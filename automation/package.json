@@ -1,0 +1,13 @@
+{
+  "name": "ai-testpilot-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generated Cypress automation suite executed by AI TestPilot",
+  "scripts": {
+    "cypress:open": "cypress open",
+    "cypress:run": "cypress run"
+  },
+  "devDependencies": {
+    "cypress": "^13.13.0"
+  }
+}
