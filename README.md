@@ -45,7 +45,7 @@ This mirrors the architecture in `AI-Driven_Playwright_Test_Automation.pdf`, ada
 
 ```bash
 npm install
-cp .env.example .env
+cp .env
 npm start
 ```
 
