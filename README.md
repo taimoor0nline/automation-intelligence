@@ -110,7 +110,7 @@ Per the spec: production-environment testing, CAPTCHA, payment gateways, multi-f
 ```bash
 git init
 git add .
-git commit -m "AI TestPilot PoC — chat-driven Cypress automation"
+git commit -m "automation-intelligence"
 git remote add origin <your-repo-url>
 git push -u origin main
 ```
