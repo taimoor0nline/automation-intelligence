@@ -30,13 +30,9 @@
     --shadow: 0 1px 2px rgba(16,20,28,0.04), 0 1px 8px rgba(16,20,28,0.03);
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: var(--font); font-size: 14px;
-  }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; }
   button { font-family: var(--font); }
 
-  /* ---------- Header ---------- */
   header {
     background: var(--panel); border-bottom: 1px solid var(--border);
     padding: 14px 28px; display: flex; align-items: center; justify-content: space-between;
@@ -54,8 +50,7 @@
   .header-right { display: flex; align-items: center; gap: 12px; }
   .status-pill {
     display: flex; align-items: center; gap: 7px; padding: 7px 13px;
-    border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; color: var(--text-muted);
-    background: #fafbfd;
+    border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; color: var(--text-muted); background: #fafbfd;
   }
   .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
   .status-dot.online { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
@@ -70,12 +65,8 @@
   .user-name { font-weight: 600; font-size: 13px; }
   .user-role { font-size: 11px; color: var(--text-faint); }
 
-  /* ---------- Layout ---------- */
-  .board {
-    display: grid; grid-template-columns: 320px 380px 1fr; gap: 20px;
-    padding: 20px 24px 40px; align-items: start;
-  }
-  @media (max-width: 1100px) { .board { grid-template-columns: 1fr; } }
+  .board { display: grid; grid-template-columns: 320px 380px 1fr; gap: 20px; padding: 20px 24px 40px; align-items: start; }
+  @media (max-width: 1200px) { .board { grid-template-columns: 1fr; } }
 
   .col-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .col-num {
@@ -84,13 +75,9 @@
   }
   .col-title { font-weight: 700; font-size: 14.5px; color: var(--blue-dark); }
 
-  .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 18px; box-shadow: var(--shadow);
-  }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
   .card + .card { margin-top: 16px; }
 
-  /* ---------- Column 1: Story ---------- */
   .panel-head { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
   .panel-icon {
     width: 28px; height: 28px; border-radius: 8px; background: var(--blue-soft); color: var(--blue);
@@ -111,50 +98,58 @@
   .btn-primary {
     width: 100%; background: var(--blue); color: #fff; border: none; border-radius: 9px;
     padding: 12px; font-weight: 600; font-size: 13.5px; cursor: pointer; margin-top: 16px;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    transition: background 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 8px; transition: background 0.15s;
   }
   .btn-primary:hover:not(:disabled) { background: var(--blue-dark); }
   .btn-primary:disabled { background: #c7d1e6; cursor: not-allowed; }
   .btn-primary.loading::after {
     content: ""; width: 13px; height: 13px; border-radius: 50%;
-    border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
-    animation: spin 0.7s linear infinite;
+    border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .meta-row { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-soft); font-size: 12px; color: var(--text-faint); }
   .meta-row b { color: var(--blue); font-weight: 600; }
 
-  /* ---------- Column 2: Test Cases ---------- */
   .criteria-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .criteria-title { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14px; }
   .count-badge { font-family: var(--mono); font-size: 11px; color: var(--blue); background: var(--blue-soft); padding: 3px 8px; border-radius: 6px; }
+  .add-btn {
+    font-size: 11.5px; font-weight: 600; color: var(--blue); background: var(--blue-soft);
+    border: none; border-radius: 6px; padding: 5px 10px; cursor: pointer;
+  }
+  .add-btn:hover { background: #dbe6ff; }
 
-  .criteria-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; margin-bottom: 4px; }
+  .criteria-list { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; margin-bottom: 4px; }
   .criteria-empty { text-align: center; padding: 40px 10px; color: var(--text-faint); font-size: 13px; }
 
   .crit-row {
     display: flex; align-items: flex-start; gap: 10px; padding: 10px 11px;
-    border: 1px solid var(--border-soft); border-radius: 9px; background: #fbfcfe;
-    cursor: pointer; transition: border-color 0.12s;
+    border: 1px solid var(--border-soft); border-radius: 9px; background: #fbfcfe; transition: border-color 0.12s;
   }
   .crit-row:hover { border-color: var(--border); }
   .crit-row.rejected { opacity: 0.45; }
+  .crit-row.custom { border-color: var(--blue-soft); background: #f8faff; }
   .crit-check {
     width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--border); flex-shrink: 0;
     margin-top: 1px; display: flex; align-items: center; justify-content: center;
-    font-size: 11px; color: #fff; transition: all 0.12s;
+    font-size: 11px; color: #fff; transition: all 0.12s; cursor: pointer;
   }
   .crit-row:not(.rejected) .crit-check { background: var(--green); border-color: var(--green); }
-  .crit-body { flex: 1; min-width: 0; }
+  .crit-body { flex: 1; min-width: 0; cursor: pointer; }
   .crit-title { font-size: 12.5px; line-height: 1.4; color: var(--text); }
-  .crit-tags { display: flex; gap: 6px; margin-top: 5px; }
+  .crit-tags { display: flex; gap: 6px; margin-top: 5px; align-items: center; }
   .crit-id { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
   .crit-priority { font-size: 9.5px; font-family: var(--mono); text-transform: uppercase; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.3px; }
   .crit-priority.high { background: var(--red-soft); color: var(--red); }
   .crit-priority.medium { background: var(--amber-soft); color: var(--amber); }
   .crit-priority.low { background: #eef1f6; color: var(--text-faint); }
+  .crit-priority.custom { background: var(--blue-soft); color: var(--blue); }
+  .crit-del {
+    flex-shrink: 0; width: 20px; height: 20px; border-radius: 5px; border: none; background: transparent;
+    color: var(--text-faint); cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+  }
+  .crit-del:hover { background: var(--red-soft); color: var(--red); }
 
   .btn-secondary {
     width: 100%; background: #fff; color: var(--blue); border: 1.5px solid var(--blue);
@@ -165,12 +160,27 @@
   .btn-secondary:disabled { border-color: var(--border); color: var(--text-faint); cursor: not-allowed; }
   .lock-note { text-align: center; font-size: 11.5px; color: var(--text-faint); margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 5px; }
 
+  /* ---------- Add Test Case form ---------- */
+  .add-form {
+    border: 1.5px dashed var(--blue-soft); background: #f8faff; border-radius: 10px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .add-form-title { font-weight: 700; font-size: 12.5px; color: var(--blue-dark); margin-bottom: 10px; }
+  .add-form label { margin: 10px 0 5px; font-size: 11.5px; }
+  .add-form label:first-of-type { margin-top: 0; }
+  .add-form select, .add-form input[type=text] { font-size: 12.5px; padding: 8px 10px; }
+  .add-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .add-form-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .add-form-actions button {
+    flex: 1; padding: 9px; border-radius: 7px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: none;
+  }
+  .add-form-save { background: var(--blue); color: #fff; }
+  .add-form-cancel { background: #eef1f6; color: var(--text-muted); }
+  .field-hint { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; }
+
   /* ---------- Column 3: Runner ---------- */
   .runner-card { padding: 0; overflow: hidden; }
-  .runner-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 18px; border-bottom: 1px solid var(--border-soft);
-  }
+  .runner-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
   .runner-title { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14px; }
   .cy-logo { width: 22px; height: 22px; border-radius: 6px; background: #0e2a1f; color: #04c38b; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; font-family: var(--mono); }
   .run-status { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
@@ -181,16 +191,12 @@
   .run-status.done { color: var(--blue); }
   @keyframes blink { 50% { opacity: 0.3; } }
 
-  .runner-body { display: grid; grid-template-columns: 1fr 1fr; min-height: 320px; }
-  @media (max-width: 1400px) { .runner-body { grid-template-columns: 1fr; } }
-
   .cmd-tabs { display: flex; border-bottom: 1px solid var(--border-soft); }
   .cmd-tab { padding: 9px 16px; font-size: 12px; font-weight: 600; color: var(--text-faint); cursor: default; border-bottom: 2px solid transparent; }
   .cmd-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
 
-  .cmd-log { background: #0b0e14; color: #cfd8e6; font-family: var(--mono); font-size: 12px;
-    padding: 14px 16px; max-height: 320px; overflow-y: auto; }
-  .cmd-empty { color: #556; padding: 30px 10px; text-align: center; }
+  .cmd-log { background: #0b0e14; color: #cfd8e6; font-family: var(--mono); font-size: 12px; padding: 14px 16px; max-height: 190px; overflow-y: auto; }
+  .cmd-empty { color: #556; padding: 26px 10px; text-align: center; }
   .cmd-line { display: flex; align-items: center; gap: 8px; padding: 4px 0; opacity: 0; animation: fadeIn 0.25s ease forwards; }
   @keyframes fadeIn { to { opacity: 1; } }
   .cmd-num { color: #556; width: 18px; flex-shrink: 0; text-align: right; }
@@ -198,22 +204,29 @@
   .cmd-badge { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; flex-shrink: 0; }
   .cmd-badge.pass { background: rgba(22,163,74,0.18); color: #4ade80; }
   .cmd-badge.fail { background: rgba(220,38,38,0.18); color: #f87171; }
-  .cmd-badge.pending { background: rgba(255,255,255,0.08); color: #7d8697; }
 
-  .preview-pane { display: flex; flex-direction: column; border-left: 1px solid var(--border-soft); }
-  .preview-bar {
-    display: flex; align-items: center; gap: 8px; padding: 9px 14px;
-    border-bottom: 1px solid var(--border-soft); font-size: 11.5px; color: var(--text-faint); font-family: var(--mono);
+  /* ---------- BIG browser preview (full width, stacked below commands) ---------- */
+  .preview-pane { border-top: 1px solid var(--border-soft); }
+  .browser-chrome {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: #eef1f6; border-bottom: 1px solid var(--border-soft);
   }
-  .preview-bar svg { flex-shrink: 0; }
-  .preview-frame-wrap { flex: 1; position: relative; background: #fff; min-height: 260px; }
+  .chrome-dots { display: flex; gap: 5px; flex-shrink: 0; }
+  .chrome-dots span { width: 9px; height: 9px; border-radius: 50%; }
+  .chrome-dots span:nth-child(1) { background: #ff5f57; }
+  .chrome-dots span:nth-child(2) { background: #febc2e; }
+  .chrome-dots span:nth-child(3) { background: #28c840; }
+  .preview-bar {
+    flex: 1; display: flex; align-items: center; gap: 7px; background: #fff; border: 1px solid var(--border);
+    border-radius: 7px; padding: 6px 12px; font-size: 12px; color: var(--text-muted); font-family: var(--mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .preview-frame-wrap { position: relative; background: #fff; height: 480px; }
   .preview-frame-wrap iframe { width: 100%; height: 100%; border: none; position: absolute; inset: 0; }
-  .preview-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-faint); font-size: 12.5px; flex-direction: column; gap: 8px; min-height: 260px; }
+  .preview-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-faint); font-size: 13px; flex-direction: column; gap: 8px; }
 
-  /* ---------- Stats + Summary row ---------- */
   .bottom-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1.3fr; gap: 12px; margin-top: 16px; }
   @media (max-width: 1400px) { .bottom-row { grid-template-columns: repeat(2, 1fr); } }
-
   .stat-card { padding: 14px 16px; }
   .stat-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; margin-bottom: 10px; }
   .stat-icon.blue { background: var(--blue-soft); color: var(--blue); }
@@ -243,20 +256,14 @@
 <header>
   <div class="brand">
     <div class="brand-icon">AI</div>
-    <div>
-      <div class="brand-title">AI TestPilot</div>
-      <div class="brand-sub">AI-Powered Software Testing</div>
-    </div>
+    <div><div class="brand-title">AI TestPilot</div><div class="brand-sub">AI-Powered Software Testing</div></div>
   </div>
   <div class="header-right">
     <div class="status-pill" id="backendStatus"><span class="status-dot" id="statusDot"></span><span id="statusText">Checking backend…</span></div>
     <div class="cypress-badge">cypress</div>
     <div class="user-chip">
       <div class="avatar">QA</div>
-      <div>
-        <div class="user-name">QA Engineer</div>
-        <div class="user-role">AI TestPilot</div>
-      </div>
+      <div><div class="user-name">QA Engineer</div><div class="user-role">AI TestPilot</div></div>
     </div>
   </div>
 </header>
@@ -267,17 +274,11 @@
   <div>
     <div class="col-head"><div class="col-num">1</div><div class="col-title">Write Story</div></div>
     <div class="card">
-      <div class="panel-head">
-        <div class="panel-icon">✦</div>
-        <div class="panel-title">AI Testing Assistant</div>
-      </div>
+      <div class="panel-head"><div class="panel-icon">✦</div><div class="panel-title">AI Testing Assistant</div></div>
 
       <label for="envSelect">Environment</label>
       <select id="envSelect">
-        <option>Development</option>
-        <option>Test</option>
-        <option selected>UAT</option>
-        <option>Pre-Production</option>
+        <option>Development</option><option>Test</option><option selected>UAT</option><option>Pre-Production</option>
       </select>
 
       <label for="targetUrl">Target URL</label>
@@ -290,14 +291,9 @@
       <textarea id="businessStory" maxlength="1000" placeholder="As a customer, I should be able to submit feedback. Required fields, email format, and URL format must be validated.">As a customer, I should be able to submit feedback through the website. Mandatory fields must be validated, invalid email addresses and URLs must be rejected, and a confirmation message must appear after successful submission.</textarea>
       <div class="char-count"><span id="charCount">0</span> / 1000</div>
 
-      <button class="btn-primary" id="generateBtn">
-        <span>Generate Test Cases</span>
-      </button>
+      <button class="btn-primary" id="generateBtn"><span>Generate Test Cases</span></button>
 
-      <div class="meta-row">
-        <span>Project: <b id="projectMeta">—</b></span>
-        <span>Environment: <b id="envMeta">UAT</b></span>
-      </div>
+      <div class="meta-row"><span>Project: <b id="projectMeta">—</b></span><span>Environment: <b id="envMeta">UAT</b></span></div>
     </div>
   </div>
 
@@ -307,16 +303,19 @@
     <div class="card">
       <div class="criteria-head">
         <div class="criteria-title">✓ Generated Test Cases</div>
-        <span class="count-badge" id="tcCount">0</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="count-badge" id="tcCount">0</span>
+          <button class="add-btn" id="addCaseToggle" disabled>+ Add</button>
+        </div>
       </div>
+
+      <div id="addFormWrap"></div>
 
       <div class="criteria-list" id="criteriaList">
         <div class="criteria-empty">Write a story and click <b>Generate Test Cases</b> to begin.</div>
       </div>
 
-      <button class="btn-secondary" id="startTestingBtn" disabled>
-        <span>▶ Start Testing</span>
-      </button>
+      <button class="btn-secondary" id="startTestingBtn" disabled><span>▶ Start Testing</span></button>
       <div class="lock-note" id="lockNote">🔒 Testing will begin once test cases are generated.</div>
     </div>
   </div>
@@ -330,19 +329,18 @@
         <div class="runner-title"><div class="cy-logo">cy</div> Cypress Runner</div>
         <div class="run-status idle" id="runStatus"><span class="status-dot"></span><span id="runStatusText">Idle</span></div>
       </div>
-      <div class="runner-body">
-        <div>
-          <div class="cmd-tabs"><div class="cmd-tab active">Commands</div><div class="cmd-tab">Tests</div></div>
-          <div class="cmd-log" id="cmdLog"><div class="cmd-empty">No test run yet.</div></div>
+
+      <div class="cmd-tabs"><div class="cmd-tab active">Commands</div><div class="cmd-tab">Tests</div></div>
+      <div class="cmd-log" id="cmdLog"><div class="cmd-empty">No test run yet.</div></div>
+
+      <!-- Big, full-width browser preview -->
+      <div class="preview-pane">
+        <div class="browser-chrome">
+          <div class="chrome-dots"><span></span><span></span><span></span></div>
+          <div class="preview-bar" id="previewUrl">no target loaded</div>
         </div>
-        <div class="preview-pane">
-          <div class="preview-bar">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9aa2b1" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-            <span id="previewUrl">no target loaded</span>
-          </div>
-          <div class="preview-frame-wrap" id="previewWrap">
-            <div class="preview-empty">Browser preview will appear here<br/>once a target URL is loaded.</div>
-          </div>
+        <div class="preview-frame-wrap" id="previewWrap">
+          <div class="preview-empty">Browser preview will appear here<br/>once a target URL is loaded.</div>
         </div>
       </div>
     </div>
@@ -352,12 +350,9 @@
       <div class="card stat-card"><div class="stat-icon green">✓</div><div class="stat-value" id="statPassed" style="color:var(--green)">0</div><div class="stat-label">Passed</div></div>
       <div class="card stat-card"><div class="stat-icon red">✕</div><div class="stat-value" id="statFailed" style="color:var(--red)">0</div><div class="stat-label">Failed</div></div>
       <div class="card stat-card"><div class="stat-icon blue">%</div><div class="stat-value" id="statRate" style="color:var(--blue)">0%</div><div class="stat-label">Success Rate</div></div>
-
       <div class="card summary-card">
         <div class="summary-title">✦ AI Run Summary</div>
-        <div class="summary-list" id="summaryList">
-          <div class="summary-item" style="color:var(--text-faint)">Run a test to see the summary.</div>
-        </div>
+        <div class="summary-list" id="summaryList"><div class="summary-item" style="color:var(--text-faint)">Run a test to see the summary.</div></div>
         <div class="summary-meta" id="summaryMeta"></div>
       </div>
     </div>
@@ -369,22 +364,17 @@
 let sessionId = "dash-" + Math.random().toString(36).slice(2, 8);
 const $ = (id) => document.getElementById(id);
 
-// ---------- Backend status check ----------
 async function checkBackend() {
   try {
     const res = await fetch("/health");
-    if (res.ok) {
-      $("statusDot").className = "status-dot online";
-      $("statusText").textContent = "Connected to Cypress";
-    } else throw new Error();
+    if (res.ok) { $("statusDot").className = "status-dot online"; $("statusText").textContent = "Connected to Cypress"; }
+    else throw new Error();
   } catch {
-    $("statusDot").className = "status-dot offline";
-    $("statusText").textContent = "Backend unreachable";
+    $("statusDot").className = "status-dot offline"; $("statusText").textContent = "Backend unreachable";
   }
 }
 checkBackend();
 
-// ---------- Story panel ----------
 const businessStory = $("businessStory");
 const charCount = $("charCount");
 function updateCharCount() { charCount.textContent = businessStory.value.length; }
@@ -393,7 +383,8 @@ updateCharCount();
 
 let currentTestCases = [];
 let rejectedIds = new Set();
-let generatedScript = null;
+let currentPageDiscovery = null;
+let customCounter = 0;
 
 function buildStoryMessage() {
   const url = $("targetUrl").value.trim();
@@ -406,14 +397,19 @@ function buildStoryMessage() {
   return `Please test ${fullUrl}. ${story} (Environment: ${env})`;
 }
 
+function escapeHtml(str) { const d = document.createElement("div"); d.textContent = str; return d.innerHTML; }
+
 $("generateBtn").addEventListener("click", async () => {
-  sessionId = "dash-" + Math.random().toString(36).slice(2, 8); // fresh session every generation
+  sessionId = "dash-" + Math.random().toString(36).slice(2, 8);
+  customCounter = 0;
   const btn = $("generateBtn");
   btn.disabled = true; btn.classList.add("loading");
   btn.querySelector("span").textContent = "Discovering & generating…";
 
   $("criteriaList").innerHTML = `<div class="criteria-empty">Discovering page and generating test cases…</div>`;
   $("startTestingBtn").disabled = true;
+  $("addCaseToggle").disabled = true;
+  $("addFormWrap").innerHTML = "";
 
   try {
     const res = await fetch("/api/chat", {
@@ -428,9 +424,11 @@ $("generateBtn").addEventListener("click", async () => {
     }
 
     currentTestCases = data.testCases;
+    currentPageDiscovery = data.pageDiscovery || null;
     rejectedIds = new Set();
     renderCriteria();
     $("startTestingBtn").disabled = false;
+    $("addCaseToggle").disabled = false;
     $("lockNote").textContent = "✓ Uncheck any case to exclude it, then start testing.";
     loadPreview($("targetUrl").value.trim());
   } catch (err) {
@@ -443,30 +441,134 @@ $("generateBtn").addEventListener("click", async () => {
 
 function renderCriteria() {
   $("tcCount").textContent = currentTestCases.length;
+  if (currentTestCases.length === 0) {
+    $("criteriaList").innerHTML = `<div class="criteria-empty">No test cases. Click <b>+ Add</b> to create one.</div>`;
+    return;
+  }
   $("criteriaList").innerHTML = currentTestCases.map(tc => `
-    <div class="crit-row ${rejectedIds.has(tc.id) ? "rejected" : ""}" data-id="${tc.id}">
-      <div class="crit-check">${rejectedIds.has(tc.id) ? "" : "✓"}</div>
-      <div class="crit-body">
+    <div class="crit-row ${rejectedIds.has(tc.id) ? "rejected" : ""} ${tc.custom ? "custom" : ""}" data-id="${tc.id}">
+      <div class="crit-check" data-action="toggle">${rejectedIds.has(tc.id) ? "" : "✓"}</div>
+      <div class="crit-body" data-action="toggle">
         <div class="crit-title">${escapeHtml(tc.title)}</div>
         <div class="crit-tags">
           <span class="crit-id">${tc.id}</span>
-          <span class="crit-priority ${tc.priority}">${tc.priority}</span>
+          <span class="crit-priority ${tc.custom ? "custom" : tc.priority}">${tc.custom ? "custom" : tc.priority}</span>
         </div>
       </div>
+      <button class="crit-del" data-action="delete" title="Remove">✕</button>
     </div>
   `).join("");
 
   document.querySelectorAll(".crit-row").forEach(row => {
-    row.addEventListener("click", () => {
-      const id = row.dataset.id;
-      if (rejectedIds.has(id)) rejectedIds.delete(id); else rejectedIds.add(id);
-      renderCriteria();
+    const id = row.dataset.id;
+    row.querySelector('[data-action="toggle"]').addEventListener("click", (e) => {
+      if (e.currentTarget.closest(".crit-row") !== row) return;
+    });
+    row.addEventListener("click", (e) => {
+      const action = e.target.closest("[data-action]")?.dataset.action;
+      if (action === "delete") {
+        currentTestCases = currentTestCases.filter(t => t.id !== id);
+        rejectedIds.delete(id);
+        renderCriteria();
+      } else {
+        if (rejectedIds.has(id)) rejectedIds.delete(id); else rejectedIds.add(id);
+        renderCriteria();
+      }
     });
   });
 }
 
-function escapeHtml(str) {
-  const d = document.createElement("div"); d.textContent = str; return d.innerHTML;
+// ---------- Add Test Case form ----------
+$("addCaseToggle").addEventListener("click", () => {
+  if ($("addFormWrap").innerHTML) { $("addFormWrap").innerHTML = ""; return; }
+  renderAddForm();
+});
+
+function getDiscoveredFields() {
+  if (!currentPageDiscovery) return [];
+  return (currentPageDiscovery.elements || []).filter(el =>
+    el.tag !== "button" && (el.testId || el.name)
+  );
+}
+
+function renderAddForm() {
+  const fields = getDiscoveredFields();
+  const fieldOptions = fields.map(f =>
+    `<option value="${f.testId || f.name}" data-tag="${f.tag}" data-type="${f.type || ""}">${escapeHtml(f.label || f.name || f.testId)}</option>`
+  ).join("");
+
+  $("addFormWrap").innerHTML = `
+    <div class="add-form">
+      <div class="add-form-title">+ Add Custom Test Case</div>
+
+      <label>Field ${fields.length === 0 ? "(none discovered — generate test cases first)" : ""}</label>
+      <select id="af-field" ${fields.length === 0 ? "disabled" : ""}>
+        ${fields.length ? fieldOptions : `<option>No fields discovered</option>`}
+      </select>
+
+      <div class="add-form-row">
+        <div>
+          <label>Value to enter</label>
+          <input type="text" id="af-value" placeholder="e.g. 17" />
+        </div>
+        <div>
+          <label>Priority</label>
+          <select id="af-priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+        </div>
+      </div>
+
+      <label>Expected outcome</label>
+      <select id="af-kind">
+        <option value="errorVisible">Should show an error</option>
+        <option value="noError">Should NOT show an error</option>
+        <option value="successVisible">Should show a success message</option>
+      </select>
+
+      <label>Error/message text <span style="font-weight:400;color:var(--text-faint)">(optional but recommended)</span></label>
+      <input type="text" id="af-message" placeholder="e.g. Age must be between 18 and 100." />
+      <div class="field-hint">For "error" checks, assumes the error element uses the pattern <code>&lt;field&gt;-error</code> (matches this project's convention).</div>
+
+      <div class="add-form-actions">
+        <button class="add-form-save" id="af-save">Add to list</button>
+        <button class="add-form-cancel" id="af-cancel">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  $("af-cancel").addEventListener("click", () => { $("addFormWrap").innerHTML = ""; });
+
+  $("af-save").addEventListener("click", () => {
+    const fieldSelect = $("af-field");
+    if (!fieldSelect || fieldSelect.disabled) return;
+    const selectedOpt = fieldSelect.options[fieldSelect.selectedIndex];
+    const fieldTestId = selectedOpt.value;
+    const fieldTag = selectedOpt.dataset.tag;
+    const fieldType = selectedOpt.dataset.type;
+    const label = selectedOpt.textContent;
+    const value = $("af-value").value.trim();
+    const priority = $("af-priority").value;
+    const kind = $("af-kind").value;
+    const message = $("af-message").value.trim();
+
+    const actionType = fieldTag === "select" ? "select" : (fieldType === "checkbox" || fieldType === "radio") ? "check" : "type";
+
+    customCounter++;
+    const id = `TC-C${customCounter}`;
+    const title = `Custom: ${label} = "${value || "(empty)"}" → ${kind === "errorVisible" ? "error shown" : kind === "noError" ? "no error" : "success shown"}`;
+
+    currentTestCases.push({
+      id, title, type: "custom", priority, custom: true,
+      action: { fieldTestId, type: actionType, value },
+      assertion: {
+        kind,
+        targetTestId: kind !== "successVisible" ? `${fieldTestId}-error` : undefined,
+        message: message || undefined,
+      },
+    });
+
+    $("addFormWrap").innerHTML = "";
+    renderCriteria();
+  });
 }
 
 // ---------- Start Testing ----------
@@ -481,14 +583,14 @@ $("startTestingBtn").addEventListener("click", async () => {
   $("cmdLog").innerHTML = "";
 
   const approveMsg = approvedIds.length === currentTestCases.length ? "approve all" : `approve ${approvedIds.join(",")}`;
+  const customTestCases = currentTestCases.filter(t => t.custom && !rejectedIds.has(t.id));
 
   try {
     const res = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, message: approveMsg }),
+      body: JSON.stringify({ sessionId, message: approveMsg, customTestCases }),
     });
     const data = await res.json();
-    generatedScript = data.generatedScript || null;
 
     if (data.summary) {
       await playCommandLog(data.summary.tests);
@@ -513,10 +615,6 @@ function setRunStatus(cls, text) {
   $("runStatusText").textContent = text;
 }
 
-// Reveals the (already-fetched) final results one row at a time to read as
-// a live run. NOTE: this is a client-side simulation of the finished results,
-// not a true real-time stream from Cypress mid-execution — that would need
-// a backend change (WebSocket/SSE + custom Cypress reporter).
 function playCommandLog(tests) {
   return new Promise((resolve) => {
     const log = $("cmdLog");
@@ -552,7 +650,7 @@ function renderResults(summary, replyText) {
       <div class="summary-item"><span class="tick">✓</span> No validation failures detected.</div>
     `;
   } else {
-    const failMatches = [...replyText.matchAll(/•\s*\*\*(TC\d+)\*\*\s*\[([A-Z_]+)\]\s*[—-]\s*(.+?)\s*\(confidence (\d+)%\)/g)];
+    const failMatches = [...replyText.matchAll(/•\s*\*\*(TC[\w-]+)\*\*\s*\[([A-Z_]+)\]\s*[—-]\s*(.+?)\s*\(confidence (\d+)%\)/g)];
     summaryList.innerHTML = `
       <div class="summary-item"><span class="cross">✕</span> ${failedTests.length} of ${summary.total} test cases failed.</div>
     ` + `<div class="failure-list">` + failMatches.map(m => `
@@ -563,13 +661,9 @@ function renderResults(summary, replyText) {
     `).join("") + `</div>`;
   }
 
-  $("summaryMeta").innerHTML = `
-    <span>Executed at: ${new Date().toLocaleString()}</span>
-    <span>Executed by: AI TestPilot</span>
-  `;
+  $("summaryMeta").innerHTML = `<span>Executed at: ${new Date().toLocaleString()}</span><span>Executed by: AI TestPilot</span>`;
 }
 
-// ---------- Browser preview ----------
 function loadPreview(url) {
   $("previewUrl").textContent = url;
   $("previewWrap").innerHTML = `<iframe src="${url}"></iframe>`;
