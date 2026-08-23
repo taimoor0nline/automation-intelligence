@@ -27,7 +27,7 @@ function parseApproval(text, allIds) {
   if (/^approve all$/.test(t) || /^approve$/.test(t) || /^yes$/.test(t)) {
     return { approvedIds: allIds, rejectedIds: [] };
   }
-  const idMatches = text.toUpperCase().match(/TC\d{3}/g) || [];
+  const idMatches = text.toUpperCase().match(/TC(?:\d{3}|-C\d+)/g) || [];
   if (/reject/i.test(text)) {
     const rejected = idMatches;
     return { approvedIds: allIds.filter((id) => !rejected.includes(id)), rejectedIds: rejected };
@@ -39,7 +39,7 @@ function parseApproval(text, allIds) {
 }
 
 router.post("/api/chat", async (req, res) => {
-  const { sessionId = "default", message = "" } = req.body;
+  const { sessionId = "default", message = "", customTestCases = [] } = req.body;
   const session = getSession(sessionId);
 
   try {
@@ -83,6 +83,28 @@ router.post("/api/chat", async (req, res) => {
     }
 
     if (session.state === "AWAITING_APPROVAL") {
+      // Merge any custom test cases sent from the UI's "+ Add Test Case"
+      // form before parsing approval, so they can be approved/run alongside
+      // the AI-generated ones. Malformed entries are skipped, not trusted blindly.
+      if (Array.isArray(customTestCases) && customTestCases.length > 0) {
+        customTestCases.forEach((c, i) => {
+          if (!c || !c.action || !c.action.type || (!c.action.fieldTestId && !c.action.fieldName)) return;
+          const existingCustomCount = session.testCases.filter((t) => t.custom).length;
+          const id = c.id && /^TC-C\d+$/.test(c.id) ? c.id : `TC-C${existingCustomCount + i + 1}`;
+          if (session.testCases.some((t) => t.id === id)) return; // already merged
+          session.testCases.push({
+            id,
+            title: c.title || `Custom check: ${c.action.fieldTestId || c.action.fieldName}`,
+            type: "custom",
+            priority: ["low", "medium", "high"].includes(c.priority) ? c.priority : "medium",
+            custom: true,
+            action: c.action,
+            assertion: c.assertion || {},
+            expectedResults: c.assertion?.message ? [c.assertion.message] : [],
+          });
+        });
+      }
+
       const allIds = session.testCases.map((tc) => tc.id);
       const parsed = parseApproval(message, allIds);
       if (!parsed) {
@@ -139,7 +161,7 @@ router.post("/api/chat", async (req, res) => {
       if (failedTests.length > 0) {
         const analyses = [];
         for (const t of failedTests) {
-          const tcId = t.title?.match(/TC\d{3}/)?.[0];
+          const tcId = t.title?.match(/TC(?:\d{3}|-C\d+)/)?.[0];
           const tc = session.testCases.find((c) => c.id === tcId) || { id: tcId, title: t.title };
           const analysis = await qwen.analyzeFailure({
             story: session.story,
