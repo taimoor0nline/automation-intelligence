@@ -47,7 +47,15 @@ The feedback API intentionally keeps two application defects so the automation h
 - age `17` is incorrectly accepted although the UI/specification says 18–100;
 - a website such as `abc` is incorrectly accepted although the field requires a valid URL.
 
-For the five-case demonstration, Qwen is instructed to include these two expected-behaviour checks as TC004 and TC005 when the discovered controls support them. The assertions are not fake failures: they test the discovered business constraints and fail only because the demo application violates them.
+For the current five-case demonstration, once the real login and feedback controls are discovered, the demo calibrates the reviewed set to a predictable shape:
+
+1. valid login + valid feedback submission — expected PASS;
+2. invalid login credentials — expected PASS;
+3. missing required email on the feedback form — expected PASS;
+4. age `17` against the discovered minimum of `18` — expected FAIL because of the demo application defect;
+5. malformed website value `abc` — expected FAIL because of the demo application defect.
+
+The two failing checks are legitimate expected-behaviour tests. They fail because the demo target violates its own discovered constraints, not because the assertions are deliberately made incorrect. This calibration is only for the PoC/demo and should not be carried into the production test-generation policy.
 
 ## AI TestPilot UI
 
@@ -65,16 +73,22 @@ The user provides:
 4. test username/password;
 5. a business user story.
 
-Known pages are optional in the UI. In this demo they help static discovery inspect additional same-origin pages relevant to the journey. They are not intended to remain a required field in the production architecture.
+### Known pages are optional
+
+The current discovery service always starts from the Target URL. In addition to explicitly supplied Known pages, it now performs a small bounded same-origin discovery pass over real page route hints such as links, form actions and simple root-relative routes found in the page source.
+
+For this demo, the login page contains a real `/feedback` redirect hint. Therefore `/feedback` can still be discovered even when the **Known pages (optional)** box is blank.
+
+This remains deliberately limited static discovery. It is not intended to replace the future browser-driven discovery agent for real React/Next/Vue/SPA applications.
 
 Credentials are kept in the in-memory session and injected into the browser automation runtime at execution time. Their values are **not included in the Qwen prompt**. Generated automation reads `TEST_USERNAME` and `TEST_PASSWORD` from the secure runtime environment.
 
-## Human-in-the-loop test design
+## Review and edit test cases
 
-Qwen proposes the initial test set, but the human remains in control before automation code is generated. A tester can:
+Qwen proposes the initial test set, but the tester can still control the final execution set before automation code is generated. A tester can:
 
-- include or exclude AI-generated cases;
-- edit an AI-generated case;
+- include or exclude generated cases;
+- edit a generated case;
 - delete a case;
 - add a human-authored case;
 - start a new case from Functional, Validation, Boundary, Negative or Blank templates.
@@ -136,12 +150,12 @@ Use these page settings in the UI:
 
 ```text
 Target URL:             http://localhost:4000/
-Known pages (optional): /feedback
+Known pages (optional): /feedback   # may also be left blank in this demo
 Username:               admin
 Password:               admin123
 ```
 
-Click **Generate AI Test Cases**, review or modify the Qwen-generated cases, then click **Run Approved Tests**. A real Chrome window opens automatically. When execution finishes, the UI shows pass/fail results and exposes **Open HTML Analytics Report**.
+Click **Generate AI Test Cases**, review or modify the generated cases, then click **Run Approved Tests**. A real Chrome window opens automatically. The positive and validation cases now visibly continue onto the feedback form rather than stopping after login.
 
 Each approved case is executed independently so every failed case can have its own video and failure screenshot.
 
@@ -149,7 +163,7 @@ Each approved case is executed independently so every failed case can have its o
 
 ### Page discovery
 
-`server/services/pageDiscovery.js` fetches the selected pages and inventories actual inputs, buttons, links, `data-testid` values, ids, names, constraints, dropdown options and nearby validation elements. Qwen receives this inventory so it does not need to guess selectors from the story alone.
+`server/services/pageDiscovery.js` inventories actual inputs, buttons, links, `data-testid` values, ids, names, constraints, dropdown options and nearby validation elements. It also performs a bounded same-origin pass over observed route hints so the current demo can find `/feedback` from the starting login page even without a manual Known pages entry.
 
 ### AI generation
 
@@ -158,6 +172,8 @@ Each approved case is executed independently so every failed case can have its o
 - Test Analyst — story + discovered pages → structured test cases;
 - Automation Engineer — approved test case + discovered pages → executable JavaScript automation;
 - Failure Analyst — runtime error + expected behaviour → business-readable classification.
+
+For the current demo target only, a calibration layer pins the five reviewed cases to the predictable 3-pass / 2-defect-detection shape described above after the relevant real controls have been discovered.
 
 ### Generated-code safety
 
@@ -177,7 +193,21 @@ AUTOMATION_SCREENSHOT_ON_FAILURE=true
 
 ### Duration
 
-The runner records duration per independent case. It first uses test-attempt timing when provided by the runtime, then falls back to the per-spec run duration. This keeps the Duration column populated even when attempt-level timing is unavailable.
+The runner records duration per independent case. It first uses attempt-level timing when provided by the runtime and then falls back through other available test/spec timing fields. This keeps the Duration value populated when the engine exposes timing at a different level.
+
+### Evidence
+
+Each approved test case runs as an independent spec. Failed cases therefore receive dedicated evidence when available:
+
+```text
+TC004 FAIL
+├── Video
+└── Screenshot
+
+TC005 FAIL
+├── Video
+└── Screenshot
+```
 
 ### Analytics
 
