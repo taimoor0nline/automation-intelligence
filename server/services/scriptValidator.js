@@ -1,5 +1,5 @@
 /**
- * Security gate for AI-generated Cypress specs.
+ * Security gate for AI-generated browser automation specs.
  * The model output is validated before any code is written/executed.
  */
 const vm = require("vm");
@@ -27,7 +27,7 @@ function validateScript(script) {
   if (typeof script !== "string" || !script.trim()) return { valid: false, errors: ["Script is empty."] };
 
   if (script.length > MAX_SCRIPT_LENGTH) errors.push(`Script is larger than ${MAX_SCRIPT_LENGTH} bytes.`);
-  if (script.length < MIN_SCRIPT_LENGTH) errors.push("Script is too short to be a complete Cypress spec.");
+  if (script.length < MIN_SCRIPT_LENGTH) errors.push("Script is too short to be a complete automation spec.");
 
   try {
     new vm.Script(script, { filename: "generated.cy.js" });
