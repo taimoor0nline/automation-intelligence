@@ -46,7 +46,7 @@ function writeSpecs(generatedSpecs) {
       testCaseId,
       safeName,
       specPath,
-      relativeSpecPath: path.relative(AUTOMATION_DIR, specPath).replace(/\\/g, "/"),
+      cwdRelativeSpecPath: path.relative(process.cwd(), specPath).replace(/\\/g, "/"),
     };
   });
 }
@@ -166,6 +166,53 @@ function summarize(result) {
   };
 }
 
+function mergeParts(parts) {
+  const tests = [];
+  const videosByTestCase = {};
+  const screenshotsByTestCase = {};
+  let total = 0;
+  let passed = 0;
+  let failed = 0;
+  let pending = 0;
+  let skipped = 0;
+  let durationMs = 0;
+  let hasDuration = false;
+  let browser = null;
+
+  for (const part of parts) {
+    const summary = part.summary;
+    total += summary.total || 0;
+    passed += summary.passed || 0;
+    failed += summary.failed || 0;
+    pending += summary.pending || 0;
+    skipped += summary.skipped || 0;
+    tests.push(...(summary.tests || []));
+    browser ||= summary.browser || null;
+
+    if (Number.isFinite(Number(summary.durationMs))) {
+      durationMs += Number(summary.durationMs);
+      hasDuration = true;
+    }
+
+    Object.assign(videosByTestCase, part.artifacts?.videosByTestCase || {});
+    Object.assign(screenshotsByTestCase, part.artifacts?.screenshotsByTestCase || {});
+  }
+
+  return {
+    summary: {
+      total,
+      passed,
+      failed,
+      pending,
+      skipped,
+      durationMs: hasDuration ? Math.round(durationMs) : null,
+      browser,
+      tests,
+    },
+    artifacts: { videosByTestCase, screenshotsByTestCase },
+  };
+}
+
 async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
   let writtenSpecs = [];
 
@@ -181,58 +228,65 @@ async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
 
     removeOldArtifacts();
 
-    // Cypress resolves `spec` from the Node process working directory, not from
-    // the `project` option. npm start runs from the repository root, so include
-    // automation-system/ in the spec path. All specs run in one Cypress run;
-    // Cypress still creates a separate video for each spec/test case.
-    const cwdRelativeSpecPattern = path
-      .join(path.relative(process.cwd(), SPEC_DIR), "*.cy.js")
-      .replace(/\\/g, "/");
-
     console.log(
-      `[test-runner] Running ${writtenSpecs.length} test case(s) in ${browser} (${headed ? "headed" : "headless"})` +
+      `[test-runner] Running ${writtenSpecs.length} test case(s) sequentially in ${browser} (${headed ? "headed" : "headless"})` +
       (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
     );
-    console.log(`[test-runner] Spec pattern: ${cwdRelativeSpecPattern}`);
 
-    const result = await automationEngine.run({
-      project: AUTOMATION_DIR,
-      configFile: ENGINE_CONFIG,
-      testingType: "e2e",
-      spec: cwdRelativeSpecPattern,
-      browser,
-      headed,
-      env: {
-        TEST_USERNAME: executionContext.credentials?.username || "",
-        TEST_PASSWORD: executionContext.credentials?.password || "",
-        DEMO_STEP_DELAY_MS: demoStepDelayMs,
-      },
-      config: {
-        baseUrl,
-        video,
-        screenshotOnRunFailure,
-        videosFolder: "artifacts/videos",
-        screenshotsFolder: "artifacts/screenshots",
-      },
-    });
+    const completedParts = [];
 
-    const { summary, diagnostic, artifacts } = summarize(result);
-    if (!summary) {
-      console.error("[test-runner] Engine result:", result);
-      return {
-        specPaths: writtenSpecs.map((item) => item.specPath),
-        ok: false,
-        summary: null,
-        artifacts: null,
-        error: diagnostic,
-      };
+    // Run one exact spec at a time and explicitly exit after it finishes.
+    // This avoids the headed runner remaining parked on TC001 and gives every
+    // test case its own clean browser lifecycle and dedicated recording.
+    for (const spec of writtenSpecs) {
+      console.log(`[test-runner] Starting ${spec.testCaseId}: ${spec.cwdRelativeSpecPath}`);
+
+      const result = await automationEngine.run({
+        project: AUTOMATION_DIR,
+        configFile: ENGINE_CONFIG,
+        testingType: "e2e",
+        spec: spec.cwdRelativeSpecPath,
+        browser,
+        headed,
+        headless: !headed,
+        exit: true,
+        runnerUi: headed,
+        env: {
+          TEST_USERNAME: executionContext.credentials?.username || "",
+          TEST_PASSWORD: executionContext.credentials?.password || "",
+          DEMO_STEP_DELAY_MS: demoStepDelayMs,
+        },
+        config: {
+          baseUrl,
+          video,
+          screenshotOnRunFailure,
+          videosFolder: "artifacts/videos",
+          screenshotsFolder: "artifacts/screenshots",
+        },
+      });
+
+      const part = summarize(result);
+      if (!part.summary) {
+        console.error(`[test-runner] ${spec.testCaseId} engine result:`, result);
+        return {
+          specPaths: writtenSpecs.map((item) => item.specPath),
+          ok: false,
+          summary: null,
+          artifacts: null,
+          error: `${spec.testCaseId} could not execute: ${part.diagnostic}`,
+        };
+      }
+
+      completedParts.push(part);
+      console.log(`[test-runner] Finished ${spec.testCaseId}: ${part.summary.passed} passed, ${part.summary.failed} failed`);
     }
 
+    const merged = mergeParts(completedParts);
     return {
       specPaths: writtenSpecs.map((item) => item.specPath),
       ok: true,
-      summary,
-      artifacts,
+      summary: merged.summary,
+      artifacts: merged.artifacts,
       error: null,
     };
   } catch (err) {
