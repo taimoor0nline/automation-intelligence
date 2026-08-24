@@ -1,6 +1,11 @@
+function numberEnv(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 const QWEN_MODEL = process.env.QWEN_MODEL || "qwen3.7-flash";
-const REQUEST_TIMEOUT_MS = 90000;
-const MAX_RETRIES = 1;
+const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_TIMEOUT_MS, 180000), 600000));
+const MAX_RETRIES = Math.max(0, Math.min(Math.trunc(numberEnv(process.env.QWEN_MAX_RETRIES, 1)), 3));
 const TEST_CASE_COUNT = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 5) || 5, 20));
 
 function isConfigured() {
@@ -68,7 +73,7 @@ async function callQwen(systemPrompt, userPayload, attempt = 0) {
   } catch (err) {
     if (err.name === "AbortError") {
       if (attempt < MAX_RETRIES) return callQwen(systemPrompt, userPayload, attempt + 1);
-      throw new Error(`Qwen request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`);
+      throw new Error(`Qwen request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s. Increase QWEN_TIMEOUT_MS if Model Studio is responding slowly.`);
     }
     throw err;
   } finally {
