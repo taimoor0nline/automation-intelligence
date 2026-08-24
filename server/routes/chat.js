@@ -6,7 +6,7 @@ const { getSession, resetSession } = require("../data/sessionStore");
 const { discoverPages } = require("../services/pageDiscovery");
 const qwen = require("../services/qwenClient");
 const { validateScript } = require("../services/scriptValidator");
-const { executeGeneratedTest } = require("../services/testRunner");
+const { executeGeneratedTests } = require("../services/testRunner");
 const { buildAnalyticsReport } = require("../services/reportGenerator");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
@@ -125,12 +125,15 @@ function addEvidenceUrls(summary, sessionId, artifacts) {
     tests: (summary.tests || []).map((test) => {
       if (!test.fail) return test;
       const testCaseId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0] || null;
+      const hasVideo = Boolean(testCaseId && artifacts?.videosByTestCase?.[testCaseId]);
       const hasScreenshot = Boolean(testCaseId && artifacts?.screenshotsByTestCase?.[testCaseId]);
       return {
         ...test,
         evidence: {
           ...(test.evidence || {}),
-          videoUrl: artifacts?.videoPath ? `/api/artifacts/${encodedSession}/video` : null,
+          videoUrl: hasVideo
+            ? `/api/artifacts/${encodedSession}/video/${encodeURIComponent(testCaseId)}`
+            : null,
           screenshotUrl: hasScreenshot
             ? `/api/artifacts/${encodedSession}/screenshot/${encodeURIComponent(testCaseId)}`
             : null,
@@ -217,30 +220,42 @@ router.post("/api/chat", async (req, res) => {
         credentials: session.credentials,
       };
 
-      const generated = await qwen.generateCypressCode({
-        approvedTestCases,
-        pageDiscoveries: session.pageDiscoveries,
-        fileName: "ai-generated.cy.js",
-        executionContext,
-      });
+      // Generate one physical Cypress spec per approved case. Cypress records one video per spec,
+      // giving every failed case its own dedicated video rather than a shared run recording.
+      const generatedSpecs = [];
+      for (const testCase of approvedTestCases) {
+        const generated = await qwen.generateCypressCode({
+          approvedTestCases: [testCase],
+          pageDiscoveries: session.pageDiscoveries,
+          fileName: `${testCase.id}.cy.js`,
+          executionContext,
+        });
 
-      const validation = validateScript(generated.script);
-      if (!validation.valid) {
-        return res.status(422).json({
-          reply: `Generated Cypress code failed validation and was not executed: ${validation.errors.join(" | ")}`,
-          validationErrors: validation.errors,
+        const validation = validateScript(generated.script);
+        if (!validation.valid) {
+          return res.status(422).json({
+            reply: `Generated Cypress code for ${testCase.id} failed validation and was not executed: ${validation.errors.join(" | ")}`,
+            validationErrors: validation.errors,
+            testCaseId: testCase.id,
+          });
+        }
+
+        generatedSpecs.push({
+          ...generated,
+          testCaseId: testCase.id,
+          fileName: `${testCase.id}.cy.js`,
         });
       }
 
-      session.generatedScript = generated;
+      session.generatedScript = generatedSpecs;
       session.state = "RUNNING";
 
-      const execResult = await executeGeneratedTest(generated, executionContext);
+      const execResult = await executeGeneratedTests(generatedSpecs, executionContext);
       if (!execResult.ok || !execResult.summary) {
         session.state = "AWAITING_APPROVAL";
         return res.status(500).json({
           reply: `Cypress could not complete: ${execResult.error || "unknown error"}`,
-          generatedScript: generated,
+          generatedScripts: generatedSpecs,
         });
       }
 
@@ -248,7 +263,7 @@ router.post("/api/chat", async (req, res) => {
       const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
       const analyses = [];
       for (const test of summary.tests.filter((t) => t.fail)) {
-        const tcId = String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
+        const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
         const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title };
         const analysis = await qwen.analyzeFailure({
           story: session.story,
@@ -276,7 +291,7 @@ router.post("/api/chat", async (req, res) => {
         reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`,
         summary,
         failureAnalyses: analyses,
-        generatedScript: generated,
+        generatedScripts: generatedSpecs,
         reviewedTestCases: session.testCases,
         reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
       });
@@ -300,9 +315,11 @@ router.get("/api/reports/:sessionId", (req, res) => {
   res.type("html").send(session.reportHtml);
 });
 
-router.get("/api/artifacts/:sessionId/video", (req, res) => {
+router.get("/api/artifacts/:sessionId/video/:testCaseId", (req, res) => {
   const session = getSession(req.params.sessionId);
-  const filePath = session.artifacts?.videoPath;
+  const testCaseId = String(req.params.testCaseId || "").toUpperCase();
+  if (!TEST_ID_REGEX.test(testCaseId)) return res.status(400).send("Invalid test case id.");
+  const filePath = session.artifacts?.videosByTestCase?.[testCaseId];
   if (!filePath || !fs.existsSync(filePath)) return res.status(404).send("Video evidence not found.");
   res.sendFile(filePath);
 });
