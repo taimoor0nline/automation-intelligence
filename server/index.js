@@ -6,6 +6,20 @@ const path = require("path");
 const chatRoutes = require("./routes/chat");
 const runRoutes = require("./routes/run");
 const qwen = require("./services/qwenClient");
+const { normalizeGeneratedScript } = require("./services/automationScriptNormalizer");
+
+// Keep Qwen as the source of the automation, but normalize the small class of
+// assertions that are known to be brittle in this demo. In particular, the
+// success panel contains a dynamic feedback reference, so exact whole-element
+// text equality would incorrectly fail a successful submission.
+const generateAutomationCode = qwen.generateAutomationCode.bind(qwen);
+qwen.generateAutomationCode = async (args) => {
+  const generated = await generateAutomationCode(args);
+  return {
+    ...generated,
+    script: normalizeGeneratedScript(generated.script),
+  };
+};
 
 const app = express();
 const PORT = process.env.SERVER_PORT || 5000;
