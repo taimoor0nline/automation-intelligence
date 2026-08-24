@@ -220,32 +220,36 @@ router.post("/api/chat", async (req, res) => {
         credentials: session.credentials,
       };
 
-      // Generate one physical automation spec per approved case so every failed case
-      // receives its own dedicated video rather than sharing a full-run recording.
-      const generatedSpecs = [];
-      for (const testCase of approvedTestCases) {
-        const generated = await qwen.generateAutomationCode({
-          approvedTestCases: [testCase],
-          pageDiscoveries: session.pageDiscoveries,
-          fileName: `${testCase.id}.cy.js`,
-          executionContext,
-        });
-
-        const validation = validateScript(generated.script);
-        if (!validation.valid) {
-          return res.status(422).json({
-            reply: `Generated automation code for ${testCase.id} failed validation and was not executed: ${validation.errors.join(" | ")}`,
-            validationErrors: validation.errors,
-            testCaseId: testCase.id,
+      // The five demo cases are independent, so ask Qwen for their scripts in
+      // parallel instead of waiting for five sequential model round-trips.
+      // Each result is still written to its own physical spec file for evidence.
+      const generatedSpecs = await Promise.all(
+        approvedTestCases.map(async (testCase) => {
+          const generated = await qwen.generateAutomationCode({
+            approvedTestCases: [testCase],
+            pageDiscoveries: session.pageDiscoveries,
+            fileName: `${testCase.id}.cy.js`,
+            executionContext,
           });
-        }
 
-        generatedSpecs.push({
-          ...generated,
-          testCaseId: testCase.id,
-          fileName: `${testCase.id}.cy.js`,
-        });
-      }
+          const validation = validateScript(generated.script);
+          if (!validation.valid) {
+            const error = new Error(
+              `Generated automation code for ${testCase.id} failed validation: ${validation.errors.join(" | ")}`
+            );
+            error.statusCode = 422;
+            error.validationErrors = validation.errors;
+            error.testCaseId = testCase.id;
+            throw error;
+          }
+
+          return {
+            ...generated,
+            testCaseId: testCase.id,
+            fileName: `${testCase.id}.cy.js`,
+          };
+        })
+      );
 
       session.generatedScript = generatedSpecs;
       session.state = "RUNNING";
@@ -261,18 +265,22 @@ router.post("/api/chat", async (req, res) => {
 
       session.artifacts = execResult.artifacts || null;
       const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
-      const analyses = [];
-      for (const test of summary.tests.filter((t) => t.fail)) {
-        const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
-        const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title };
-        const analysis = await qwen.analyzeFailure({
-          story: session.story,
-          testCase: tc,
-          expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
-          actual: test.err?.message || "Automation assertion failed",
-        });
-        analyses.push({ testCase: tc.id, ...analysis });
-      }
+
+      // Failure explanations are independent too, so analyze multiple failures
+      // concurrently rather than adding another sequential wait to the demo.
+      const analyses = await Promise.all(
+        summary.tests.filter((t) => t.fail).map(async (test) => {
+          const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
+          const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title };
+          const analysis = await qwen.analyzeFailure({
+            story: session.story,
+            testCase: tc,
+            expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
+            actual: test.err?.message || "Automation assertion failed",
+          });
+          return { testCase: tc.id, ...analysis };
+        })
+      );
 
       session.failureAnalyses = analyses;
       session.lastResults = { execResult, summary };
@@ -305,6 +313,13 @@ router.post("/api/chat", async (req, res) => {
     });
   } catch (err) {
     console.error("[api/chat]", err);
+    if (err.statusCode === 422) {
+      return res.status(422).json({
+        reply: err.message,
+        validationErrors: err.validationErrors || [],
+        testCaseId: err.testCaseId || null,
+      });
+    }
     return res.status(500).json({ reply: `Error: ${err.message}` });
   }
 });
