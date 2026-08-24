@@ -65,7 +65,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
 </head>
 <body><div class="wrap">
   <div class="hero">
-    <div><h1>AI TestPilot Analytics</h1><div class="muted">Story-driven Qwen + Cypress execution report</div></div>
+    <div><h1>AI TestPilot Analytics</h1><div class="muted">Story-driven AI automation execution report</div></div>
     <div class="meta">Run: ${esc(sessionId)}<br>Model: ${esc(model)}<br>Generated: ${esc(new Date().toLocaleString())}</div>
   </div>
   <div class="cards">
@@ -79,7 +79,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   <div class="card story">${esc(story)}</div>
   <h2 class="section-title">Execution results</h2>
   <table><thead><tr><th>Case</th><th>Test</th><th>Status</th><th>Duration</th><th>Evidence</th><th>AI analysis / error</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="muted" style="margin-top:12px">Each approved case is executed as its own Cypress spec. A failed case therefore has a dedicated video for that case plus its own Cypress failure screenshot when available.</div>
+  <div class="muted" style="margin-top:12px">Each approved case is executed independently. A failed case can therefore have its own dedicated video and failure screenshot.</div>
 </div></body></html>`;
 }
 
