@@ -4,6 +4,7 @@ const cors = require("cors");
 const path = require("path");
 
 const chatRoutes = require("./routes/chat");
+const runRoutes = require("./routes/run");
 const qwen = require("./services/qwenClient");
 
 const app = express();
@@ -12,6 +13,7 @@ const PORT = process.env.SERVER_PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(chatRoutes);
+app.use(runRoutes);
 
 app.get("/health", (req, res) => {
   res.json({
