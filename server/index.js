@@ -21,7 +21,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.use(express.static(path.join(__dirname, "..", "chat-ui")));
+app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
 app.listen(PORT, () => {
   console.log(`[ai-testpilot] Backend running at http://localhost:${PORT}`);
