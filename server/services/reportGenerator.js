@@ -79,7 +79,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   <div class="card story">${esc(story)}</div>
   <h2 class="section-title">Execution results</h2>
   <table><thead><tr><th>Case</th><th>Test</th><th>Status</th><th>Duration</th><th>Evidence</th><th>AI analysis / error</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="muted" style="margin-top:12px">For this Cypress demo, the Video link points to the complete recorded spec run and is repeated beside each failed case; each failed case has its own Cypress failure screenshot when available.</div>
+  <div class="muted" style="margin-top:12px">Each approved case is executed as its own Cypress spec. A failed case therefore has a dedicated video for that case plus its own Cypress failure screenshot when available.</div>
 </div></body></html>`;
 }
 
