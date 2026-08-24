@@ -2,7 +2,7 @@
   "name": "ai-testpilot-poc",
   "version": "2.0.0",
   "private": true,
-  "description": "AI TestPilot demo — User Story -> Qwen Test Cases -> Human Approval -> Cypress -> AI Failure Analysis -> HTML Analytics",
+  "description": "AI TestPilot demo — User Story -> Qwen Test Cases -> Human Approval -> Browser Automation -> AI Failure Analysis -> HTML Analytics",
   "scripts": {
     "start:demo-app": "node demo-app/server.js",
     "start:server": "node server/index.js",
