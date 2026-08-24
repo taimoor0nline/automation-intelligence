@@ -1,3 +1,8 @@
+const fs = require("fs");
+const path = require("path");
+
+const REPORT_DIR = path.join(__dirname, "..", "..", "automation-system", "artifacts", "reports");
+
 function esc(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -28,6 +33,18 @@ function evidenceLinks(test) {
   return links.length ? `<div class="evidence-links">${links.join("")}</div>` : "—";
 }
 
+function reportFileName(sessionId) {
+  const safe = String(sessionId || "run").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${safe}.html`;
+}
+
+function saveReportHtml(sessionId, html) {
+  fs.mkdirSync(REPORT_DIR, { recursive: true });
+  const filePath = path.join(REPORT_DIR, reportFileName(sessionId));
+  fs.writeFileSync(filePath, html, "utf8");
+  return filePath;
+}
+
 function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summary, analyses, model }) {
   const successRate = pct(summary.passed, summary.total);
   const analysisById = new Map((analyses || []).map((a) => [a.testCase, a]));
@@ -46,7 +63,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
       </tr>`;
   }).join("");
 
-  return `<!doctype html>
+  const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -79,8 +96,11 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   <div class="card story">${esc(story)}</div>
   <h2 class="section-title">Execution results</h2>
   <table><thead><tr><th>Case</th><th>Test</th><th>Status</th><th>Duration</th><th>Evidence</th><th>AI analysis / error</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="muted" style="margin-top:12px">Each approved case is executed independently. A failed case can therefore have its own dedicated video and failure screenshot.</div>
+  <div class="muted" style="margin-top:12px">This optimized branch runs all approved cases in one generated spec. Failed cases keep individual screenshots; Video links, when enabled, point to the shared full-run recording.</div>
 </div></body></html>`;
+
+  saveReportHtml(sessionId, html);
+  return html;
 }
 
-module.exports = { buildAnalyticsReport };
+module.exports = { buildAnalyticsReport, REPORT_DIR, reportFileName };
