@@ -73,7 +73,7 @@ async function discoverPage(url) {
     const type = $el.attr("type") || (tag === "select" ? "select" : tag === "textarea" ? "textarea" : "text");
     if (type === "radio" || type === "checkbox") return; // grouped separately below
     const id = $el.attr("id");
-    elements.push({
+    const entry = {
       tag,
       type,
       label: (id && labelFor(id)) || $el.attr("placeholder") || $el.attr("name"),
@@ -81,7 +81,18 @@ async function discoverPage(url) {
       testId: $el.attr("data-testid") || null,
       required: $el.attr("required") !== undefined || $el.attr("min") !== undefined,
       errorElement: findErrorElement($, $el),
-    });
+    };
+    // FIX: for <select> elements, also capture the real <option> values so
+    // the AI can only ever choose from options that genuinely exist on the
+    // page, instead of inventing plausible-sounding category names (e.g.
+    // "Feature Request" / "Bug Report" that don't actually exist).
+    if (tag === "select") {
+      entry.options = $el.find("option").map((__, opt) => {
+        const $opt = $(opt);
+        return { value: $opt.attr("value") ?? "", label: $opt.text().trim() };
+      }).get();
+    }
+    elements.push(entry);
   });
 
   // Radio / checkbox groups (grouped by `name`, inside a <fieldset>)

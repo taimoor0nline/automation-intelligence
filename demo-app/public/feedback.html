@@ -51,22 +51,26 @@
         <span id="category-error" class="error" data-testid="category-error"></span>
       </div>
 
+      <!-- FIX: every radio option now has its own data-testid, so
+           Page Discovery reports a REAL testId instead of null,
+           and the AI never has to guess a selector for these. -->
       <fieldset class="field">
         <legend>Preferred Contact Method</legend>
-        <label><input type="radio" name="contactMethod" value="email" /> Email</label>
-        <label><input type="radio" name="contactMethod" value="phone" /> Phone</label>
-        <label><input type="radio" name="contactMethod" value="whatsapp" /> WhatsApp</label>
-        <label><input type="radio" name="contactMethod" value="none" /> Do not contact me</label>
+        <label><input type="radio" name="contactMethod" value="email" data-testid="contact-method-email" /> Email</label>
+        <label><input type="radio" name="contactMethod" value="phone" data-testid="contact-method-phone" /> Phone</label>
+        <label><input type="radio" name="contactMethod" value="whatsapp" data-testid="contact-method-whatsapp" /> WhatsApp</label>
+        <label><input type="radio" name="contactMethod" value="none" data-testid="contact-method-none" /> Do not contact me</label>
         <span id="contactMethod-error" class="error" data-testid="contact-method-error"></span>
       </fieldset>
 
+      <!-- FIX: same treatment for the Products Used checkboxes. -->
       <fieldset class="field">
         <legend>Products Used</legend>
-        <label><input type="checkbox" name="products" value="web" /> Web Portal</label>
-        <label><input type="checkbox" name="products" value="mobile" /> Mobile App</label>
-        <label><input type="checkbox" name="products" value="api" /> API</label>
-        <label><input type="checkbox" name="products" value="support" /> Customer Support</label>
-        <label><input type="checkbox" name="products" value="other" /> Other</label>
+        <label><input type="checkbox" name="products" value="web" data-testid="products-web" /> Web Portal</label>
+        <label><input type="checkbox" name="products" value="mobile" data-testid="products-mobile" /> Mobile App</label>
+        <label><input type="checkbox" name="products" value="api" data-testid="products-api" /> API</label>
+        <label><input type="checkbox" name="products" value="support" data-testid="products-support" /> Customer Support</label>
+        <label><input type="checkbox" name="products" value="other" data-testid="products-other" /> Other</label>
         <span id="products-error" class="error" data-testid="products-error"></span>
       </fieldset>
 

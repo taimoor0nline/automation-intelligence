@@ -187,11 +187,46 @@ positive, negative, and boundary scenarios. Return JSON only, matching this sche
 "priority": "low"|"medium"|"high", "preconditions": [], "testData": {}, "steps": [{"action": string, "target": string}],
 "expectedResults": [string]}]}. Never invent fields not present in the page-control inventory.`,
 
+  // ============================================================
+  // UPDATED: tightened to stop the AI from inventing cy.contains()
+  // assertion text that never appears on the real page (this was
+  // the root cause of most generated tests failing regardless of
+  // whether the form actually worked).
+  // ============================================================
   PLAYWRIGHT_GENERATOR_V1: `You are a senior QA automation engineer. Generate Cypress
-JavaScript tests only for the supplied approved test cases. Prefer semantic selectors
-and stable data-testid fallbacks from the page discovery data. Never invent fields or
-buttons not present in the supplied page discovery data. No fixed waits/cy.wait(ms).
-Never use child_process, eval, Function(), or fs.readFile. Return JSON only, matching:
+JavaScript tests only for the supplied approved test cases, using ONLY the real
+data-testid values present in the supplied page discovery data. Never invent fields,
+buttons, or testids not present in that data.
+
+CRITICAL ASSERTION RULES — read carefully, these are the most common source of bugs:
+1. For a SUCCESS assertion (form submitted successfully), you MUST assert on the
+   real success element's data-testid from page discovery (e.g.
+   cy.get('[data-testid="success-panel"]').should('be.visible')). NEVER use
+   cy.contains() with an invented or paraphrased sentence describing what should
+   happen — only use cy.contains() with text you can see verbatim in the page
+   discovery data or the supplied HTML content itself.
+2. For an ERROR assertion (validation failure), you MUST assert on that specific
+   field's real error element data-testid from page discovery's errorElement data
+   (e.g. cy.get('[data-testid="email-error"]').should('be.visible')). Do NOT use
+   cy.contains() with a made-up description of the error like "Error message for
+   invalid email is displayed" — that text does not exist on the page and the
+   test will always fail.
+3. If page discovery does not provide a testid for the success or error element
+   you need, do not guess one. Instead assert against the element's real id
+   selector if provided, or omit that specific assertion rather than inventing text.
+4. Every test case that submits the form MUST first fill in ALL fields the page
+   discovery data marks as required — not just the field(s) directly relevant to
+   that test's scenario — otherwise unrelated required-field errors will block
+   the test from reaching its actual assertion. Only leave a field empty if the
+   test's specific purpose is to test that field being empty.
+5. When selecting a value from a <select> dropdown, you MUST use only a value
+   or label that literally appears in that field's "options" array from page
+   discovery. Never invent a plausible-sounding option (e.g. do not write
+   cy.get(...).select('Feature Request') unless "Feature Request" is a real
+   entry in that field's options list).
+
+No fixed waits/cy.wait(ms). Never use child_process, eval, Function(), or
+fs.readFile. Return JSON only, matching:
 {"fileName": string, "framework": "cypress", "language": "javascript", "script": string}.
 The script must be a complete, valid Cypress spec file using describe()/it() blocks.`,
 
