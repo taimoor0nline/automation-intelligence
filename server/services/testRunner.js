@@ -17,6 +17,11 @@ function boolEnv(value, fallback) {
   return !["false", "0", "no", "off"].includes(String(value).toLowerCase());
 }
 
+function numberEnv(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 async function loadCypress() {
   const cypressModulePath = path.join(AUTOMATION_DIR, "node_modules", "cypress");
   try {
@@ -71,8 +76,12 @@ async function executeGeneratedTest({ fileName, script }, executionContext = {})
     const headed = boolEnv(process.env.CYPRESS_HEADED, true);
     const browser = process.env.CYPRESS_BROWSER || "chrome";
     const baseUrl = executionContext.baseUrl || process.env.TEST_BASE_URL || "http://localhost:4000";
+    const demoStepDelayMs = Math.max(0, Math.min(numberEnv(process.env.CYPRESS_STEP_DELAY_MS, 0), 3000));
 
-    console.log(`[test-runner] Running ${safeName} in ${browser} (${headed ? "headed" : "headless"})`);
+    console.log(
+      `[test-runner] Running ${safeName} in ${browser} (${headed ? "headed" : "headless"})` +
+      (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
+    );
 
     const result = await cypress.run({
       project: AUTOMATION_DIR,
@@ -82,6 +91,7 @@ async function executeGeneratedTest({ fileName, script }, executionContext = {})
       env: {
         TEST_USERNAME: executionContext.credentials?.username || "",
         TEST_PASSWORD: executionContext.credentials?.password || "",
+        DEMO_STEP_DELAY_MS: demoStepDelayMs,
       },
       config: {
         baseUrl,
