@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI TestPilot — Login</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  >
+
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --border: #e6eaf1;
+      --blue: #2f5bff;
+      --blue-dark: #1d3fd6;
+      --blue-soft: #eaf0ff;
+      --red: #dc2626;
+      --red-soft: #fee2e2;
+      --text: #10141c;
+      --text-muted: #6b7385;
+      --text-faint: #9aa2b1;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --radius: 12px;
+      --shadow: 0 1px 2px rgba(16,20,28,0.04),
+                 0 1px 8px rgba(16,20,28,0.03);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 32px 30px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--blue), #6c8fff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      font-weight: 700;
+      font-size: 17px;
+      letter-spacing: -0.2px;
+    }
+
+    .brand-sub {
+      font-size: 12px;
+      color: var(--text-faint);
+      margin-top: 1px;
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0 0 4px;
+    }
+
+    .subtext {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 0 0 24px;
+    }
+
+    label {
+      display: block;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin: 16px 0 6px;
+    }
+
+    label:first-of-type {
+      margin-top: 0;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px 12px;
+      font-family: var(--font);
+      font-size: 13.5px;
+      color: var(--text);
+      background: #fff;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px var(--blue-soft);
+    }
+
+    .field-error {
+      display: none;
+      font-size: 11.5px;
+      color: var(--red);
+      margin-top: 5px;
+    }
+
+    .field-error.show {
+      display: block;
+    }
+
+    .btn-primary {
+      width: 100%;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      padding: 12px;
+      font-weight: 600;
+      font-size: 13.5px;
+      cursor: pointer;
+      margin-top: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--blue-dark);
+    }
+
+    .btn-primary:disabled {
+      background: #c7d1e6;
+      cursor: not-allowed;
+    }
+
+    .btn-primary.loading::after {
+      content: "";
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .top-error {
+      display: none;
+      background: var(--red-soft);
+      color: var(--red);
+      font-size: 12.5px;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+    }
+
+    .top-error.show {
+      display: block;
+    }
+
+    .footnote {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-faint);
+      margin-top: 20px;
+    }
+
+    .demo-credentials {
+      text-align: center;
+      font-size: 11.5px;
+      color: var(--text-faint);
+      margin-top: 12px;
+    }
+
+    .demo-credentials strong {
+      color: var(--text-muted);
+    }
+  </style>
+
+</head>
+
+<body>
+
+  <div class="login-card">
+
+```
+<div class="brand">
+  <div class="brand-icon">AI</div>
+
+  <div>
+    <div class="brand-title">AI TestPilot</div>
+    <div class="brand-sub">AI-Powered Software Testing</div>
+  </div>
+</div>
+
+<h1>Sign in</h1>
+
+<p class="subtext">
+  Enter your credentials to access the testing dashboard.
+</p>
+
+<div class="top-error" id="topError" data-testid="login-error">
+  Invalid username or password. Please try again.
+</div>
+
+<form id="loginForm" novalidate>
+
+  <label for="username">Username</label>
+
+  <input
+    type="text"
+    id="username"
+    name="username"
+    placeholder="Enter your username"
+    autocomplete="username"
+    data-testid="username"
+  />
+
+  <div
+    class="field-error"
+    id="usernameError"
+    data-testid="username-error"
+  >
+    Enter your username.
+  </div>
+
+  <label for="password">Password</label>
+
+  <input
+    type="password"
+    id="password"
+    name="password"
+    placeholder="Enter your password"
+    autocomplete="current-password"
+    data-testid="password"
+  />
+
+  <div
+    class="field-error"
+    id="passwordError"
+    data-testid="password-error"
+  >
+    Enter your password.
+  </div>
+
+  <button
+    type="submit"
+    class="btn-primary"
+    id="loginBtn"
+    data-testid="login-button"
+  >
+    <span>Sign in</span>
+  </button>
+
+</form>
+
+<div class="footnote">
+  QA Engineer access only · AI TestPilot
+</div>
+
+<div class="demo-credentials">
+  Demo: <strong>admin</strong> / <strong>admin123</strong>
+</div>
+```
+
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const form = $("loginForm");
+    const usernameInput = $("username");
+    const passwordInput = $("password");
+
+    function clearErrors() {
+      $("usernameError").classList.remove("show");
+      $("passwordError").classList.remove("show");
+      $("topError").classList.remove("show");
+    }
+
+    function validate() {
+      let valid = true;
+
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+
+      if (!username) {
+        $("usernameError").classList.add("show");
+        valid = false;
+      }
+
+      if (!password) {
+        $("passwordError").classList.add("show");
+        valid = false;
+      }
+
+      return valid;
+    }
+
+    usernameInput.addEventListener("input", () => {
+      $("usernameError").classList.remove("show");
+      $("topError").classList.remove("show");
+    });
+
+    passwordInput.addEventListener("input", () => {
+      $("passwordError").classList.remove("show");
+      $("topError").classList.remove("show");
+    });
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      clearErrors();
+
+      if (!validate()) {
+        return;
+      }
+
+      const btn = $("loginBtn");
+
+      btn.disabled = true;
+      btn.classList.add("loading");
+      btn.querySelector("span").textContent = "Signing in…";
+
+      const DEMO_USERNAME = "admin";
+      const DEMO_PASSWORD = "admin123";
+
+      setTimeout(() => {
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value;
+
+        if (
+          username === DEMO_USERNAME &&
+          password === DEMO_PASSWORD
+        ) {
+          window.location.href = "/feedback";
+          return;
+        }
+
+        $("topError").classList.add("show");
+
+        btn.disabled = false;
+        btn.classList.remove("loading");
+        btn.querySelector("span").textContent = "Sign in";
+      }, 400);
+    });
+  </script>
+
+</body>
+</html>

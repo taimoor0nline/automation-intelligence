@@ -59,14 +59,25 @@
     font-family: var(--mono); font-size: 12px; font-weight: 600; color: #04c38b;
     border: 1px solid var(--border); padding: 6px 12px; border-radius: 8px; background: #fafbfd;
   }
+
+  /* NEW: Write Story trigger button, placed right after the cypress badge */
+  .write-story-btn {
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 15px; border: none; border-radius: 8px;
+    background: var(--blue); color: #fff; font-weight: 600; font-size: 12.5px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .write-story-btn:hover { background: var(--blue-dark); }
+
   .user-chip { display: flex; align-items: center; gap: 9px; padding-left: 8px; }
   .avatar { width: 32px; height: 32px; border-radius: 50%; background: #dbe3ff; color: var(--blue-dark);
     display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12.5px; }
   .user-name { font-weight: 600; font-size: 13px; }
   .user-role { font-size: 11px; color: var(--text-faint); }
 
-  .board { display: grid; grid-template-columns: 320px 380px 1fr; gap: 20px; padding: 20px 24px 40px; align-items: start; }
-  @media (max-width: 1200px) { .board { grid-template-columns: 1fr; } }
+  /* Board now only has 2 columns (Test Cases, Live Execution) — Write Story moved into a modal */
+  .board { display: grid; grid-template-columns: 420px 1fr; gap: 20px; padding: 20px 24px 40px; align-items: start; }
+  @media (max-width: 1100px) { .board { grid-template-columns: 1fr; } }
 
   .col-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .col-num {
@@ -178,7 +189,7 @@
   .add-form-cancel { background: #eef1f6; color: var(--text-muted); }
   .field-hint { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; }
 
-  /* ---------- Column 3: Runner ---------- */
+  /* ---------- Column: Runner ---------- */
   .runner-card { padding: 0; overflow: hidden; }
   .runner-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
   .runner-title { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14px; }
@@ -205,7 +216,6 @@
   .cmd-badge.pass { background: rgba(22,163,74,0.18); color: #4ade80; }
   .cmd-badge.fail { background: rgba(220,38,38,0.18); color: #f87171; }
 
-  /* ---------- BIG browser preview (full width, stacked below commands) ---------- */
   .preview-pane { border-top: 1px solid var(--border-soft); }
   .browser-chrome {
     display: flex; align-items: center; gap: 10px; padding: 10px 14px;
@@ -249,6 +259,28 @@
   .failure-item-id { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--red); }
   .failure-item-conf { margin-left: auto; font-size: 10px; color: var(--text-faint); font-family: var(--mono); }
   .failure-item-text { font-size: 11.5px; color: var(--text); line-height: 1.45; }
+
+  /* ---------- NEW: Write Story modal ---------- */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(16,20,28,0.45);
+    align-items: center; justify-content: center; z-index: 1000; padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow);
+    width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 22px; border-bottom: 1px solid var(--border);
+  }
+  .modal-title { font-weight: 700; font-size: 15px; }
+  .modal-close {
+    border: none; background: transparent; font-size: 16px; color: var(--text-faint); cursor: pointer;
+    width: 28px; height: 28px; border-radius: 7px;
+  }
+  .modal-close:hover { background: var(--border-soft); color: var(--text); }
+  .modal-body { padding: 20px 22px 26px; }
 </style>
 </head>
 <body>
@@ -261,6 +293,7 @@
   <div class="header-right">
     <div class="status-pill" id="backendStatus"><span class="status-dot" id="statusDot"></span><span id="statusText">Checking backend…</span></div>
     <div class="cypress-badge">cypress</div>
+    <button class="write-story-btn" id="writeStoryBtn">✎ Write Story</button>
     <div class="user-chip">
       <div class="avatar">QA</div>
       <div><div class="user-name">QA Engineer</div><div class="user-role">AI TestPilot</div></div>
@@ -268,14 +301,14 @@
   </div>
 </header>
 
-<div class="board">
-
-  <!-- COLUMN 1: Write Story -->
-  <div>
-    <div class="col-head"><div class="col-num">1</div><div class="col-title">Write Story</div></div>
-    <div class="card">
-      <div class="panel-head"><div class="panel-icon">✦</div><div class="panel-title">AI Testing Assistant</div></div>
-
+<!-- Write Story modal (moved out of the board so columns have more space) -->
+<div class="modal-overlay" id="storyModalOverlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title">✦ AI Testing Assistant — Write Story</div>
+      <button class="modal-close" id="storyModalClose">✕</button>
+    </div>
+    <div class="modal-body">
       <label for="envSelect">Environment</label>
       <select id="envSelect">
         <option>Development</option><option>Test</option><option selected>UAT</option><option>Pre-Production</option>
@@ -296,10 +329,13 @@
       <div class="meta-row"><span>Project: <b id="projectMeta">—</b></span><span>Environment: <b id="envMeta">UAT</b></span></div>
     </div>
   </div>
+</div>
 
-  <!-- COLUMN 2: Test Cases -->
+<div class="board">
+
+  <!-- COLUMN 1: Test Cases -->
   <div>
-    <div class="col-head"><div class="col-num">2</div><div class="col-title">AI Generated Test Cases</div></div>
+    <div class="col-head"><div class="col-num">1</div><div class="col-title">AI Generated Test Cases</div></div>
     <div class="card">
       <div class="criteria-head">
         <div class="criteria-title">✓ Generated Test Cases</div>
@@ -312,7 +348,7 @@
       <div id="addFormWrap"></div>
 
       <div class="criteria-list" id="criteriaList">
-        <div class="criteria-empty">Write a story and click <b>Generate Test Cases</b> to begin.</div>
+        <div class="criteria-empty">Click <b>Write Story</b> above and generate test cases to begin.</div>
       </div>
 
       <button class="btn-secondary" id="startTestingBtn" disabled><span>▶ Start Testing</span></button>
@@ -320,9 +356,9 @@
     </div>
   </div>
 
-  <!-- COLUMN 3: Live Execution -->
+  <!-- COLUMN 2: Live Execution -->
   <div>
-    <div class="col-head"><div class="col-num">3</div><div class="col-title">Live test execution and results</div></div>
+    <div class="col-head"><div class="col-num">2</div><div class="col-title">Live test execution and results</div></div>
 
     <div class="card runner-card">
       <div class="runner-head">
@@ -333,7 +369,6 @@
       <div class="cmd-tabs"><div class="cmd-tab active">Commands</div><div class="cmd-tab">Tests</div></div>
       <div class="cmd-log" id="cmdLog"><div class="cmd-empty">No test run yet.</div></div>
 
-      <!-- Big, full-width browser preview -->
       <div class="preview-pane">
         <div class="browser-chrome">
           <div class="chrome-dots"><span></span><span></span><span></span></div>
@@ -363,6 +398,14 @@
 <script>
 let sessionId = "dash-" + Math.random().toString(36).slice(2, 8);
 const $ = (id) => document.getElementById(id);
+
+// ---------- NEW: Write Story modal open/close ----------
+const storyModalOverlay = $("storyModalOverlay");
+$("writeStoryBtn").addEventListener("click", () => storyModalOverlay.classList.add("open"));
+$("storyModalClose").addEventListener("click", () => storyModalOverlay.classList.remove("open"));
+storyModalOverlay.addEventListener("click", (e) => {
+  if (e.target === storyModalOverlay) storyModalOverlay.classList.remove("open");
+});
 
 async function checkBackend() {
   try {
@@ -431,6 +474,7 @@ $("generateBtn").addEventListener("click", async () => {
     $("addCaseToggle").disabled = false;
     $("lockNote").textContent = "✓ Uncheck any case to exclude it, then start testing.";
     loadPreview($("targetUrl").value.trim());
+    storyModalOverlay.classList.remove("open"); // NEW: auto-close modal once cases are generated
   } catch (err) {
     $("criteriaList").innerHTML = `<div class="criteria-empty">Error: ${escapeHtml(err.message)}</div>`;
   } finally {
@@ -461,9 +505,6 @@ function renderCriteria() {
 
   document.querySelectorAll(".crit-row").forEach(row => {
     const id = row.dataset.id;
-    row.querySelector('[data-action="toggle"]').addEventListener("click", (e) => {
-      if (e.currentTarget.closest(".crit-row") !== row) return;
-    });
     row.addEventListener("click", (e) => {
       const action = e.target.closest("[data-action]")?.dataset.action;
       if (action === "delete") {
@@ -478,7 +519,6 @@ function renderCriteria() {
   });
 }
 
-// ---------- Add Test Case form ----------
 $("addCaseToggle").addEventListener("click", () => {
   if ($("addFormWrap").innerHTML) { $("addFormWrap").innerHTML = ""; return; }
   renderAddForm();
@@ -491,12 +531,6 @@ function getDiscoveredFields() {
   );
 }
 
-/* ============================================================
-   NEW: dynamic "Value to enter" placeholder helper.
-   Guesses a sensible example value based on the selected
-   field's label/name and its underlying input type, instead
-   of the old hardcoded "e.g. 17" that showed for every field.
-   ============================================================ */
 function guessValuePlaceholder(label, type) {
   const l = (label || "").toLowerCase();
   const t = (type || "").toLowerCase();
@@ -550,7 +584,6 @@ function renderAddForm() {
       <div class="add-form-row">
         <div>
           <label>Value to enter</label>
-          <!-- placeholder is now set dynamically by updateValuePlaceholder() -->
           <input type="text" id="af-value" placeholder="" />
         </div>
         <div>
@@ -579,7 +612,7 @@ function renderAddForm() {
 
   $("af-cancel").addEventListener("click", () => { $("addFormWrap").innerHTML = ""; });
 
-  let manualMode = fields.length === 0; // if nothing discovered, start in manual mode automatically
+  let manualMode = fields.length === 0;
   function applyMode() {
     $("af-field-mode-picker").style.display = manualMode ? "none" : "block";
     $("af-manual-fields").style.display = manualMode ? "block" : "none";
@@ -610,9 +643,6 @@ function renderAddForm() {
     }
   }
 
-  /* NEW: updates the "Value to enter" placeholder based on the
-     currently selected field (auto mode) or the manual selector
-     text + manual type (manual mode). */
   function updateValuePlaceholder() {
     const valueInput = $("af-value");
     if (!valueInput) return;
@@ -670,9 +700,6 @@ function renderAddForm() {
       action: { fieldTestId, type: actionType, value },
       assertion: {
         kind,
-        // Uses the REAL error element Page Discovery found on the page.
-        // Only falls back to undefined (never a guessed name) if none was found —
-        // the Cypress generator then falls back to a text-content search instead.
         targetTestId: kind !== "successVisible" ? (discoveredErrorTestId || undefined) : undefined,
         message: message || undefined,
       },
@@ -683,7 +710,6 @@ function renderAddForm() {
   });
 }
 
-// ---------- Start Testing ----------
 $("startTestingBtn").addEventListener("click", async () => {
   const btn = $("startTestingBtn");
   const approvedIds = currentTestCases.map(t => t.id).filter(id => !rejectedIds.has(id));
