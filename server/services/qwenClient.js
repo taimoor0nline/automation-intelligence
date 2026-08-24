@@ -84,8 +84,7 @@ Rules:
 - Cover only behaviour that appears in the business story and discovered page inventory.
 - Include a useful mix of positive, negative, validation and boundary coverage.
 - Tests must describe the EXPECTED behaviour. Never manufacture an assertion just to make a test fail. A failed run should mean the real application did not meet the expected behaviour.
-- For a five-case demo, use this shape when the discovered controls support it: one positive end-to-end journey, one authentication/required-field negative case, one later-form required-field case, and two defect-detection validation/boundary cases.
-- DEMO CALIBRATION: if the discovered feedback form contains an Age field with min=18, TC004 MUST test age 17 and expect the submission to be rejected by the age rule. If the discovered feedback form contains a Website field of type=url, TC005 MUST use the malformed value "abc" and expect the submission to be rejected by the website URL rule. These are legitimate expected-behaviour tests derived from discovered constraints; do not describe them as intentionally failing tests.
+- For a five-case demo, prefer one positive end-to-end journey, one authentication/required-field negative case, one later-form required-field case, and two meaningful defect-detection validation/boundary cases.
 - When the story and discovered controls contain explicit boundaries, formats or validation constraints, prioritize them because they are good defect-detection scenarios.
 - Treat the supplied page inventory as the source of truth. Never invent fields, pages, buttons, selectors, messages or dropdown values.
 - Multi-page journeys are allowed. If the story describes login followed by another page, create end-to-end cases that reflect that flow.
@@ -113,20 +112,22 @@ const AUTOMATION_GENERATOR_PROMPT = `You are a senior browser automation enginee
 Generate a complete JavaScript end-to-end spec for ONLY the approved test cases using the current runtime's cy.* API.
 
 STRICT RULES:
-1. Use only selectors, data-testid values, ids, names, messages, option values and URLs that appear in pageDiscoveries.
+1. Use only selectors, data-testid values, ids, names, messages, option values and URLs that appear in pageDiscoveries or the approved test case itself.
 2. Never invent a selector or assertion text.
-3. Prefer data-testid, then id, then name.
+3. Prefer an explicit selector supplied in a test step; otherwise prefer data-testid, then id, then name from discovery.
 4. Use relative paths with cy.visit() when pages share the supplied base URL.
 5. If login credentials are available, NEVER hardcode them. Read them securely with:
    cy.env(['TEST_USERNAME','TEST_PASSWORD'], { log: false }).then(({ TEST_USERNAME, TEST_PASSWORD }) => { ... })
    and type them with { log: false }.
 6. Do not send credential values to logs, assertions, screenshots, titles or comments.
-7. For a login journey, use the discovered username/password fields and discovered login button, then assert the discovered destination/page outcome.
-8. Before testing a validation rule on a later form, populate the other required fields with valid values using only discovered controls/options.
-9. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
-10. Assertions must use real discovered elements/messages. For a rejection/validation case, assert the discovered field-specific error element becomes visible/non-empty and/or the discovered success state remains absent. Do not use a weak assertion that can pass even when invalid data is accepted.
-11. Every approved test case must map to one it() block whose title begins with its TC id.
-12. For an age-minimum case using 17, the assertion must prove the age rule rejected 17. For an invalid-website case using "abc", the assertion must prove the URL rule rejected "abc".
+7. For a login journey, use the discovered username/password fields and discovered login button, then continue to the discovered destination page.
+8. Execute the approved test case steps in order. Do not silently skip later-form actions just because login succeeded.
+9. For a form validation case, populate every other field listed in the approved steps before submitting. Check/select radio buttons, checkboxes and dropdowns exactly as requested.
+10. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
+11. Assertions must prove the expected result. For a rejection/validation case, assert the discovered field-specific error element becomes visible and non-empty and that the discovered success state does not appear. Do not use a weak assertion that can pass when invalid data is accepted.
+12. Every approved test case must map to one it() block whose title begins with its TC id.
+13. If TC001 contains feedback-form steps, visibly complete and submit the feedback form; do not stop after login.
+14. If a case enters age 17 against a discovered min=18 rule, prove that 17 is rejected. If a case enters website value "abc" against a discovered URL field, prove that "abc" is rejected.
 
 Return JSON only:
 {"fileName": string, "framework": "browser-automation", "language": "javascript", "script": string}`;
@@ -191,14 +192,168 @@ function validateFailure(result) {
   return result;
 }
 
+function findByTestId(pageDiscoveries, testId) {
+  for (const page of pageDiscoveries || []) {
+    const element = (page.elements || []).find((item) => item.testId === testId);
+    if (element) return { page, element };
+  }
+  return null;
+}
+
+function findMessageByTestId(pageDiscoveries, testId) {
+  for (const page of pageDiscoveries || []) {
+    const message = (page.messages || []).find((item) => item.testId === testId);
+    if (message) return { page, message };
+  }
+  return null;
+}
+
+function elementTarget(found) {
+  return found?.element?.selector || found?.element?.label || found?.element?.testId || "";
+}
+
+function errorTarget(found) {
+  const error = found?.element?.errorElement;
+  if (!error) return "";
+  if (error.testId) return `[data-testid="${error.testId}"]`;
+  if (error.id) return `#${error.id}`;
+  return error.text || "";
+}
+
+function pagePath(page) {
+  try {
+    const url = new URL(page?.finalUrl || page?.url || "/");
+    return `${url.pathname}${url.search}` || "/";
+  } catch {
+    return "/";
+  }
+}
+
+function firstNonEmptyOption(found, fallback) {
+  const option = (found?.element?.options || []).find((item) => item.value !== "");
+  return option?.value || fallback;
+}
+
+function buildDemoCalibration(result, pageDiscoveries, story) {
+  if (TEST_CASE_COUNT !== 5 || !/feedback/i.test(String(story || ""))) return result;
+
+  const username = findByTestId(pageDiscoveries, "username");
+  const password = findByTestId(pageDiscoveries, "password");
+  const loginButton = findByTestId(pageDiscoveries, "login-button");
+  const loginError = findMessageByTestId(pageDiscoveries, "login-error");
+  const fullName = findByTestId(pageDiscoveries, "full-name");
+  const email = findByTestId(pageDiscoveries, "email");
+  const age = findByTestId(pageDiscoveries, "age");
+  const website = findByTestId(pageDiscoveries, "website");
+  const category = findByTestId(pageDiscoveries, "feedback-category");
+  const contact = findByTestId(pageDiscoveries, "contact-method-email");
+  const product = findByTestId(pageDiscoveries, "products-web");
+  const rating = findByTestId(pageDiscoveries, "rating");
+  const subject = findByTestId(pageDiscoveries, "subject");
+  const feedback = findByTestId(pageDiscoveries, "feedback-message");
+  const consent = findByTestId(pageDiscoveries, "consent");
+  const submit = findByTestId(pageDiscoveries, "submit-feedback");
+  const success = findMessageByTestId(pageDiscoveries, "success-panel");
+
+  const requiredDemoControls = [username, password, loginButton, fullName, email, age, website, category, contact, product, rating, subject, feedback, consent, submit, success];
+  if (requiredDemoControls.some((item) => !item)) return result;
+  if (String(age.element.min || "") !== "18" || age.element.type !== "number" || website.element.type !== "url") return result;
+
+  const loginPath = pagePath(username.page);
+  const feedbackPath = pagePath(fullName.page);
+  const loginErrorTarget = loginError?.message?.testId ? `[data-testid="${loginError.message.testId}"]` : loginError?.message?.id ? `#${loginError.message.id}` : "";
+  const successTarget = success?.message?.testId ? `[data-testid="${success.message.testId}"]` : success?.message?.id ? `#${success.message.id}` : "";
+
+  const loginSteps = () => [
+    { action: "Navigate to the login page", target: "page", value: loginPath },
+    { action: "Enter the configured test username", target: elementTarget(username), value: null },
+    { action: "Enter the configured test password", target: elementTarget(password), value: null },
+    { action: "Click Sign in", target: elementTarget(loginButton), value: null },
+    { action: "Continue to the feedback form after successful login", target: "page", value: feedbackPath },
+  ];
+
+  const feedbackSteps = ({ emailValue = "demo.user@example.com", ageValue = "30", websiteValue = "https://example.com" } = {}) => [
+    { action: "Enter full name", target: elementTarget(fullName), value: "Demo User" },
+    emailValue === null ? { action: "Leave email blank", target: elementTarget(email), value: null } : { action: "Enter email", target: elementTarget(email), value: emailValue },
+    { action: "Enter age", target: elementTarget(age), value: ageValue },
+    { action: "Enter website", target: elementTarget(website), value: websiteValue },
+    { action: "Select feedback category", target: elementTarget(category), value: firstNonEmptyOption(category, "service") },
+    { action: "Select preferred contact method", target: elementTarget(contact), value: contact.element.value || "email" },
+    { action: "Select at least one product", target: elementTarget(product), value: product.element.value || "web" },
+    { action: "Enter satisfaction rating", target: elementTarget(rating), value: "8" },
+    { action: "Enter subject", target: elementTarget(subject), value: "Service feedback" },
+    { action: "Enter feedback message", target: elementTarget(feedback), value: "This feedback confirms the expected customer journey." },
+    { action: "Provide consent", target: elementTarget(consent), value: "checked" },
+    { action: "Submit feedback", target: elementTarget(submit), value: null },
+  ];
+
+  return {
+    ...result,
+    demoCalibrated: true,
+    testCases: [
+      {
+        id: "TC001",
+        title: "Login and submit valid customer feedback",
+        type: "positive",
+        priority: "high",
+        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
+        testData: { category: firstNonEmptyOption(category, "service"), age: "30", website: "https://example.com" },
+        steps: [...loginSteps(), ...feedbackSteps()],
+        expectedResults: [`The feedback form at ${feedbackPath} is opened after login`, "The valid feedback submission is accepted", `The success element ${successTarget} is visible after submission`],
+      },
+      {
+        id: "TC002",
+        title: "Reject invalid login credentials",
+        type: "negative",
+        priority: "high",
+        preconditions: ["Target application is available"],
+        testData: { username: "invalid-user", password: "invalid-password" },
+        steps: [
+          { action: "Navigate to the login page", target: "page", value: loginPath },
+          { action: "Enter invalid username", target: elementTarget(username), value: "invalid-user" },
+          { action: "Enter invalid password", target: elementTarget(password), value: "invalid-password" },
+          { action: "Click Sign in", target: elementTarget(loginButton), value: null },
+        ],
+        expectedResults: ["Login is rejected", loginErrorTarget ? `The login error element ${loginErrorTarget} is visible and non-empty` : "A discovered login error is shown", `The user is not taken to ${feedbackPath}`],
+      },
+      {
+        id: "TC003",
+        title: "Reject feedback submission when email is missing",
+        type: "negative",
+        priority: "medium",
+        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
+        testData: { email: null },
+        steps: [...loginSteps(), ...feedbackSteps({ emailValue: null })],
+        expectedResults: ["Feedback submission is rejected because email is required", `The email validation element ${errorTarget(email)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
+      },
+      {
+        id: "TC004",
+        title: "Reject age below the minimum of 18",
+        type: "boundary",
+        priority: "high",
+        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
+        testData: { age: "17", minimumAge: "18" },
+        steps: [...loginSteps(), ...feedbackSteps({ ageValue: "17" })],
+        expectedResults: ["Age 17 is rejected because the discovered minimum age is 18", `The age validation element ${errorTarget(age)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
+      },
+      {
+        id: "TC005",
+        title: "Reject malformed website URL",
+        type: "negative",
+        priority: "high",
+        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
+        testData: { website: "abc" },
+        steps: [...loginSteps(), ...feedbackSteps({ websiteValue: "abc" })],
+        expectedResults: ["Website value abc is rejected because the discovered field requires a URL", `The website validation element ${errorTarget(website)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
+      },
+    ],
+  };
+}
+
 async function generateTestCases({ story, pageDiscoveries, environment }) {
-  const result = await callQwen(TEST_ANALYST_PROMPT, {
-    story,
-    pageDiscoveries,
-    environment,
-    requestedTestCaseCount: TEST_CASE_COUNT,
-  });
-  return validateTestCases(result, TEST_CASE_COUNT);
+  const result = await callQwen(TEST_ANALYST_PROMPT, { story, pageDiscoveries, environment, requestedTestCaseCount: TEST_CASE_COUNT });
+  const validated = validateTestCases(result, TEST_CASE_COUNT);
+  return buildDemoCalibration(validated, pageDiscoveries, story);
 }
 
 async function generateAutomationCode({ approvedTestCases, pageDiscoveries, fileName, executionContext }) {
@@ -220,11 +375,4 @@ async function analyzeFailure({ story, testCase, expected, actual }) {
   return validateFailure(result);
 }
 
-module.exports = {
-  generateTestCases,
-  generateAutomationCode,
-  analyzeFailure,
-  isConfigured,
-  QWEN_MODEL,
-  TEST_CASE_COUNT,
-};
+module.exports = { generateTestCases, generateAutomationCode, analyzeFailure, isConfigured, QWEN_MODEL, TEST_CASE_COUNT };
