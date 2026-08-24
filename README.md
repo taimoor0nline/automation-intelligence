@@ -163,7 +163,7 @@ CYPRESS_HEADED=true
 ```text
 automation-intelligence/
 ├── automation/                 Cypress project and generated specs
-├── chat-ui/                    AI TestPilot browser UI
+├── testpilot-ui/               AI TestPilot browser UI
 ├── demo-app/                   Login + feedback target application
 └── server/
     ├── data/sessionStore.js    In-memory run state
