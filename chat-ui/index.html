@@ -6,20 +6,20 @@
 <title>AI TestPilot</title>
 <style>
 :root{--bg:#f6f8fb;--panel:#fff;--border:#e5e9f1;--text:#10141c;--muted:#6b7385;--blue:#2f5bff;--blue2:#1f46d8;--green:#15803d;--greenbg:#dcfce7;--red:#b91c1c;--redbg:#fee2e2;--amber:#b45309;--amberbg:#fef3c7;--shadow:0 1px 2px rgba(16,20,28,.04),0 8px 24px rgba(16,20,28,.04)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;font-size:14px}button,input,textarea,select{font:inherit}header{height:68px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 26px;position:sticky;top:0;z-index:5}.brand{display:flex;gap:11px;align-items:center}.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--blue),#7794ff);display:grid;place-items:center;color:#fff;font-weight:800}.brand strong{display:block;font-size:16px}.brand span{font-size:11px;color:var(--muted)}.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;padding:7px 11px;border:1px solid var(--border);border-radius:999px}.dot{width:8px;height:8px;border-radius:50%;background:#9ca3af}.dot.ok{background:#16a34a}.dot.bad{background:#dc2626}.wrap{max-width:1450px;margin:0 auto;padding:22px}.grid{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}.panel{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}.pad{padding:18px}.panel h2{font-size:15px;margin:0}.sub{font-size:12px;color:var(--muted);line-height:1.45;margin-top:5px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.pill{font-size:11px;padding:4px 8px;border-radius:999px;background:#eef2ff;color:var(--blue);font-weight:700}.field{margin-top:13px}.field label{display:block;margin-bottom:6px;color:#4b5563;font-size:12px;font-weight:700}.field small{display:block;color:var(--muted);margin-top:5px;font-size:10.5px}.field input,.field textarea,.field select{width:100%;border:1px solid var(--border);border-radius:9px;padding:10px 11px;background:#fff}.field textarea{min-height:150px;resize:vertical;line-height:1.5}.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px #eaf0ff}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btn{border:0;border-radius:9px;padding:11px 14px;font-weight:700;cursor:pointer}.btn.primary{width:100%;background:var(--blue);color:#fff;margin-top:16px}.btn.primary:hover{background:var(--blue2)}.btn.secondary{background:#fff;color:var(--blue);border:1px solid var(--blue)}.btn:disabled{opacity:.55;cursor:not-allowed}.workflow{display:grid;grid-template-columns:1.15fr .85fr;gap:18px}.cases{max-height:660px;overflow:auto}.case{display:grid;grid-template-columns:24px 1fr;gap:9px;padding:12px 0;border-bottom:1px solid #eef1f6}.case:last-child{border-bottom:0}.case input{margin-top:3px}.case-title{font-weight:700;font-size:13px;line-height:1.4}.case-meta{display:flex;gap:7px;align-items:center;margin-top:6px;font-size:10.5px;color:var(--muted)}.tag{padding:2px 6px;border-radius:5px;background:#f2f4f8}.expected{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45}.empty{padding:50px 16px;text-align:center;color:var(--muted);font-size:12px}.runbar{display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid var(--border)}.runbar .btn{margin-left:auto}.run-state{font-size:12px;color:var(--muted)}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metric{border:1px solid var(--border);border-radius:11px;padding:14px}.metric .n{font-size:25px;font-weight:800}.metric .l{font-size:11px;color:var(--muted);margin-top:4px}.results{margin-top:14px;max-height:430px;overflow:auto}.result{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #eef1f6}.result-title{font-size:12px;line-height:1.4}.badge{font-size:10px;font-weight:800;padding:4px 7px;border-radius:999px;height:max-content}.badge.pass{background:var(--greenbg);color:var(--green)}.badge.fail{background:var(--redbg);color:var(--red)}.analysis{margin-top:14px}.analysis-item{border:1px solid #fde2e2;background:#fffafa;border-radius:10px;padding:10px;margin-top:8px}.analysis-item strong{font-size:11px;color:var(--red)}.analysis-item p{font-size:11.5px;color:var(--muted);line-height:1.45;margin:5px 0 0}.report{display:none;margin-top:14px}.report a{display:block;text-align:center;text-decoration:none;background:#111827;color:#fff;padding:11px;border-radius:9px;font-weight:700}.notice{background:var(--amberbg);color:var(--amber);border-radius:9px;padding:10px 11px;font-size:11.5px;line-height:1.4;margin-top:12px}.errorbox{display:none;background:var(--redbg);color:var(--red);border-radius:9px;padding:10px;margin-top:12px;font-size:12px;white-space:pre-wrap}.errorbox.show{display:block}@media(max-width:1100px){.grid,.workflow{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,1fr)}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;font-size:14px}button,input,textarea,select{font:inherit}header{height:68px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 26px;position:sticky;top:0;z-index:5}.brand{display:flex;gap:11px;align-items:center}.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--blue),#7794ff);display:grid;place-items:center;color:#fff;font-weight:800}.brand strong{display:block;font-size:16px}.brand span{font-size:11px;color:var(--muted)}.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;padding:7px 11px;border:1px solid var(--border);border-radius:999px}.dot{width:8px;height:8px;border-radius:50%;background:#9ca3af}.dot.ok{background:#16a34a}.dot.bad{background:#dc2626}.wrap{max-width:1500px;margin:0 auto;padding:22px}.grid{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}.panel{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}.pad{padding:18px}.panel h2{font-size:15px;margin:0}.sub{font-size:12px;color:var(--muted);line-height:1.45;margin-top:5px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.section-actions{display:flex;align-items:center;gap:8px}.pill{font-size:11px;padding:4px 8px;border-radius:999px;background:#eef2ff;color:var(--blue);font-weight:700}.field{margin-top:13px}.field label{display:block;margin-bottom:6px;color:#4b5563;font-size:12px;font-weight:700}.field small{display:block;color:var(--muted);margin-top:5px;font-size:10.5px}.field input,.field textarea,.field select{width:100%;border:1px solid var(--border);border-radius:9px;padding:10px 11px;background:#fff}.field textarea{min-height:130px;resize:vertical;line-height:1.5}.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px #eaf0ff}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btn{border:0;border-radius:9px;padding:10px 13px;font-weight:700;cursor:pointer}.btn.primary{width:100%;background:var(--blue);color:#fff;margin-top:16px}.btn.primary:hover{background:var(--blue2)}.btn.secondary{background:#fff;color:var(--blue);border:1px solid var(--blue)}.btn.ghost{background:#f7f8fb;color:#374151;border:1px solid var(--border);padding:7px 9px;font-size:11px}.btn.danger{color:var(--red)}.btn:disabled{opacity:.55;cursor:not-allowed}.workflow{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.cases{max-height:680px;overflow:auto}.case{display:grid;grid-template-columns:24px 1fr auto;gap:9px;padding:13px 0;border-bottom:1px solid #eef1f6}.case:last-child{border-bottom:0}.case-check{margin-top:4px}.case-title{font-weight:700;font-size:13px;line-height:1.4}.case-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:10.5px;color:var(--muted)}.tag{padding:2px 6px;border-radius:5px;background:#f2f4f8}.tag.human{background:#ecfdf5;color:#047857}.expected{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45}.case-actions{display:flex;gap:5px;align-items:start}.empty{padding:50px 16px;text-align:center;color:var(--muted);font-size:12px}.runbar{display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid var(--border)}.runbar .btn:last-child{margin-left:auto}.run-state{font-size:12px;color:var(--muted)}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metric{border:1px solid var(--border);border-radius:11px;padding:14px}.metric .n{font-size:25px;font-weight:800}.metric .l{font-size:11px;color:var(--muted);margin-top:4px}.results{margin-top:14px;max-height:430px;overflow:auto}.result{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #eef1f6}.result-title{font-size:12px;line-height:1.4}.badge{font-size:10px;font-weight:800;padding:4px 7px;border-radius:999px;height:max-content}.badge.pass{background:var(--greenbg);color:var(--green)}.badge.fail{background:var(--redbg);color:var(--red)}.analysis{margin-top:14px}.analysis-item{border:1px solid #fde2e2;background:#fffafa;border-radius:10px;padding:10px;margin-top:8px}.analysis-item strong{font-size:11px;color:var(--red)}.analysis-item p{font-size:11.5px;color:var(--muted);line-height:1.45;margin:5px 0 0}.report{display:none;margin-top:14px}.report a{display:block;text-align:center;text-decoration:none;background:#111827;color:#fff;padding:11px;border-radius:9px;font-weight:700}.notice{background:var(--amberbg);color:var(--amber);border-radius:9px;padding:10px 11px;font-size:11.5px;line-height:1.4;margin-top:12px}.errorbox{display:none;background:var(--redbg);color:var(--red);border-radius:9px;padding:10px;margin-top:12px;font-size:12px;white-space:pre-wrap}.errorbox.show{display:block}.modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.48);z-index:50;align-items:center;justify-content:center;padding:18px}.modal.show{display:flex}.modal-card{width:min(720px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:14px;border:1px solid var(--border);box-shadow:0 30px 70px rgba(15,23,42,.2);padding:20px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.modal .field textarea{min-height:90px}.human-note{padding:9px 11px;border-radius:9px;background:#eef2ff;color:#334155;font-size:11.5px;margin-bottom:10px}@media(max-width:1100px){.grid,.workflow{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><div class="logo">AI</div><div><strong>AI TestPilot</strong><span>User Story → Qwen → Cypress → Analytics</span></div></div>
+  <div class="brand"><div class="logo">AI</div><div><strong>AI TestPilot</strong><span>User Story → Qwen → Human Review → Cypress → Analytics</span></div></div>
   <div class="status"><span id="healthDot" class="dot"></span><span id="healthText">Checking backend…</span></div>
 </header>
 <div class="wrap">
   <div class="grid">
     <aside class="panel pad">
-      <div class="section-head"><div><h2>1. Define the journey</h2><div class="sub">The credentials stay in memory and are injected into Cypress. They are not sent to Qwen.</div></div></div>
+      <div class="section-head"><div><h2>1. Define the journey</h2><div class="sub">Credentials stay in memory and are injected into Cypress. They are not sent to Qwen.</div></div></div>
       <div class="field"><label>Target URL</label><input id="targetUrl" value="http://localhost:4000/"></div>
-      <div class="field"><label>Additional page paths</label><input id="additionalPaths" value="/feedback"><small>Comma-separated pages that Qwen may use in the journey.</small></div>
+      <div class="field"><label>Additional page paths</label><input id="additionalPaths" value="/feedback"><small>For this demo, provide known same-origin pages that Qwen may use in the journey.</small></div>
       <div class="two">
         <div class="field"><label>Environment</label><select id="environment"><option>Development</option><option selected>Test</option><option>UAT</option></select></div>
         <div class="field"><label>Username</label><input id="username" value="admin" autocomplete="off"></div>
@@ -27,19 +27,23 @@
       <div class="field"><label>Password</label><input id="password" type="password" value="admin123" autocomplete="off"></div>
       <div class="field"><label>Business user story</label><textarea id="story">As a customer, I should be able to log in with valid credentials and submit feedback. Username and password are required. The feedback form must validate required fields, email format, age boundaries, website URL format and show a confirmation after successful submission.</textarea></div>
       <button id="generateBtn" class="btn primary">Generate AI Test Cases</button>
-      <div class="notice">For the demo, keep Chrome visible. Clicking <b>Run Approved Tests</b> will launch Cypress in a real Chrome window.</div>
+      <div class="notice">Human-in-the-loop is enabled: after Qwen generates cases, you can edit, delete, add, select or exclude cases before Cypress code is generated.</div>
       <div id="errorBox" class="errorbox"></div>
     </aside>
 
     <main class="workflow">
       <section class="panel">
-        <div class="pad section-head"><div><h2>2. AI-generated test cases</h2><div class="sub" id="caseSubtitle">Enter a story and generate cases.</div></div><span id="caseCount" class="pill">0</span></div>
+        <div class="pad section-head">
+          <div><h2>2. Review test cases</h2><div class="sub" id="caseSubtitle">Enter a story and generate cases.</div></div>
+          <div class="section-actions"><button id="addCaseBtn" class="btn ghost" disabled>+ Add Test Case</button><span id="caseCount" class="pill">0</span></div>
+        </div>
+        <div class="human-note" style="margin:0 18px 8px">AI proposes the test set. A human can change it before execution. Cypress is generated only from the final approved version.</div>
         <div id="cases" class="pad cases"><div class="empty">No test cases generated yet.</div></div>
         <div class="runbar"><span id="runHint" class="run-state">Review and select the cases you want to execute.</span><button id="runBtn" class="btn secondary" disabled>Run Approved Tests</button></div>
       </section>
 
       <section class="panel pad">
-        <div class="section-head"><div><h2>3. Execution & analytics</h2><div class="sub">Cypress runs the AI-generated spec; Qwen then explains failures.</div></div><span id="runStatus" class="pill">Idle</span></div>
+        <div class="section-head"><div><h2>3. Execution & analytics</h2><div class="sub">Cypress runs the reviewed cases; Qwen then explains failures.</div></div><span id="runStatus" class="pill">Idle</span></div>
         <div class="metric-grid">
           <div class="metric"><div id="mTotal" class="n">0</div><div class="l">Tests</div></div>
           <div class="metric"><div id="mPassed" class="n" style="color:var(--green)">0</div><div class="l">Passed</div></div>
@@ -53,20 +57,41 @@
     </main>
   </div>
 </div>
+
+<div id="editorModal" class="modal">
+  <div class="modal-card">
+    <div class="section-head"><div><h2 id="editorHeading">Edit Test Case</h2><div class="sub">Modify the AI proposal or define your own test case.</div></div><button id="closeEditorBtn" class="btn ghost">Close</button></div>
+    <input id="editIndex" type="hidden" value="-1">
+    <div class="field"><label>Test Case ID</label><input id="editId" readonly></div>
+    <div class="field"><label>Title</label><input id="editTitle"></div>
+    <div class="two">
+      <div class="field"><label>Type</label><select id="editType"><option>positive</option><option>negative</option><option>boundary</option><option>functional</option><option>custom</option></select></div>
+      <div class="field"><label>Priority</label><select id="editPriority"><option>low</option><option selected>medium</option><option>high</option></select></div>
+    </div>
+    <div class="field"><label>Preconditions</label><textarea id="editPreconditions" placeholder="One precondition per line"></textarea></div>
+    <div class="field"><label>Steps</label><textarea id="editSteps" placeholder="One step per line. Example: Enter valid username | username field | admin"></textarea><small>Format: action | target | value. Target/value are optional.</small></div>
+    <div class="field"><label>Expected Results</label><textarea id="editExpected" placeholder="One expected result per line"></textarea></div>
+    <div class="modal-actions"><button id="cancelEditorBtn" class="btn ghost">Cancel</button><button id="saveEditorBtn" class="btn secondary">Save Test Case</button></div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 let sessionId = null;
 let testCases = [];
+let humanCounter = 1;
 
 function escapeHtml(value){ const d=document.createElement('div'); d.textContent=String(value??''); return d.innerHTML; }
 function showError(message){ $('errorBox').textContent=message; $('errorBox').classList.add('show'); }
 function clearError(){ $('errorBox').classList.remove('show'); $('errorBox').textContent=''; }
 function setBusy(button,busy,text){ button.disabled=busy; button.dataset.oldText ||= button.textContent; button.textContent=busy?text:button.dataset.oldText; }
+function lines(value){ return String(value||'').split(/\r?\n/).map(v=>v.trim()).filter(Boolean); }
+function stepToLine(step){ return [step?.action||'',step?.target||'',step?.value??''].join(' | ').replace(/\s+\|\s+\|\s*$/,'').replace(/\s+\|\s*$/,''); }
+function parseStep(line){ const parts=String(line).split('|').map(v=>v.trim()); return {action:parts[0]||'',target:parts[1]||'',value:parts.length>2&&parts[2]!==''?parts.slice(2).join(' | '):null}; }
 
 async function checkHealth(){
   try{
-    const r=await fetch('/health'); const data=await r.json();
-    if(!r.ok) throw new Error();
+    const r=await fetch('/health'); const data=await r.json(); if(!r.ok) throw new Error();
     $('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');
     $('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured';
   }catch{ $('healthDot').className='dot bad'; $('healthText').textContent='Backend unavailable'; }
@@ -75,32 +100,77 @@ checkHealth();
 
 function renderCases(){
   $('caseCount').textContent=testCases.length;
+  $('addCaseBtn').disabled=!sessionId;
   if(!testCases.length){ $('cases').innerHTML='<div class="empty">No test cases returned.</div>'; return; }
   $('cases').innerHTML=testCases.map((tc,i)=>{
     const expected=(tc.expectedResults||[]).slice(0,2).join(' · ');
-    return `<label class="case"><input class="case-check" type="checkbox" value="${escapeHtml(tc.id)}" checked><div><div class="case-title">${escapeHtml(tc.id)} — ${escapeHtml(tc.title)}</div><div class="case-meta"><span class="tag">${escapeHtml(tc.type)}</span><span class="tag">${escapeHtml(tc.priority)}</span><span>${(tc.steps||[]).length} steps</span></div>${expected?`<div class="expected">Expected: ${escapeHtml(expected)}</div>`:''}</div></label>`;
+    const source=(tc.source||'ai').toLowerCase();
+    return `<div class="case"><input class="case-check" type="checkbox" value="${escapeHtml(tc.id)}" checked><div><div class="case-title">${escapeHtml(tc.id)} — ${escapeHtml(tc.title)}</div><div class="case-meta"><span class="tag">${escapeHtml(tc.type||'functional')}</span><span class="tag">${escapeHtml(tc.priority||'medium')}</span><span class="tag ${source==='human'?'human':''}">${source==='human'?'Human':'AI / Reviewed'}</span><span>${(tc.steps||[]).length} steps</span></div>${expected?`<div class="expected">Expected: ${escapeHtml(expected)}</div>`:''}</div><div class="case-actions"><button class="btn ghost" onclick="openEditor(${i})">Edit</button><button class="btn ghost danger" onclick="deleteCase(${i})">Delete</button></div></div>`;
   }).join('');
 }
+
+function nextHumanId(){
+  let id;
+  do{ id=`TC-H${String(humanCounter++).padStart(3,'0')}`; }while(testCases.some(tc=>tc.id===id));
+  return id;
+}
+
+function openEditor(index){
+  const isNew=index<0;
+  const tc=isNew?{id:nextHumanId(),title:'',type:'functional',priority:'medium',preconditions:[],steps:[],expectedResults:[],source:'human'}:testCases[index];
+  $('editIndex').value=String(index);
+  $('editorHeading').textContent=isNew?'Add Human Test Case':'Edit Test Case';
+  $('editId').value=tc.id;
+  $('editTitle').value=tc.title||'';
+  $('editType').value=tc.type||'functional';
+  $('editPriority').value=tc.priority||'medium';
+  $('editPreconditions').value=(tc.preconditions||[]).join('\n');
+  $('editSteps').value=(tc.steps||[]).map(stepToLine).join('\n');
+  $('editExpected').value=(tc.expectedResults||[]).join('\n');
+  $('editorModal').classList.add('show');
+  setTimeout(()=>$('editTitle').focus(),20);
+}
+window.openEditor=openEditor;
+
+function closeEditor(){ $('editorModal').classList.remove('show'); }
+$('closeEditorBtn').onclick=closeEditor; $('cancelEditorBtn').onclick=closeEditor;
+$('editorModal').addEventListener('click',(e)=>{ if(e.target===$('editorModal')) closeEditor(); });
+
+$('saveEditorBtn').addEventListener('click',()=>{
+  const index=Number($('editIndex').value);
+  const title=$('editTitle').value.trim(); if(!title){ alert('Title is required.'); return; }
+  const existing=index>=0?testCases[index]:null;
+  const tc={
+    id:$('editId').value,
+    title,
+    type:$('editType').value,
+    priority:$('editPriority').value,
+    preconditions:lines($('editPreconditions').value),
+    testData:existing?.testData||{},
+    steps:lines($('editSteps').value).map(parseStep),
+    expectedResults:lines($('editExpected').value),
+    source:index<0?'human':(existing?.source==='human'?'human':'ai-reviewed')
+  };
+  if(index<0) testCases.push(tc); else testCases[index]=tc;
+  renderCases(); closeEditor();
+});
+
+function deleteCase(index){ if(confirm(`Remove ${testCases[index].id} from this run?`)){ testCases.splice(index,1); renderCases(); } }
+window.deleteCase=deleteCase;
+$('addCaseBtn').addEventListener('click',()=>openEditor(-1));
 
 $('generateBtn').addEventListener('click', async()=>{
   clearError();
   const targetUrl=$('targetUrl').value.trim(); const story=$('story').value.trim();
   if(!targetUrl || !story){ showError('Target URL and business story are required.'); return; }
   sessionId='run-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
-  testCases=[]; renderCases(); $('runBtn').disabled=true; $('runStatus').textContent='Generating'; $('reportBox').style.display='none'; $('analysis').innerHTML=''; $('results').innerHTML='<div class="empty">Waiting for execution.</div>';
+  humanCounter=1; testCases=[]; renderCases(); $('runBtn').disabled=true; $('runStatus').textContent='Generating'; $('reportBox').style.display='none'; $('analysis').innerHTML=''; $('results').innerHTML='<div class="empty">Waiting for execution.</div>';
   setBusy($('generateBtn'),true,'Discovering pages & asking Qwen…');
   try{
     const paths=$('additionalPaths').value.split(',').map(v=>v.trim()).filter(Boolean);
-    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      sessionId,
-      message:story,
-      targetUrl,
-      additionalPaths:paths,
-      environment:$('environment').value,
-      credentials:{username:$('username').value,password:$('password').value}
-    })});
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,message:story,targetUrl,additionalPaths:paths,environment:$('environment').value,credentials:{username:$('username').value,password:$('password').value}})});
     const data=await r.json(); if(!r.ok) throw new Error(data.reply||'Generation failed.');
-    testCases=data.testCases||[]; renderCases();
+    testCases=(data.testCases||[]).map(tc=>({...tc,source:tc.source||'ai'})); renderCases();
     $('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`;
     $('runBtn').disabled=!testCases.length; $('runStatus').textContent='Ready';
   }catch(err){ showError(err.message); $('runStatus').textContent='Error'; }
@@ -113,7 +183,7 @@ $('runBtn').addEventListener('click', async()=>{
   if(!approved.length){ showError('Select at least one test case.'); return; }
   setBusy($('runBtn'),true,'Running in Chrome…'); $('runStatus').textContent='Running'; $('results').innerHTML='<div class="empty">Cypress is running. Watch the Chrome window that opens automatically.</div>'; $('analysis').innerHTML=''; $('reportBox').style.display='none';
   try{
-    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,message:`approve ${approved.join(',')}`})});
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,message:'approve reviewed cases',approvedIds:approved,reviewedTestCases:testCases})});
     const data=await r.json(); if(!r.ok) throw new Error(data.reply||'Execution failed.');
     renderResults(data.summary,data.failureAnalyses||[]);
     if(data.reportUrl){ $('reportLink').href=data.reportUrl; $('reportBox').style.display='block'; }
