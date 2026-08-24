@@ -18,6 +18,7 @@ function createSession() {
     generatedScript: null,
     lastResults: null,
     failureAnalyses: [],
+    artifacts: null,
     reportHtml: null,
   };
 }
