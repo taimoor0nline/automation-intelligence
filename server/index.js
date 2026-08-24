@@ -12,8 +12,11 @@ const PORT = process.env.SERVER_PORT || 5000;
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
-app.use(chatRoutes);
+
+// The optimized run router intercepts only approved execution requests and
+// calls next() for normal story/test-case generation requests.
 app.use(runRoutes);
+app.use(chatRoutes);
 
 app.get("/health", (req, res) => {
   res.json({
