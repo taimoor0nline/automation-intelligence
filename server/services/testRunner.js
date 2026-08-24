@@ -7,14 +7,6 @@ const VIDEO_DIR = path.join(AUTOMATION_DIR, "cypress", "videos");
 const SCREENSHOT_DIR = path.join(AUTOMATION_DIR, "cypress", "screenshots");
 const TEST_ID_REGEX = /TC(?:\d{3}|-H\d{3})/i;
 
-function writeSpec(fileName, script) {
-  if (!fs.existsSync(SPEC_DIR)) fs.mkdirSync(SPEC_DIR, { recursive: true });
-  const safeName = path.basename(fileName || "ai-generated.cy.js");
-  const specPath = path.join(SPEC_DIR, safeName);
-  fs.writeFileSync(specPath, script, "utf8");
-  return { specPath, safeName };
-}
-
 function boolEnv(value, fallback) {
   if (value == null || value === "") return fallback;
   return !["false", "0", "no", "off"].includes(String(value).toLowerCase());
@@ -25,8 +17,27 @@ function numberEnv(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function tcIdFromText(value) {
+  return String(value || "").match(TEST_ID_REGEX)?.[0]?.toUpperCase() || null;
+}
+
+function clearGeneratedSpecs() {
+  fs.rmSync(SPEC_DIR, { recursive: true, force: true });
+  fs.mkdirSync(SPEC_DIR, { recursive: true });
+}
+
+function writeSpecs(generatedSpecs) {
+  clearGeneratedSpecs();
+  return generatedSpecs.map((spec, index) => {
+    const testCaseId = String(spec.testCaseId || tcIdFromText(spec.fileName) || `TC-H${String(index + 1).padStart(3, "0")}`).toUpperCase();
+    const safeName = path.basename(spec.fileName || `${testCaseId}.cy.js`);
+    const specPath = path.join(SPEC_DIR, safeName);
+    fs.writeFileSync(specPath, spec.script, "utf8");
+    return { ...spec, testCaseId, safeName, specPath };
+  });
+}
+
 function removeOldArtifacts() {
-  // The demo always generates one active spec, so clear stale run evidence before a new run.
   fs.rmSync(VIDEO_DIR, { recursive: true, force: true });
   fs.rmSync(SCREENSHOT_DIR, { recursive: true, force: true });
 }
@@ -42,49 +53,54 @@ async function loadCypress() {
   }
 }
 
-function tcIdFromText(value) {
-  return String(value || "").match(TEST_ID_REGEX)?.[0]?.toUpperCase() || null;
-}
-
 function summarize(result) {
   if (!result || typeof result.totalTests !== "number") {
     return { summary: null, diagnostic: "Cypress returned an unexpected result shape.", artifacts: null };
   }
 
-  const run = result.runs?.[0];
-  if (!run) return { summary: null, diagnostic: "Cypress completed without run details.", artifacts: null };
+  const runs = Array.isArray(result.runs) ? result.runs : [];
+  if (!runs.length) return { summary: null, diagnostic: "Cypress completed without run details.", artifacts: null };
 
-  const screenshotEntries = (run.screenshots || [])
-    .filter((item) => item?.path && fs.existsSync(item.path))
-    .map((item) => ({
-      path: path.resolve(item.path),
-      testCaseId: tcIdFromText(`${item.path} ${item.name || ""}`),
-    }));
+  const tests = [];
+  const videosByTestCase = {};
+  const screenshotsByTestCase = {};
 
-  const videoPath = run.video && fs.existsSync(run.video) ? path.resolve(run.video) : null;
+  for (const run of runs) {
+    const runSpecText = `${run.spec?.name || ""} ${run.spec?.relative || ""} ${run.spec?.absolute || ""}`;
+    const runTestCaseId = tcIdFromText(runSpecText);
+    const videoPath = run.video && fs.existsSync(run.video) ? path.resolve(run.video) : null;
+    if (runTestCaseId && videoPath) videosByTestCase[runTestCaseId] = videoPath;
 
-  const tests = (run.tests || []).map((test) => {
-    const attempt = test.attempts?.[test.attempts.length - 1] || {};
-    const title = Array.isArray(test.title) ? test.title.join(" ") : test.title;
-    const testCaseId = tcIdFromText(title);
-    const screenshot = testCaseId
-      ? screenshotEntries.find((item) => item.testCaseId === testCaseId)
-      : null;
+    const screenshotEntries = (run.screenshots || [])
+      .filter((item) => item?.path && fs.existsSync(item.path))
+      .map((item) => ({
+        path: path.resolve(item.path),
+        testCaseId: tcIdFromText(`${item.path} ${item.name || ""}`) || runTestCaseId,
+      }));
 
-    return {
-      title,
-      testCaseId,
-      pass: test.state === "passed",
-      fail: test.state === "failed",
-      state: test.state,
-      durationMs: attempt.wallClockDuration ?? null,
-      err: test.displayError ? { message: test.displayError } : null,
-      evidence: {
-        videoAvailable: Boolean(videoPath),
-        screenshotAvailable: Boolean(screenshot?.path),
-      },
-    };
-  });
+    for (const item of screenshotEntries) {
+      if (item.testCaseId) screenshotsByTestCase[item.testCaseId] = item.path;
+    }
+
+    for (const test of run.tests || []) {
+      const attempt = test.attempts?.[test.attempts.length - 1] || {};
+      const title = Array.isArray(test.title) ? test.title.join(" ") : test.title;
+      const testCaseId = tcIdFromText(title) || runTestCaseId;
+      tests.push({
+        title,
+        testCaseId,
+        pass: test.state === "passed",
+        fail: test.state === "failed",
+        state: test.state,
+        durationMs: attempt.wallClockDuration ?? null,
+        err: test.displayError ? { message: test.displayError } : null,
+        evidence: {
+          videoAvailable: Boolean(testCaseId && videosByTestCase[testCaseId]),
+          screenshotAvailable: Boolean(testCaseId && screenshotsByTestCase[testCaseId]),
+        },
+      });
+    }
+  }
 
   return {
     summary: {
@@ -94,23 +110,19 @@ function summarize(result) {
       pending: result.totalPending || 0,
       skipped: result.totalSkipped || 0,
       durationMs: result.totalDuration || null,
-      browser: run.browser?.displayName || run.browser?.name || null,
+      browser: runs[0]?.browser?.displayName || runs[0]?.browser?.name || null,
       tests,
     },
     artifacts: {
-      videoPath,
-      screenshotsByTestCase: Object.fromEntries(
-        screenshotEntries
-          .filter((item) => item.testCaseId)
-          .map((item) => [item.testCaseId, item.path])
-      ),
+      videosByTestCase,
+      screenshotsByTestCase,
     },
     diagnostic: null,
   };
 }
 
-async function executeGeneratedTest({ fileName, script }, executionContext = {}) {
-  const { specPath, safeName } = writeSpec(fileName, script);
+async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
+  const writtenSpecs = writeSpecs(generatedSpecs);
 
   try {
     const cypress = await loadCypress();
@@ -124,13 +136,14 @@ async function executeGeneratedTest({ fileName, script }, executionContext = {})
     removeOldArtifacts();
 
     console.log(
-      `[test-runner] Running ${safeName} in ${browser} (${headed ? "headed" : "headless"})` +
+      `[test-runner] Running ${writtenSpecs.length} Cypress test-case spec(s) in ${browser} (${headed ? "headed" : "headless"})` +
       (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
     );
 
+    const specPattern = path.join(SPEC_DIR, "*.cy.js").replace(/\\/g, "/");
     const result = await cypress.run({
       project: AUTOMATION_DIR,
-      spec: specPath,
+      spec: specPattern,
       browser,
       headed,
       env: {
@@ -146,11 +159,23 @@ async function executeGeneratedTest({ fileName, script }, executionContext = {})
     });
 
     const { summary, diagnostic, artifacts } = summarize(result);
-    return { specPath, ok: Boolean(summary), summary, artifacts, error: diagnostic };
+    return {
+      specPaths: writtenSpecs.map((item) => item.specPath),
+      ok: Boolean(summary),
+      summary,
+      artifacts,
+      error: diagnostic,
+    };
   } catch (err) {
     console.error("[test-runner] Cypress execution failed:", err);
-    return { specPath, ok: false, summary: null, artifacts: null, error: err.message || String(err) };
+    return {
+      specPaths: writtenSpecs.map((item) => item.specPath),
+      ok: false,
+      summary: null,
+      artifacts: null,
+      error: err.message || String(err),
+    };
   }
 }
 
-module.exports = { executeGeneratedTest, SPEC_DIR };
+module.exports = { executeGeneratedTests, SPEC_DIR };
