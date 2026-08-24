@@ -8,7 +8,7 @@
  *   /feedback -> Customer Feedback Form
  *
  * The application intentionally contains two defects
- * so the generated Cypress suite has something real to catch.
+ * so the generated automation suite has something real to catch.
  */
 
 const express = require("express");
