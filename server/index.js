@@ -26,4 +26,5 @@ app.listen(PORT, () => {
   } else {
     console.log(`[ai-testpilot] ⚠️  Using MOCK Qwen (QWEN_API_KEY or QWEN_BASE_URL not set in .env)`);
   }
+  require("./db/database").initDb();
 });

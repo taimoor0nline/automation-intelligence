@@ -5,10 +5,56 @@
  * (label, name, type, testId, required) so Qwen never has to guess
  * selectors from the business story alone.
  *
- * Uses cheerio for lightweight HTML parsing (no headless browser needed
- * for static/server-rendered forms like the demo app).
+ * For each field, also attempts to find its associated error-message
+ * element, using two real, standard techniques — never a hardcoded
+ * naming convention guess:
+ *   1. aria-describedby — the accessibility-standard way a page links an
+ *      input to its error/help text. When present, this is exact, not a guess.
+ *   2. DOM proximity — if no aria-describedby, check nearby sibling elements
+ *      for class/id/testid containing "error".
+ * If neither finds anything, errorElement is null — callers should treat
+ * that as "unknown," not fall back to inventing a pattern.
  */
 const cheerio = require("cheerio");
+
+function findErrorElement($, $el) {
+  // Strategy 1: aria-describedby — accessibility-standard, exact when present.
+  const describedBy = $el.attr("aria-describedby");
+  if (describedBy) {
+    const ids = describedBy.split(/\s+/).filter(Boolean);
+    for (const id of ids) {
+      const $desc = $(`#${id}`);
+      if ($desc.length) {
+        return {
+          testId: $desc.attr("data-testid") || null,
+          id,
+          source: "aria-describedby",
+        };
+      }
+    }
+  }
+
+  // Strategy 2: DOM proximity — check the next couple of sibling elements
+  // for something that looks like an error/validation message.
+  let $sibling = $el.next();
+  let hops = 0;
+  while ($sibling.length && hops < 3) {
+    const cls = ($sibling.attr("class") || "").toLowerCase();
+    const idAttr = ($sibling.attr("id") || "").toLowerCase();
+    const testIdAttr = ($sibling.attr("data-testid") || "").toLowerCase();
+    if (cls.includes("error") || idAttr.includes("error") || testIdAttr.includes("error")) {
+      return {
+        testId: $sibling.attr("data-testid") || null,
+        id: $sibling.attr("id") || null,
+        source: "dom-proximity",
+      };
+    }
+    $sibling = $sibling.next();
+    hops++;
+  }
+
+  return null; // genuinely unknown — do not guess a naming convention here
+}
 
 async function discoverPage(url) {
   const res = await fetch(url);
@@ -34,6 +80,7 @@ async function discoverPage(url) {
       name: $el.attr("name"),
       testId: $el.attr("data-testid") || null,
       required: $el.attr("required") !== undefined || $el.attr("min") !== undefined,
+      errorElement: findErrorElement($, $el),
     });
   });
 
@@ -46,7 +93,10 @@ async function discoverPage(url) {
       const $inp = $(inp);
       const name = $inp.attr("name");
       if (!name) return;
-      groups[name] = groups[name] || { name, type: $inp.attr("type"), label: legend, options: [] };
+      groups[name] = groups[name] || {
+        name, type: $inp.attr("type"), label: legend, options: [],
+        errorElement: findErrorElement($, $fs),
+      };
       const optLabel = $inp.closest("label").text().trim();
       groups[name].options.push({ value: $inp.attr("value"), label: optLabel, testId: $inp.attr("data-testid") || null });
     });
@@ -65,6 +115,7 @@ async function discoverPage(url) {
       name: $el.attr("name"),
       testId: $el.attr("data-testid") || null,
       required: $el.attr("required") !== undefined,
+      errorElement: findErrorElement($, $el),
     });
   });
 

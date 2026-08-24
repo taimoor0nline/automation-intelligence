@@ -6,6 +6,7 @@ const { discoverPage } = require("../services/pageDiscovery");
 const qwen = require("../services/qwenClient");
 const { validateScript } = require("../services/scriptValidator");
 const { executeGeneratedTest } = require("../services/testRunner");
+const db = require("../db/database");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 
@@ -69,6 +70,12 @@ router.post("/api/chat", async (req, res) => {
       session.testCases = result.testCases;
       session.state = "AWAITING_APPROVAL";
 
+      // Persist the run + generated test cases (no-op if DB isn't configured).
+      session.dbRunId = await db.saveRun({
+        sessionId, story: message, targetUrl: url, environment: "UAT",
+      });
+      await db.saveTestCases(session.dbRunId, session.testCases);
+
       return res.json({
         reply:
           `Discovered **${session.pageDiscovery.elements.length} controls** on ${url}.\n\n` +
@@ -92,7 +99,7 @@ router.post("/api/chat", async (req, res) => {
           const existingCustomCount = session.testCases.filter((t) => t.custom).length;
           const id = c.id && /^TC-C\d+$/.test(c.id) ? c.id : `TC-C${existingCustomCount + i + 1}`;
           if (session.testCases.some((t) => t.id === id)) return; // already merged
-          session.testCases.push({
+          const newCase = {
             id,
             title: c.title || `Custom check: ${c.action.fieldTestId || c.action.fieldName}`,
             type: "custom",
@@ -101,7 +108,9 @@ router.post("/api/chat", async (req, res) => {
             action: c.action,
             assertion: c.assertion || {},
             expectedResults: c.assertion?.message ? [c.assertion.message] : [],
-          });
+          };
+          session.testCases.push(newCase);
+          db.saveTestCases(session.dbRunId, [newCase]).catch(() => {}); // fire-and-forget, non-blocking
         });
       }
 
@@ -144,6 +153,8 @@ router.post("/api/chat", async (req, res) => {
       session.lastResults = { execResult, summary };
       session.state = "DONE";
 
+      if (summary) await db.saveResults(session.dbRunId, summary.tests);
+
       if (!execResult.ok || !summary) {
         return res.json({
           reply:
@@ -176,6 +187,8 @@ router.post("/api/chat", async (req, res) => {
           analyses
             .map((a) => `  • **${a.testCase}** [${a.classification}] — ${a.summary} (confidence ${Math.round(a.confidence * 100)}%)`)
             .join("\n");
+
+        await db.saveFailureAnalyses(session.dbRunId, analyses);
       }
 
       return res.json({
@@ -199,7 +212,7 @@ router.post("/api/chat", async (req, res) => {
       });
     }
 
-    return res.json({ reply: "Unexpected state — resetting session." });
+    return res.json({ reply: "Unexpected state — resetting session.", });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ reply: `Error: ${err.message}` });

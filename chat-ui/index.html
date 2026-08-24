@@ -491,25 +491,67 @@ function getDiscoveredFields() {
   );
 }
 
+/* ============================================================
+   NEW: dynamic "Value to enter" placeholder helper.
+   Guesses a sensible example value based on the selected
+   field's label/name and its underlying input type, instead
+   of the old hardcoded "e.g. 17" that showed for every field.
+   ============================================================ */
+function guessValuePlaceholder(label, type) {
+  const l = (label || "").toLowerCase();
+  const t = (type || "").toLowerCase();
+
+  if (t === "email" || l.includes("email")) return "e.g. jane.doe@example.com";
+  if (t === "url" || l.includes("website") || l.includes("url")) return "e.g. https://example.com";
+  if (t === "tel" || l.includes("phone") || l.includes("contact number")) return "e.g. +1 555 123 4567";
+  if (l.includes("age")) return "e.g. 25";
+  if (l.includes("rating") || l.includes("score")) return "e.g. 4";
+  if (l.includes("name")) return "e.g. Jane Doe";
+  if (l.includes("message") || l.includes("feedback") || l.includes("comment")) return "e.g. Great experience overall!";
+  if (t === "number") return "e.g. 10";
+  if (t === "checkbox" || t === "radio") return "e.g. true or false";
+  return "Enter a value for this field";
+}
+
 function renderAddForm() {
   const fields = getDiscoveredFields();
   const fieldOptions = fields.map(f =>
-    `<option value="${f.testId || f.name}" data-tag="${f.tag}" data-type="${f.type || ""}">${escapeHtml(f.label || f.name || f.testId)}</option>`
+    `<option value="${f.testId || f.name}" data-tag="${f.tag}" data-type="${f.type || ""}" data-error-testid="${f.errorElement?.testId || ""}" data-error-source="${f.errorElement?.source || ""}">${escapeHtml(f.label || f.name || f.testId)}</option>`
   ).join("");
 
   $("addFormWrap").innerHTML = `
     <div class="add-form">
       <div class="add-form-title">+ Add Custom Test Case</div>
 
-      <label>Field ${fields.length === 0 ? "(none discovered — generate test cases first)" : ""}</label>
-      <select id="af-field" ${fields.length === 0 ? "disabled" : ""}>
-        ${fields.length ? fieldOptions : `<option>No fields discovered</option>`}
-      </select>
+      <div id="af-field-mode-picker">
+        <label>Field ${fields.length === 0 ? "(none discovered automatically)" : ""}</label>
+        <select id="af-field" ${fields.length === 0 ? "disabled" : ""}>
+          ${fields.length ? fieldOptions : `<option>No fields discovered</option>`}
+        </select>
+        <div class="field-hint">
+          <a href="#" id="af-manual-toggle" style="color:var(--blue);">Can't find your field? Enter it manually →</a>
+        </div>
+      </div>
+
+      <div id="af-manual-fields" style="display:none;">
+        <label>Field testId or name <span style="font-weight:400;color:var(--text-faint)">(from the page's HTML)</span></label>
+        <input type="text" id="af-manual-selector" placeholder="e.g. age or data-testid value" />
+        <label>Field type</label>
+        <select id="af-manual-type">
+          <option value="type">Text/number input (type a value)</option>
+          <option value="select">Dropdown (select an option)</option>
+          <option value="check">Checkbox/radio (check it)</option>
+        </select>
+        <div class="field-hint">
+          <a href="#" id="af-auto-toggle" style="color:var(--blue);">← Back to discovered fields</a>
+        </div>
+      </div>
 
       <div class="add-form-row">
         <div>
           <label>Value to enter</label>
-          <input type="text" id="af-value" placeholder="e.g. 17" />
+          <!-- placeholder is now set dynamically by updateValuePlaceholder() -->
+          <input type="text" id="af-value" placeholder="" />
         </div>
         <div>
           <label>Priority</label>
@@ -526,7 +568,7 @@ function renderAddForm() {
 
       <label>Error/message text <span style="font-weight:400;color:var(--text-faint)">(optional but recommended)</span></label>
       <input type="text" id="af-message" placeholder="e.g. Age must be between 18 and 100." />
-      <div class="field-hint">For "error" checks, assumes the error element uses the pattern <code>&lt;field&gt;-error</code> (matches this project's convention).</div>
+      <div class="field-hint" id="af-error-target-hint"></div>
 
       <div class="add-form-actions">
         <button class="add-form-save" id="af-save">Add to list</button>
@@ -537,20 +579,87 @@ function renderAddForm() {
 
   $("af-cancel").addEventListener("click", () => { $("addFormWrap").innerHTML = ""; });
 
-  $("af-save").addEventListener("click", () => {
+  let manualMode = fields.length === 0; // if nothing discovered, start in manual mode automatically
+  function applyMode() {
+    $("af-field-mode-picker").style.display = manualMode ? "none" : "block";
+    $("af-manual-fields").style.display = manualMode ? "block" : "none";
+    updateErrorTargetHint();
+    updateValuePlaceholder();
+  }
+  $("af-manual-toggle")?.addEventListener("click", (e) => { e.preventDefault(); manualMode = true; applyMode(); });
+  $("af-auto-toggle")?.addEventListener("click", (e) => { e.preventDefault(); manualMode = false; applyMode(); });
+
+  function updateErrorTargetHint() {
+    const hint = $("af-error-target-hint");
+    if (manualMode) {
+      hint.innerHTML = `⚠ Manually entered fields have no automatically-detected error element. The check will look for your message text anywhere on the page — fill in "Error/message text" above for this to work reliably.`;
+      hint.style.color = "var(--amber)";
+      return;
+    }
     const fieldSelect = $("af-field");
     if (!fieldSelect || fieldSelect.disabled) return;
-    const selectedOpt = fieldSelect.options[fieldSelect.selectedIndex];
-    const fieldTestId = selectedOpt.value;
-    const fieldTag = selectedOpt.dataset.tag;
-    const fieldType = selectedOpt.dataset.type;
-    const label = selectedOpt.textContent;
+    const opt = fieldSelect.options[fieldSelect.selectedIndex];
+    const errTestId = opt.dataset.errorTestid;
+    const errSource = opt.dataset.errorSource;
+    if (errTestId) {
+      hint.innerHTML = `✓ Found error element on the page: <code>${escapeHtml(errTestId)}</code> (detected via ${errSource === "aria-describedby" ? "aria-describedby" : "DOM proximity"}) — will be used automatically.`;
+      hint.style.color = "var(--green)";
+    } else {
+      hint.innerHTML = `⚠ No error element found automatically near this field. The check will instead look for your message text anywhere on the page — fill in "Error/message text" above for this to work reliably.`;
+      hint.style.color = "var(--amber)";
+    }
+  }
+
+  /* NEW: updates the "Value to enter" placeholder based on the
+     currently selected field (auto mode) or the manual selector
+     text + manual type (manual mode). */
+  function updateValuePlaceholder() {
+    const valueInput = $("af-value");
+    if (!valueInput) return;
+
+    if (manualMode) {
+      const type = $("af-manual-type")?.value || "";
+      valueInput.placeholder = guessValuePlaceholder($("af-manual-selector")?.value, type);
+      return;
+    }
+
+    const fieldSelect = $("af-field");
+    if (!fieldSelect || fieldSelect.disabled) return;
+    const opt = fieldSelect.options[fieldSelect.selectedIndex];
+    valueInput.placeholder = guessValuePlaceholder(opt.textContent, opt.dataset.type || opt.dataset.tag);
+  }
+
+  $("af-field")?.addEventListener("change", () => { updateErrorTargetHint(); updateValuePlaceholder(); });
+  $("af-kind")?.addEventListener("change", updateErrorTargetHint);
+  $("af-manual-selector")?.addEventListener("input", updateValuePlaceholder);
+  $("af-manual-type")?.addEventListener("change", updateValuePlaceholder);
+  applyMode();
+
+  $("af-save").addEventListener("click", () => {
+    let fieldTestId, fieldTag, fieldType, discoveredErrorTestId, label, actionType;
+
+    if (manualMode) {
+      fieldTestId = $("af-manual-selector").value.trim();
+      if (!fieldTestId) { alert("Please enter a field testId or name."); return; }
+      actionType = $("af-manual-type").value;
+      discoveredErrorTestId = null;
+      label = fieldTestId;
+    } else {
+      const fieldSelect = $("af-field");
+      if (!fieldSelect || fieldSelect.disabled) return;
+      const selectedOpt = fieldSelect.options[fieldSelect.selectedIndex];
+      fieldTestId = selectedOpt.value;
+      fieldTag = selectedOpt.dataset.tag;
+      fieldType = selectedOpt.dataset.type;
+      discoveredErrorTestId = selectedOpt.dataset.errorTestid || null;
+      label = selectedOpt.textContent;
+      actionType = fieldTag === "select" ? "select" : (fieldType === "checkbox" || fieldType === "radio") ? "check" : "type";
+    }
+
     const value = $("af-value").value.trim();
     const priority = $("af-priority").value;
     const kind = $("af-kind").value;
     const message = $("af-message").value.trim();
-
-    const actionType = fieldTag === "select" ? "select" : (fieldType === "checkbox" || fieldType === "radio") ? "check" : "type";
 
     customCounter++;
     const id = `TC-C${customCounter}`;
@@ -561,7 +670,10 @@ function renderAddForm() {
       action: { fieldTestId, type: actionType, value },
       assertion: {
         kind,
-        targetTestId: kind !== "successVisible" ? `${fieldTestId}-error` : undefined,
+        // Uses the REAL error element Page Discovery found on the page.
+        // Only falls back to undefined (never a guessed name) if none was found —
+        // the Cypress generator then falls back to a text-content search instead.
+        targetTestId: kind !== "successVisible" ? (discoveredErrorTestId || undefined) : undefined,
         message: message || undefined,
       },
     });

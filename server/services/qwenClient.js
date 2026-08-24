@@ -126,6 +126,59 @@ function validateFailureAnalysisResponse(result) {
   return result;
 }
 
+// ---------- Deterministic relevance filter ----------
+// The prompt asks the AI to scope results to what the story mentions, but
+// LLMs follow instructions with high probability, not certainty. This is a
+// second, deterministic layer behind the prompt: strip out any test case
+// whose title doesn't relate to a word actually in the story, so a narrow
+// request like "check the age" can't come back with unrelated feedback/email
+// cases even if the AI over-generates. Real code, not another AI call —
+// instant, free, and always behaves the same way.
+const STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "for", "is", "are", "in", "on",
+  "check", "test", "validate", "validation", "please", "should", "that",
+  "this", "with", "field", "fields", "only", "all", "must", "be", "it",
+]);
+
+function extractKeywords(story) {
+  return (story || "")
+    .toLowerCase()
+    .replace(/https?:\/\/[^\s]+/g, " ") // strip URLs so they never leak in as false keywords
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+}
+
+function looksLikeBaseline(title) {
+  const t = title.toLowerCase();
+  return /valid information|all valid|empty form|completely empty|valid data/.test(t);
+}
+
+function filterRelevantTestCases(result, story) {
+  const keywords = extractKeywords(story);
+  if (keywords.length === 0) return result; // broad/unspecific story — keep everything, nothing to scope to
+
+  const relevant = [];
+  const baseline = [];
+
+  result.testCases.forEach((tc) => {
+    const titleLower = tc.title.toLowerCase();
+    if (keywords.some((k) => titleLower.includes(k))) {
+      relevant.push(tc);
+    } else if (looksLikeBaseline(titleLower) && baseline.length < 2) {
+      baseline.push(tc);
+    }
+    // else: dropped — didn't match the story and isn't a baseline sanity check
+  });
+
+  // Safety net: if filtering would remove everything (e.g. keywords too
+  // unusual to match any title text), fall back to the original unfiltered
+  // list rather than showing the user nothing.
+  if (relevant.length === 0 && baseline.length === 0) return result;
+
+  return { ...result, testCases: [...baseline, ...relevant] };
+}
+
 const SYSTEM_PROMPTS = {
   TEST_ANALYST_V1: `You are a senior QA test analyst. Given a business story, acceptance
 criteria, and a page-control inventory, produce 15-25 structured test cases covering
@@ -156,7 +209,8 @@ async function generateTestCases({ story, acceptanceCriteria, pageDiscovery, env
     const result = await callQwenReal(SYSTEM_PROMPTS.TEST_ANALYST_V1, {
       story, acceptanceCriteria, pageDiscovery, environment, priority,
     });
-    return validateTestCasesResponse(result);
+    const validated = validateTestCasesResponse(result);
+    return filterRelevantTestCases(validated, story);
   }
   return mockGenerateTestCases({ story, acceptanceCriteria, pageDiscovery });
 }
