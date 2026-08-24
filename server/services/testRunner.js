@@ -30,11 +30,24 @@ function clearGeneratedSpecs() {
 function writeSpecs(generatedSpecs) {
   clearGeneratedSpecs();
   return generatedSpecs.map((spec, index) => {
-    const testCaseId = String(spec.testCaseId || tcIdFromText(spec.fileName) || `TC-H${String(index + 1).padStart(3, "0")}`).toUpperCase();
+    const testCaseId = String(
+      spec.testCaseId || tcIdFromText(spec.fileName) || `TC-H${String(index + 1).padStart(3, "0")}`
+    ).toUpperCase();
     const safeName = path.basename(spec.fileName || `${testCaseId}.cy.js`);
     const specPath = path.join(SPEC_DIR, safeName);
     fs.writeFileSync(specPath, spec.script, "utf8");
-    return { ...spec, testCaseId, safeName, specPath };
+
+    if (!fs.existsSync(specPath)) {
+      throw new Error(`Generated automation spec was not written: ${specPath}`);
+    }
+
+    return {
+      ...spec,
+      testCaseId,
+      safeName,
+      specPath,
+      relativeSpecPath: path.relative(AUTOMATION_DIR, specPath).replace(/\\/g, "/"),
+    };
   });
 }
 
@@ -70,13 +83,28 @@ function resolveDurationMs(test, attempt, run) {
   return null;
 }
 
+function engineFailureMessage(result) {
+  if (!result) return "Automation engine returned no result.";
+  if (typeof result.message === "string" && result.message.trim()) return result.message.trim();
+  if (typeof result.error === "string" && result.error.trim()) return result.error.trim();
+  if (result.status === "failed") {
+    const failures = Number(result.failures);
+    return Number.isFinite(failures)
+      ? `Automation engine failed before test execution (${failures} failure${failures === 1 ? "" : "s"}).`
+      : "Automation engine failed before test execution.";
+  }
+  return `Automation engine returned an unexpected result shape (keys: ${Object.keys(result).join(", ") || "none"}).`;
+}
+
 function summarize(result) {
   if (!result || typeof result.totalTests !== "number") {
-    return { summary: null, diagnostic: "Automation engine returned an unexpected result shape.", artifacts: null };
+    return { summary: null, diagnostic: engineFailureMessage(result), artifacts: null };
   }
 
   const runs = Array.isArray(result.runs) ? result.runs : [];
-  if (!runs.length) return { summary: null, diagnostic: "Automation completed without run details.", artifacts: null };
+  if (!runs.length) {
+    return { summary: null, diagnostic: "Automation completed without run details.", artifacts: null };
+  }
 
   const tests = [];
   const videosByTestCase = {};
@@ -138,10 +166,61 @@ function summarize(result) {
   };
 }
 
+function mergeRunSummaries(parts) {
+  const tests = [];
+  const videosByTestCase = {};
+  const screenshotsByTestCase = {};
+  let total = 0;
+  let passed = 0;
+  let failed = 0;
+  let pending = 0;
+  let skipped = 0;
+  let durationMs = 0;
+  let hasDuration = false;
+  let browser = null;
+
+  for (const part of parts) {
+    const summary = part.summary;
+    total += summary.total || 0;
+    passed += summary.passed || 0;
+    failed += summary.failed || 0;
+    pending += summary.pending || 0;
+    skipped += summary.skipped || 0;
+    tests.push(...(summary.tests || []));
+    browser ||= summary.browser || null;
+
+    if (Number.isFinite(Number(summary.durationMs))) {
+      durationMs += Number(summary.durationMs);
+      hasDuration = true;
+    }
+
+    Object.assign(videosByTestCase, part.artifacts?.videosByTestCase || {});
+    Object.assign(screenshotsByTestCase, part.artifacts?.screenshotsByTestCase || {});
+  }
+
+  return {
+    summary: {
+      total,
+      passed,
+      failed,
+      pending,
+      skipped,
+      durationMs: hasDuration ? Math.round(durationMs) : null,
+      browser,
+      tests,
+    },
+    artifacts: {
+      videosByTestCase,
+      screenshotsByTestCase,
+    },
+  };
+}
+
 async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
-  const writtenSpecs = writeSpecs(generatedSpecs);
+  let writtenSpecs = [];
 
   try {
+    writtenSpecs = writeSpecs(generatedSpecs);
     const automationEngine = await loadAutomationEngine();
     const headed = boolEnv(process.env.AUTOMATION_HEADED, true);
     const browser = process.env.AUTOMATION_BROWSER || "chrome";
@@ -153,38 +232,58 @@ async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
     removeOldArtifacts();
 
     console.log(
-      `[test-runner] Running ${writtenSpecs.length} test case(s) in ${browser} (${headed ? "headed" : "headless"})` +
+      `[test-runner] Running ${writtenSpecs.length} test case(s) independently in ${browser} (${headed ? "headed" : "headless"})` +
       (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
     );
 
-    const specPattern = path.join(SPEC_DIR, "*.cy.js").replace(/\\/g, "/");
-    const result = await automationEngine.run({
-      project: AUTOMATION_DIR,
-      configFile: ENGINE_CONFIG,
-      spec: specPattern,
-      browser,
-      headed,
-      env: {
-        TEST_USERNAME: executionContext.credentials?.username || "",
-        TEST_PASSWORD: executionContext.credentials?.password || "",
-        DEMO_STEP_DELAY_MS: demoStepDelayMs,
-      },
-      config: {
-        baseUrl,
-        video,
-        screenshotOnRunFailure,
-        videosFolder: "artifacts/videos",
-        screenshotsFolder: "artifacts/screenshots",
-      },
-    });
+    const completedParts = [];
 
-    const { summary, diagnostic, artifacts } = summarize(result);
+    // Run one concrete relative spec path at a time. This is more reliable on Windows
+    // than passing an absolute wildcard glob and also guarantees one recording per case.
+    for (const spec of writtenSpecs) {
+      console.log(`[test-runner] ${spec.testCaseId}: ${spec.relativeSpecPath}`);
+
+      const result = await automationEngine.run({
+        project: AUTOMATION_DIR,
+        configFile: ENGINE_CONFIG,
+        spec: spec.relativeSpecPath,
+        browser,
+        headed,
+        env: {
+          TEST_USERNAME: executionContext.credentials?.username || "",
+          TEST_PASSWORD: executionContext.credentials?.password || "",
+          DEMO_STEP_DELAY_MS: demoStepDelayMs,
+        },
+        config: {
+          baseUrl,
+          video,
+          screenshotOnRunFailure,
+          videosFolder: "artifacts/videos",
+          screenshotsFolder: "artifacts/screenshots",
+        },
+      });
+
+      const part = summarize(result);
+      if (!part.summary) {
+        return {
+          specPaths: writtenSpecs.map((item) => item.specPath),
+          ok: false,
+          summary: null,
+          artifacts: null,
+          error: `${spec.testCaseId} could not execute: ${part.diagnostic}`,
+        };
+      }
+
+      completedParts.push(part);
+    }
+
+    const merged = mergeRunSummaries(completedParts);
     return {
       specPaths: writtenSpecs.map((item) => item.specPath),
-      ok: Boolean(summary),
-      summary,
-      artifacts,
-      error: diagnostic,
+      ok: true,
+      summary: merged.summary,
+      artifacts: merged.artifacts,
+      error: null,
     };
   } catch (err) {
     console.error("[test-runner] Automation execution failed:", err);
