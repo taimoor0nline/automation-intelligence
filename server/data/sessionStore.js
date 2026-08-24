@@ -1,23 +1,29 @@
 /**
- * In-memory session store (PoC only — swap for Redis/DB in production).
- * Tracks the chat-driven pipeline state per session:
- * IDLE -> AWAITING_APPROVAL -> RUNNING -> DONE
+ * In-memory demo session store.
+ * Nothing is persisted to a database. Restarting the Node process clears runs.
  */
 const sessions = new Map();
 
+function createSession() {
+  return {
+    state: "IDLE",
+    story: null,
+    targetUrl: null,
+    environment: null,
+    additionalPaths: [],
+    credentials: null,
+    pageDiscoveries: [],
+    testCases: [],
+    approvedIds: [],
+    generatedScript: null,
+    lastResults: null,
+    failureAnalyses: [],
+    reportHtml: null,
+  };
+}
+
 function getSession(id) {
-  if (!sessions.has(id)) {
-    sessions.set(id, {
-      state: "IDLE",
-      story: null,
-      targetUrl: null,
-      pageDiscovery: null,
-      testCases: [],
-      approvedIds: [],
-      generatedScript: null,
-      lastResults: null,
-    });
-  }
+  if (!sessions.has(id)) sessions.set(id, createSession());
   return sessions.get(id);
 }
 

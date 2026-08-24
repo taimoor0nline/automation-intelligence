@@ -1,151 +1,155 @@
-/**
- * Page Discovery Service
- * -----------------------
- * Visits the target URL and builds a compact inventory of form controls
- * (label, name, type, testId, required) so Qwen never has to guess
- * selectors from the business story alone.
- *
- * For each field, also attempts to find its associated error-message
- * element, using two real, standard techniques — never a hardcoded
- * naming convention guess:
- *   1. aria-describedby — the accessibility-standard way a page links an
- *      input to its error/help text. When present, this is exact, not a guess.
- *   2. DOM proximity — if no aria-describedby, check nearby sibling elements
- *      for class/id/testid containing "error".
- * If neither finds anything, errorElement is null — callers should treat
- * that as "unknown," not fall back to inventing a pattern.
- */
 const cheerio = require("cheerio");
 
+function labelFor($, id) {
+  if (!id) return null;
+  let text = null;
+  $("label").each((_, label) => {
+    if (text) return;
+    const $label = $(label);
+    if ($label.attr("for") === id) text = $label.text().trim();
+  });
+  return text;
+}
+
 function findErrorElement($, $el) {
-  // Strategy 1: aria-describedby — accessibility-standard, exact when present.
-  const describedBy = $el.attr("aria-describedby");
-  if (describedBy) {
-    const ids = describedBy.split(/\s+/).filter(Boolean);
-    for (const id of ids) {
-      const $desc = $(`#${id}`);
-      if ($desc.length) {
-        return {
-          testId: $desc.attr("data-testid") || null,
-          id,
-          source: "aria-describedby",
-        };
-      }
+  const describedBy = ($el.attr("aria-describedby") || "").split(/\s+/).filter(Boolean);
+  for (const id of describedBy) {
+    const $candidate = $(`#${id}`);
+    if ($candidate.length) {
+      return {
+        id,
+        testId: $candidate.attr("data-testid") || null,
+        text: $candidate.text().trim() || null,
+        source: "aria-describedby",
+      };
     }
   }
 
-  // Strategy 2: DOM proximity — check the next couple of sibling elements
-  // for something that looks like an error/validation message.
-  let $sibling = $el.next();
-  let hops = 0;
-  while ($sibling.length && hops < 3) {
-    const cls = ($sibling.attr("class") || "").toLowerCase();
-    const idAttr = ($sibling.attr("id") || "").toLowerCase();
-    const testIdAttr = ($sibling.attr("data-testid") || "").toLowerCase();
-    if (cls.includes("error") || idAttr.includes("error") || testIdAttr.includes("error")) {
+  let $candidate = $el.next();
+  for (let i = 0; i < 4 && $candidate.length; i += 1) {
+    const signature = [
+      $candidate.attr("class"),
+      $candidate.attr("id"),
+      $candidate.attr("data-testid"),
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (signature.includes("error") || signature.includes("validation")) {
       return {
-        testId: $sibling.attr("data-testid") || null,
-        id: $sibling.attr("id") || null,
+        id: $candidate.attr("id") || null,
+        testId: $candidate.attr("data-testid") || null,
+        text: $candidate.text().trim() || null,
         source: "dom-proximity",
       };
     }
-    $sibling = $sibling.next();
-    hops++;
+    $candidate = $candidate.next();
   }
+  return null;
+}
 
-  return null; // genuinely unknown — do not guess a naming convention here
+function controlSelector($el) {
+  if ($el.attr("data-testid")) return `[data-testid="${$el.attr("data-testid")}"]`;
+  if ($el.attr("id")) return `#${$el.attr("id")}`;
+  if ($el.attr("name")) return `[name="${$el.attr("name")}"]`;
+  return null;
 }
 
 async function discoverPage(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok) throw new Error(`Failed to fetch ${url}: HTTP ${res.status}`);
+
   const html = await res.text();
   const $ = cheerio.load(html);
-
   const elements = [];
-
-  const labelFor = (id) => $(`label[for="${id}"]`).first().text().trim() || null;
-  const legendFor = ($fieldset) => $fieldset.find("legend").first().text().trim() || null;
 
   $("input, select, textarea").each((_, el) => {
     const $el = $(el);
-    const tag = el.tagName.toLowerCase();
+    const tag = String(el.tagName || "").toLowerCase();
     const type = $el.attr("type") || (tag === "select" ? "select" : tag === "textarea" ? "textarea" : "text");
-    if (type === "radio" || type === "checkbox") return; // grouped separately below
-    const id = $el.attr("id");
+    const id = $el.attr("id") || null;
     const entry = {
       tag,
       type,
-      label: (id && labelFor(id)) || $el.attr("placeholder") || $el.attr("name"),
-      name: $el.attr("name"),
+      id,
+      name: $el.attr("name") || null,
       testId: $el.attr("data-testid") || null,
-      required: $el.attr("required") !== undefined || $el.attr("min") !== undefined,
+      selector: controlSelector($el),
+      label: labelFor($, id) || $el.closest("label").text().trim() || $el.attr("placeholder") || $el.attr("name") || null,
+      placeholder: $el.attr("placeholder") || null,
+      required: $el.attr("required") !== undefined,
+      min: $el.attr("min") || null,
+      max: $el.attr("max") || null,
+      minlength: $el.attr("minlength") || null,
+      maxlength: $el.attr("maxlength") || null,
       errorElement: findErrorElement($, $el),
     };
-    // FIX: for <select> elements, also capture the real <option> values so
-    // the AI can only ever choose from options that genuinely exist on the
-    // page, instead of inventing plausible-sounding category names (e.g.
-    // "Feature Request" / "Bug Report" that don't actually exist).
+
     if (tag === "select") {
-      entry.options = $el.find("option").map((__, opt) => {
-        const $opt = $(opt);
-        return { value: $opt.attr("value") ?? "", label: $opt.text().trim() };
+      entry.options = $el.find("option").map((__, option) => {
+        const $option = $(option);
+        return { value: $option.attr("value") ?? "", label: $option.text().trim() };
       }).get();
     }
+
+    if (type === "radio" || type === "checkbox") {
+      entry.value = $el.attr("value") || null;
+      entry.checked = $el.attr("checked") !== undefined;
+    }
+
     elements.push(entry);
-  });
-
-  // Radio / checkbox groups (grouped by `name`, inside a <fieldset>)
-  const groups = {};
-  $("fieldset").each((_, fs) => {
-    const $fs = $(fs);
-    const legend = legendFor($fs);
-    $fs.find('input[type="radio"], input[type="checkbox"]').each((__, inp) => {
-      const $inp = $(inp);
-      const name = $inp.attr("name");
-      if (!name) return;
-      groups[name] = groups[name] || {
-        name, type: $inp.attr("type"), label: legend, options: [],
-        errorElement: findErrorElement($, $fs),
-      };
-      const optLabel = $inp.closest("label").text().trim();
-      groups[name].options.push({ value: $inp.attr("value"), label: optLabel, testId: $inp.attr("data-testid") || null });
-    });
-  });
-  Object.values(groups).forEach((g) => elements.push({ tag: "input-group", ...g }));
-
-  // Standalone consent/newsletter-style checkboxes (not in a fieldset group)
-  $('input[type="checkbox"]').each((_, el) => {
-    const $el = $(el);
-    if (groups[$el.attr("name")]) return;
-    const id = $el.attr("id");
-    elements.push({
-      tag: "input",
-      type: "checkbox",
-      label: (id && labelFor(id)) || $el.closest("label").text().trim(),
-      name: $el.attr("name"),
-      testId: $el.attr("data-testid") || null,
-      required: $el.attr("required") !== undefined,
-      errorElement: findErrorElement($, $el),
-    });
   });
 
   $("button").each((_, el) => {
     const $el = $(el);
     elements.push({
       tag: "button",
-      role: "button",
-      text: $el.text().trim(),
+      type: $el.attr("type") || "submit",
+      id: $el.attr("id") || null,
       testId: $el.attr("data-testid") || null,
-      submitType: $el.attr("type") || "submit",
+      selector: controlSelector($el),
+      text: $el.text().trim(),
     });
   });
 
+  $("a[href]").each((_, el) => {
+    const $el = $(el);
+    elements.push({
+      tag: "a",
+      href: $el.attr("href"),
+      id: $el.attr("id") || null,
+      testId: $el.attr("data-testid") || null,
+      selector: controlSelector($el),
+      text: $el.text().trim(),
+    });
+  });
+
+  // Assertion targets are discovered separately so the model can see
+  // validation/success elements even when their runtime text is initially empty.
+  const messages = [];
+  $("[role='alert'], .error, .success, .success-panel").each((_, el) => {
+    const $el = $(el);
+    const item = {
+      tag: String(el.tagName || "").toLowerCase(),
+      id: $el.attr("id") || null,
+      testId: $el.attr("data-testid") || null,
+      text: $el.text().replace(/\s+/g, " ").trim() || null,
+      hidden: $el.attr("hidden") !== undefined,
+    };
+    if (item.id || item.testId || item.text) messages.push(item);
+  });
+
   return {
-    pageTitle: $("title").text().trim() || $("h1").first().text().trim(),
     url,
+    finalUrl: res.url || url,
+    pageTitle: $("title").text().trim() || $("h1").first().text().trim() || url,
     elements,
+    messages,
   };
 }
 
-module.exports = { discoverPage };
+async function discoverPages(urls) {
+  const unique = [...new Set((urls || []).filter(Boolean))];
+  const pages = [];
+  for (const url of unique) pages.push(await discoverPage(url));
+  return pages;
+}
+
+module.exports = { discoverPage, discoverPages };

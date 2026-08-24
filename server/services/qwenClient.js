@@ -1,29 +1,39 @@
-/**
- * Qwen Client
- * -----------
- * Thin wrapper around Alibaba Cloud Model Studio (Qwen), OpenAI-compatible mode.
- *
- * Set QWEN_API_KEY + QWEN_BASE_URL + QWEN_MODEL in .env to hit the real API.
- * With no key configured, every method falls back to a deterministic mock.
- *
- * IMPORTANT: this file is the ONLY place that should ever call the Qwen API.
- * Never call it from the frontend / chat-ui.
- */
-const USE_REAL_QWEN = Boolean(process.env.QWEN_API_KEY && process.env.QWEN_BASE_URL);
-const QWEN_MODEL = process.env.QWEN_MODEL || "qwen-plus";
-const REQUEST_TIMEOUT_MS = 60000;
-const MAX_RETRIES = 1; // one retry on transient (5xx/network) failure only
+const QWEN_MODEL = process.env.QWEN_MODEL || "qwen3.7-flash";
+const REQUEST_TIMEOUT_MS = 90000;
+const MAX_RETRIES = 1;
 
-const { mockGenerateTestCases } = require("./mock/mockTestCases");
-const { mockGenerateCypressCode } = require("./mock/mockCypressCode");
-const { mockAnalyzeFailure } = require("./mock/mockFailureAnalysis");
+function isConfigured() {
+  return Boolean(process.env.QWEN_API_KEY && process.env.QWEN_BASE_URL);
+}
 
-async function callQwenReal(systemPrompt, userPayload, attempt = 0) {
+function ensureConfigured() {
+  if (!isConfigured()) {
+    throw new Error("Qwen is not configured. Set QWEN_API_KEY and QWEN_BASE_URL in your local .env file.");
+  }
+}
+
+function parseJsonContent(raw) {
+  const cleaned = String(raw || "")
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new Error("Qwen returned invalid JSON. Retry the generation.");
+  }
+}
+
+async function callQwen(systemPrompt, userPayload, attempt = 0) {
+  ensureConfigured();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${process.env.QWEN_BASE_URL}/chat/completions`, {
+    const endpoint = `${process.env.QWEN_BASE_URL.replace(/\/$/, "")}/chat/completions`;
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -36,42 +46,28 @@ async function callQwenReal(systemPrompt, userPayload, attempt = 0) {
           { role: "user", content: JSON.stringify(userPayload) },
         ],
         response_format: { type: "json_object" },
+        temperature: 0.1,
       }),
       signal: controller.signal,
     });
 
     if (!res.ok) {
-      const bodyText = await res.text().catch(() => "");
-      // Retry once on server-side/transient errors; never retry on 4xx (bad key, bad request).
-      if (res.status >= 500 && attempt < MAX_RETRIES) {
-        return callQwenReal(systemPrompt, userPayload, attempt + 1);
-      }
+      const body = await res.text().catch(() => "");
+      if (res.status >= 500 && attempt < MAX_RETRIES) return callQwen(systemPrompt, userPayload, attempt + 1);
       if (res.status === 401 || res.status === 403) {
-        throw new Error(
-          `Qwen API auth error (${res.status}). Check QWEN_API_KEY and that QWEN_BASE_URL matches the same ` +
-          `region your key was created in (a Singapore key against a Beijing URL, or vice versa, causes this).`
-        );
+        throw new Error(`Qwen authentication failed (${res.status}). Check the key and Model Studio region/base URL.`);
       }
-      throw new Error(`Qwen API error (${res.status}): ${bodyText.slice(0, 300)}`);
+      throw new Error(`Qwen API error (${res.status}): ${body.slice(0, 400)}`);
     }
 
     const data = await res.json();
     const raw = data.choices?.[0]?.message?.content;
-    if (!raw) {
-      throw new Error("Qwen API returned an empty response — no message content found.");
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new Error("Qwen API response was not valid JSON — the model may not have followed the requested format.");
-    }
-    return parsed;
+    if (!raw) throw new Error("Qwen returned an empty response.");
+    return parseJsonContent(raw);
   } catch (err) {
     if (err.name === "AbortError") {
-      if (attempt < MAX_RETRIES) return callQwenReal(systemPrompt, userPayload, attempt + 1);
-      throw new Error(`Qwen API request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`);
+      if (attempt < MAX_RETRIES) return callQwen(systemPrompt, userPayload, attempt + 1);
+      throw new Error(`Qwen request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`);
     }
     throw err;
   } finally {
@@ -79,201 +75,140 @@ async function callQwenReal(systemPrompt, userPayload, attempt = 0) {
   }
 }
 
-// ---------- Response shape validation ----------
-// The mock always returns a guaranteed shape. Real AI output isn't guaranteed,
-// so we check the essentials before trusting it downstream, and fail loudly
-// (not silently) if something's missing.
+const TEST_ANALYST_PROMPT = `You are a senior QA test analyst.
+Convert the supplied business user story and discovered web-page inventory into a concise set of executable test cases.
 
-function validateTestCasesResponse(result) {
-  if (!result || !Array.isArray(result.testCases)) {
-    throw new Error("Qwen response missing a valid 'testCases' array.");
+Rules:
+- Generate 6-15 cases unless the story genuinely requires more.
+- Cover the story only: positive, negative, validation and important boundary cases.
+- Treat the supplied page inventory as the source of truth. Never invent fields, pages, buttons, selectors, messages or dropdown values.
+- Multi-page journeys are allowed. If the story describes login followed by another page, create end-to-end cases that reflect that flow.
+- Do not include actual passwords or secrets in test data.
+- Each case must be independently understandable and have concrete expected results.
+
+Return JSON only using:
+{
+  "feature": string,
+  "testCases": [
+    {
+      "id": "TC001",
+      "title": string,
+      "type": "positive"|"negative"|"boundary"|"functional",
+      "priority": "low"|"medium"|"high",
+      "preconditions": [string],
+      "testData": object,
+      "steps": [{"action": string, "target": string, "value": string|null}],
+      "expectedResults": [string]
+    }
+  ]
+}`;
+
+const CYPRESS_GENERATOR_PROMPT = `You are a senior Cypress automation engineer.
+Generate a complete Cypress JavaScript spec for ONLY the approved test cases.
+
+STRICT RULES:
+1. Use only selectors, data-testid values, ids, names, messages, option values and URLs that appear in pageDiscoveries.
+2. Never invent a selector or assertion text.
+3. Prefer data-testid, then id, then name.
+4. Use relative paths with cy.visit() when pages share the supplied base URL.
+5. If login credentials are available, NEVER hardcode them. Read them securely with:
+   cy.env(['TEST_USERNAME','TEST_PASSWORD'], { log: false }).then(({ TEST_USERNAME, TEST_PASSWORD }) => { ... })
+   and type them with { log: false }.
+6. Do not send credential values to logs, assertions, screenshots, titles or comments.
+7. For a login journey, use the discovered username/password fields and discovered login button, then assert the discovered destination/page outcome.
+8. Before testing a validation rule on a later form, populate the other required fields with valid values using only discovered controls/options.
+9. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
+10. Assertions must use real discovered elements/messages. If a precise assertion target is unavailable, use a safe URL/visibility assertion that is supported by discovery rather than inventing text.
+11. Every approved test case must map to one it() block whose title begins with its TC id.
+
+Return JSON only:
+{"fileName": string, "framework": "cypress", "language": "javascript", "script": string}`;
+
+const FAILURE_ANALYST_PROMPT = `You are a QA failure analyst.
+Classify a failed automated test using the business story, test case, expected result and actual Cypress error.
+Do not assume the application is wrong: selector/generator mistakes are AUTOMATION_DEFECT, bad input is TEST_DATA_PROBLEM, unreachable systems are ENVIRONMENT_PROBLEM.
+Return JSON only:
+{
+  "summary": string,
+  "classification": "APPLICATION_DEFECT"|"AUTOMATION_DEFECT"|"TEST_DATA_PROBLEM"|"ENVIRONMENT_PROBLEM"|"REQUIREMENT_AMBIGUITY"|"UNKNOWN",
+  "expected": string,
+  "actual": string,
+  "probableCause": string,
+  "severity": "low"|"medium"|"high",
+  "confidence": number
+}`;
+
+function validateTestCases(result) {
+  if (!result || !Array.isArray(result.testCases) || result.testCases.length === 0) {
+    throw new Error("Qwen response did not contain testCases.");
   }
   result.testCases.forEach((tc, i) => {
-    if (!tc.id || !tc.title) {
-      throw new Error(`Qwen test case at index ${i} is missing required 'id' or 'title'.`);
+    if (!tc.id || !tc.title || !Array.isArray(tc.steps) || !Array.isArray(tc.expectedResults)) {
+      throw new Error(`Qwen test case ${i + 1} is missing required fields.`);
+    }
+    if (!/^TC\d{3}$/i.test(tc.id)) {
+      throw new Error(`Qwen test case ${i + 1} has invalid id '${tc.id}'. Expected TC001 style ids.`);
     }
   });
   return result;
 }
 
-function validateCypressCodeResponse(result) {
-  if (!result || typeof result.script !== "string" || result.script.trim().length === 0) {
-    throw new Error("Qwen response missing a valid 'script' string.");
+function validateCypress(result) {
+  if (!result || typeof result.script !== "string" || !result.script.includes("describe(") || !result.script.includes("it(")) {
+    throw new Error("Qwen did not return a valid Cypress spec.");
   }
-  if (!result.script.includes("describe(") || !result.script.includes("it(")) {
-    throw new Error("Qwen-generated script doesn't look like a Cypress spec (missing describe/it blocks).");
-  }
-  if (result.script.length > 200000) {
-    throw new Error("Qwen-generated script is unexpectedly large (>200KB) — refusing to use it.");
-  }
-  return { fileName: result.fileName || "customer-feedback.cy.js", framework: "cypress", language: "javascript", script: result.script };
+  if (result.script.length > 200000) throw new Error("Generated Cypress spec is unexpectedly large.");
+  return {
+    fileName: result.fileName || "ai-generated.cy.js",
+    framework: "cypress",
+    language: "javascript",
+    script: result.script,
+  };
 }
 
-function validateFailureAnalysisResponse(result) {
-  const ALLOWED_CLASSIFICATIONS = [
-    "APPLICATION_DEFECT", "AUTOMATION_DEFECT", "TEST_DATA_PROBLEM",
-    "ENVIRONMENT_PROBLEM", "REQUIREMENT_AMBIGUITY", "UNKNOWN",
-  ];
-  if (!result || typeof result.summary !== "string") {
-    throw new Error("Qwen failure-analysis response missing a valid 'summary' string.");
-  }
-  if (!ALLOWED_CLASSIFICATIONS.includes(result.classification)) {
-    result.classification = "UNKNOWN"; // don't trust an invented classification — fall back safely
-  }
-  if (typeof result.confidence !== "number" || result.confidence < 0 || result.confidence > 1) {
-    result.confidence = 0.5;
-  }
+function validateFailure(result) {
+  const allowed = new Set([
+    "APPLICATION_DEFECT",
+    "AUTOMATION_DEFECT",
+    "TEST_DATA_PROBLEM",
+    "ENVIRONMENT_PROBLEM",
+    "REQUIREMENT_AMBIGUITY",
+    "UNKNOWN",
+  ]);
+  if (!result || typeof result.summary !== "string") throw new Error("Qwen failure analysis was invalid.");
+  if (!allowed.has(result.classification)) result.classification = "UNKNOWN";
+  if (typeof result.confidence !== "number" || result.confidence < 0 || result.confidence > 1) result.confidence = 0.5;
   return result;
 }
 
-// ---------- Deterministic relevance filter ----------
-// The prompt asks the AI to scope results to what the story mentions, but
-// LLMs follow instructions with high probability, not certainty. This is a
-// second, deterministic layer behind the prompt: strip out any test case
-// whose title doesn't relate to a word actually in the story, so a narrow
-// request like "check the age" can't come back with unrelated feedback/email
-// cases even if the AI over-generates. Real code, not another AI call —
-// instant, free, and always behaves the same way.
-const STOPWORDS = new Set([
-  "the", "a", "an", "and", "or", "of", "to", "for", "is", "are", "in", "on",
-  "check", "test", "validate", "validation", "please", "should", "that",
-  "this", "with", "field", "fields", "only", "all", "must", "be", "it",
-]);
-
-function extractKeywords(story) {
-  return (story || "")
-    .toLowerCase()
-    .replace(/https?:\/\/[^\s]+/g, " ") // strip URLs so they never leak in as false keywords
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+async function generateTestCases({ story, pageDiscoveries, environment }) {
+  const result = await callQwen(TEST_ANALYST_PROMPT, { story, pageDiscoveries, environment });
+  return validateTestCases(result);
 }
 
-function looksLikeBaseline(title) {
-  const t = title.toLowerCase();
-  return /valid information|all valid|empty form|completely empty|valid data/.test(t);
-}
-
-function filterRelevantTestCases(result, story) {
-  const keywords = extractKeywords(story);
-  if (keywords.length === 0) return result; // broad/unspecific story — keep everything, nothing to scope to
-
-  const relevant = [];
-  const baseline = [];
-
-  result.testCases.forEach((tc) => {
-    const titleLower = tc.title.toLowerCase();
-    if (keywords.some((k) => titleLower.includes(k))) {
-      relevant.push(tc);
-    } else if (looksLikeBaseline(titleLower) && baseline.length < 2) {
-      baseline.push(tc);
-    }
-    // else: dropped — didn't match the story and isn't a baseline sanity check
+async function generateCypressCode({ approvedTestCases, pageDiscoveries, fileName, executionContext }) {
+  const result = await callQwen(CYPRESS_GENERATOR_PROMPT, {
+    approvedTestCases,
+    pageDiscoveries,
+    fileName,
+    executionContext: {
+      baseUrl: executionContext.baseUrl,
+      hasCredentials: Boolean(executionContext.hasCredentials),
+      credentialKeys: executionContext.hasCredentials ? ["TEST_USERNAME", "TEST_PASSWORD"] : [],
+    },
   });
-
-  // Safety net: if filtering would remove everything (e.g. keywords too
-  // unusual to match any title text), fall back to the original unfiltered
-  // list rather than showing the user nothing.
-  if (relevant.length === 0 && baseline.length === 0) return result;
-
-  return { ...result, testCases: [...baseline, ...relevant] };
+  return validateCypress(result);
 }
 
-const SYSTEM_PROMPTS = {
-  TEST_ANALYST_V1: `You are a senior QA test analyst. Given a business story, acceptance
-criteria, and a page-control inventory, produce 15-25 structured test cases covering
-positive, negative, and boundary scenarios. Return JSON only, matching this schema:
-{"feature": string, "testCases": [{"id": "TC001", "title": string, "type": "positive"|"negative"|"boundary"|"functional",
-"priority": "low"|"medium"|"high", "preconditions": [], "testData": {}, "steps": [{"action": string, "target": string}],
-"expectedResults": [string]}]}. Never invent fields not present in the page-control inventory.`,
-
-  // ============================================================
-  // UPDATED: tightened to stop the AI from inventing cy.contains()
-  // assertion text that never appears on the real page (this was
-  // the root cause of most generated tests failing regardless of
-  // whether the form actually worked).
-  // ============================================================
-  PLAYWRIGHT_GENERATOR_V1: `You are a senior QA automation engineer. Generate Cypress
-JavaScript tests only for the supplied approved test cases, using ONLY the real
-data-testid values present in the supplied page discovery data. Never invent fields,
-buttons, or testids not present in that data.
-
-CRITICAL ASSERTION RULES — read carefully, these are the most common source of bugs:
-1. For a SUCCESS assertion (form submitted successfully), you MUST assert on the
-   real success element's data-testid from page discovery (e.g.
-   cy.get('[data-testid="success-panel"]').should('be.visible')). NEVER use
-   cy.contains() with an invented or paraphrased sentence describing what should
-   happen — only use cy.contains() with text you can see verbatim in the page
-   discovery data or the supplied HTML content itself.
-2. For an ERROR assertion (validation failure), you MUST assert on that specific
-   field's real error element data-testid from page discovery's errorElement data
-   (e.g. cy.get('[data-testid="email-error"]').should('be.visible')). Do NOT use
-   cy.contains() with a made-up description of the error like "Error message for
-   invalid email is displayed" — that text does not exist on the page and the
-   test will always fail.
-3. If page discovery does not provide a testid for the success or error element
-   you need, do not guess one. Instead assert against the element's real id
-   selector if provided, or omit that specific assertion rather than inventing text.
-4. Every test case that submits the form MUST first fill in ALL fields the page
-   discovery data marks as required — not just the field(s) directly relevant to
-   that test's scenario — otherwise unrelated required-field errors will block
-   the test from reaching its actual assertion. Only leave a field empty if the
-   test's specific purpose is to test that field being empty.
-5. When selecting a value from a <select> dropdown, you MUST use only a value
-   or label that literally appears in that field's "options" array from page
-   discovery. Never invent a plausible-sounding option (e.g. do not write
-   cy.get(...).select('Feature Request') unless "Feature Request" is a real
-   entry in that field's options list).
-
-No fixed waits/cy.wait(ms). Never use child_process, eval, Function(), or
-fs.readFile. Return JSON only, matching:
-{"fileName": string, "framework": "cypress", "language": "javascript", "script": string}.
-The script must be a complete, valid Cypress spec file using describe()/it() blocks.`,
-
-  FAILURE_ANALYST_V1: `You are a QA failure analyst. Given a business requirement, the
-test case, expected result, and actual error, classify the failure and explain it in
-plain business language. Return JSON only, matching:
-{"summary": string, "classification": "APPLICATION_DEFECT"|"AUTOMATION_DEFECT"|"TEST_DATA_PROBLEM"|
-"ENVIRONMENT_PROBLEM"|"REQUIREMENT_AMBIGUITY"|"UNKNOWN", "expected": string, "actual": string,
-"probableCause": string, "severity": "low"|"medium"|"high", "confidence": number between 0 and 1}.
-Do NOT automatically classify every failure as an application defect — consider automation and test-data causes too.`,
-};
-
-async function generateTestCases({ story, acceptanceCriteria, pageDiscovery, environment, priority }) {
-  if (USE_REAL_QWEN) {
-    const result = await callQwenReal(SYSTEM_PROMPTS.TEST_ANALYST_V1, {
-      story, acceptanceCriteria, pageDiscovery, environment, priority,
-    });
-    const validated = validateTestCasesResponse(result);
-    return filterRelevantTestCases(validated, story);
-  }
-  return mockGenerateTestCases({ story, acceptanceCriteria, pageDiscovery });
-}
-
-async function generateCypressCode({ approvedTestCases, pageDiscovery, fileName }) {
-  if (USE_REAL_QWEN) {
-    const result = await callQwenReal(SYSTEM_PROMPTS.PLAYWRIGHT_GENERATOR_V1, {
-      approvedTestCases, pageDiscovery, fileName,
-    });
-    return validateCypressCodeResponse(result);
-  }
-  return mockGenerateCypressCode({ approvedTestCases, pageDiscovery, fileName });
-}
-
-async function analyzeFailure({ story, acceptanceCriteria, testCase, expected, actual, consoleErrors }) {
-  if (USE_REAL_QWEN) {
-    const result = await callQwenReal(SYSTEM_PROMPTS.FAILURE_ANALYST_V1, {
-      story, acceptanceCriteria, testCase, expected, actual, consoleErrors,
-    });
-    return validateFailureAnalysisResponse(result);
-  }
-  return mockAnalyzeFailure({ testCase, expected, actual });
+async function analyzeFailure({ story, testCase, expected, actual }) {
+  const result = await callQwen(FAILURE_ANALYST_PROMPT, { story, testCase, expected, actual });
+  return validateFailure(result);
 }
 
 module.exports = {
   generateTestCases,
   generateCypressCode,
   analyzeFailure,
-  isUsingRealQwen: () => USE_REAL_QWEN,
+  isConfigured,
   QWEN_MODEL,
 };

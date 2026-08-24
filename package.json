@@ -1,8 +1,8 @@
 {
   "name": "ai-testpilot-poc",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "AI TestPilot — chat-driven AI test automation PoC (Story -> Qwen -> Cypress -> Execution -> Failure Analysis)",
+  "description": "AI TestPilot demo — User Story -> Qwen Test Cases -> Human Approval -> Cypress -> AI Failure Analysis -> HTML Analytics",
   "scripts": {
     "start:demo-app": "node demo-app/server.js",
     "start:server": "node server/index.js",
@@ -12,8 +12,7 @@
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "pg": "^8.13.0"
+    "express": "^4.19.2"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

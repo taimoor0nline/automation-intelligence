@@ -1,125 +1,115 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Customer Feedback</title>
-<link rel="stylesheet" href="/style.css" />
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <main class="card">
-    <h1>Customer Feedback</h1>
-    <p class="subtitle">We'd love to hear about your experience.</p>
+<main class="card">
+  <h1>Customer Feedback</h1>
+  <p class="subtitle">We'd love to hear about your experience.</p>
 
-    <form id="feedbackForm" novalidate>
-      <div class="field">
-        <label for="fullName">Full Name</label>
-        <input id="fullName" name="fullName" type="text" data-testid="full-name" />
-        <span id="fullName-error" class="error" data-testid="full-name-error"></span>
-      </div>
-
-      <div class="field">
-        <label for="email">Email Address</label>
-        <input id="email" name="email" type="email" data-testid="email" />
-        <span id="email-error" class="error" data-testid="email-error"></span>
-      </div>
-
-      <div class="field">
-        <label for="age">Age</label>
-        <input id="age" name="age" type="number" min="18" max="100" data-testid="age" />
-        <span id="age-error" class="error" data-testid="age-error"></span>
-      </div>
-
-      <div class="field">
-        <label for="website">Website</label>
-        <input id="website" name="website" type="url" data-testid="website" placeholder="https://example.com" />
-        <span id="website-error" class="error" data-testid="website-error"></span>
-      </div>
-
-      <div class="field">
-        <label for="category">Feedback Category</label>
-        <select id="category" name="category" data-testid="feedback-category">
-          <option value="">-- Select Category --</option>
-          <option value="product">Product</option>
-          <option value="service">Service</option>
-          <option value="support">Support</option>
-          <option value="website">Website</option>
-          <option value="billing">Billing</option>
-          <option value="suggestion">Suggestion</option>
-          <option value="complaint">Complaint</option>
-          <option value="other">Other</option>
-        </select>
-        <span id="category-error" class="error" data-testid="category-error"></span>
-      </div>
-
-      <!-- FIX: every radio option now has its own data-testid, so
-           Page Discovery reports a REAL testId instead of null,
-           and the AI never has to guess a selector for these. -->
-      <fieldset class="field">
-        <legend>Preferred Contact Method</legend>
-        <label><input type="radio" name="contactMethod" value="email" data-testid="contact-method-email" /> Email</label>
-        <label><input type="radio" name="contactMethod" value="phone" data-testid="contact-method-phone" /> Phone</label>
-        <label><input type="radio" name="contactMethod" value="whatsapp" data-testid="contact-method-whatsapp" /> WhatsApp</label>
-        <label><input type="radio" name="contactMethod" value="none" data-testid="contact-method-none" /> Do not contact me</label>
-        <span id="contactMethod-error" class="error" data-testid="contact-method-error"></span>
-      </fieldset>
-
-      <!-- FIX: same treatment for the Products Used checkboxes. -->
-      <fieldset class="field">
-        <legend>Products Used</legend>
-        <label><input type="checkbox" name="products" value="web" data-testid="products-web" /> Web Portal</label>
-        <label><input type="checkbox" name="products" value="mobile" data-testid="products-mobile" /> Mobile App</label>
-        <label><input type="checkbox" name="products" value="api" data-testid="products-api" /> API</label>
-        <label><input type="checkbox" name="products" value="support" data-testid="products-support" /> Customer Support</label>
-        <label><input type="checkbox" name="products" value="other" data-testid="products-other" /> Other</label>
-        <span id="products-error" class="error" data-testid="products-error"></span>
-      </fieldset>
-
-      <div class="field">
-        <label for="rating">Satisfaction Rating (1–10)</label>
-        <input id="rating" name="rating" type="number" min="1" max="10" data-testid="rating" />
-        <span id="rating-error" class="error" data-testid="rating-error"></span>
-      </div>
-
-      <div class="field">
-        <label for="subject">Subject</label>
-        <input id="subject" name="subject" type="text" data-testid="subject" />
-        <span id="subject-error" class="error" data-testid="subject-error"></span>
-      </div>
-
-      <div class="field">
-        <label for="feedback">Feedback</label>
-        <textarea id="feedback" name="feedback" maxlength="500" data-testid="feedback-message"></textarea>
-        <span class="counter" id="feedbackCounter">0 / 500</span>
-        <span id="feedback-error" class="error" data-testid="feedback-error"></span>
-      </div>
-
-      <div class="field checkbox-field">
-        <label>
-          <input type="checkbox" id="consent" name="consent" data-testid="consent" />
-          I agree that the company may contact me regarding this feedback.
-        </label>
-        <span id="consent-error" class="error" data-testid="consent-error"></span>
-      </div>
-
-      <div class="field checkbox-field">
-        <label>
-          <input type="checkbox" id="newsletter" name="newsletter" data-testid="newsletter" />
-          Subscribe me to product updates.
-        </label>
-      </div>
-
-      <div class="actions">
-        <button type="submit" data-testid="submit-feedback">Submit Feedback</button>
-        <button type="reset" data-testid="reset-form">Reset Form</button>
-      </div>
-    </form>
-
-    <div id="successPanel" class="success-panel" hidden data-testid="success-panel">
-      <h2>Thank you for your feedback.</h2>
-      <p id="referenceText" data-testid="feedback-reference"></p>
+  <form id="feedbackForm" novalidate>
+    <div class="field">
+      <label for="fullName">Full Name</label>
+      <input id="fullName" name="fullName" type="text" minlength="2" maxlength="80" required data-testid="full-name">
+      <span id="fullName-error" class="error" data-testid="full-name-error"></span>
     </div>
-  </main>
 
-  <script src="/app.js"></script>
+    <div class="field">
+      <label for="email">Email Address</label>
+      <input id="email" name="email" type="email" required data-testid="email">
+      <span id="email-error" class="error" data-testid="email-error"></span>
+    </div>
+
+    <div class="field">
+      <label for="age">Age</label>
+      <input id="age" name="age" type="number" min="18" max="100" required data-testid="age">
+      <span id="age-error" class="error" data-testid="age-error"></span>
+    </div>
+
+    <div class="field">
+      <label for="website">Website</label>
+      <input id="website" name="website" type="url" data-testid="website" placeholder="https://example.com">
+      <span id="website-error" class="error" data-testid="website-error"></span>
+    </div>
+
+    <div class="field">
+      <label for="category">Feedback Category</label>
+      <select id="category" name="category" required data-testid="feedback-category">
+        <option value="">-- Select Category --</option>
+        <option value="product">Product</option>
+        <option value="service">Service</option>
+        <option value="support">Support</option>
+        <option value="website">Website</option>
+        <option value="billing">Billing</option>
+        <option value="suggestion">Suggestion</option>
+        <option value="complaint">Complaint</option>
+        <option value="other">Other</option>
+      </select>
+      <span id="category-error" class="error" data-testid="category-error"></span>
+    </div>
+
+    <fieldset class="field">
+      <legend>Preferred Contact Method</legend>
+      <label><input type="radio" name="contactMethod" value="email" required data-testid="contact-method-email"> Email</label>
+      <label><input type="radio" name="contactMethod" value="phone" data-testid="contact-method-phone"> Phone</label>
+      <label><input type="radio" name="contactMethod" value="whatsapp" data-testid="contact-method-whatsapp"> WhatsApp</label>
+      <label><input type="radio" name="contactMethod" value="none" data-testid="contact-method-none"> Do not contact me</label>
+      <span id="contactMethod-error" class="error" data-testid="contact-method-error"></span>
+    </fieldset>
+
+    <fieldset class="field">
+      <legend>Products Used</legend>
+      <label><input type="checkbox" name="products" value="web" data-testid="products-web"> Web Portal</label>
+      <label><input type="checkbox" name="products" value="mobile" data-testid="products-mobile"> Mobile App</label>
+      <label><input type="checkbox" name="products" value="api" data-testid="products-api"> API</label>
+      <label><input type="checkbox" name="products" value="support" data-testid="products-support"> Customer Support</label>
+      <label><input type="checkbox" name="products" value="other" data-testid="products-other"> Other</label>
+      <span id="products-error" class="error" data-testid="products-error"></span>
+    </fieldset>
+
+    <div class="field">
+      <label for="rating">Satisfaction Rating (1–10)</label>
+      <input id="rating" name="rating" type="number" min="1" max="10" required data-testid="rating">
+      <span id="rating-error" class="error" data-testid="rating-error"></span>
+    </div>
+
+    <div class="field">
+      <label for="subject">Subject</label>
+      <input id="subject" name="subject" type="text" minlength="5" maxlength="100" required data-testid="subject">
+      <span id="subject-error" class="error" data-testid="subject-error"></span>
+    </div>
+
+    <div class="field">
+      <label for="feedback">Feedback</label>
+      <textarea id="feedback" name="feedback" minlength="10" maxlength="500" required data-testid="feedback-message"></textarea>
+      <span class="counter" id="feedbackCounter">0 / 500</span>
+      <span id="feedback-error" class="error" data-testid="feedback-error"></span>
+    </div>
+
+    <div class="field checkbox-field">
+      <label><input type="checkbox" id="consent" name="consent" required data-testid="consent"> I agree that the company may contact me regarding this feedback.</label>
+      <span id="consent-error" class="error" data-testid="consent-error"></span>
+    </div>
+
+    <div class="field checkbox-field">
+      <label><input type="checkbox" id="newsletter" name="newsletter" data-testid="newsletter"> Subscribe me to product updates.</label>
+    </div>
+
+    <div class="actions">
+      <button type="submit" data-testid="submit-feedback">Submit Feedback</button>
+      <button type="reset" data-testid="reset-form">Reset Form</button>
+    </div>
+  </form>
+
+  <div id="successPanel" class="success-panel" hidden data-testid="success-panel">
+    <h2>Thank you for your feedback.</h2>
+    <p id="referenceText" data-testid="feedback-reference"></p>
+  </div>
+</main>
+<script src="/app.js"></script>
 </body>
 </html>
