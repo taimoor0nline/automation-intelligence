@@ -9,6 +9,10 @@ const { executeGeneratedTest } = require("../services/testRunner");
 const { buildAnalyticsReport } = require("../services/reportGenerator");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
+const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
+const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
+const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional", "custom"]);
+const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
 
 function extractUrl(text) {
   const m = String(text || "").match(URL_REGEX);
@@ -35,9 +39,77 @@ function resolveDiscoveryUrls(targetUrl, additionalPaths = []) {
 function parseApproval(text, allIds) {
   const normalized = String(text || "").trim().toLowerCase();
   if (["approve all", "approve", "yes"].includes(normalized)) return allIds;
-  const ids = String(text || "").toUpperCase().match(/TC(?:\d{3}|-C\d+)/g) || [];
+  const ids = String(text || "").toUpperCase().match(TEST_ID_GLOBAL_REGEX) || [];
   if (/reject/i.test(text)) return allIds.filter((id) => !ids.includes(id));
   return ids.length ? ids : null;
+}
+
+function cleanString(value, max = 1000) {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+function normalizeReviewedTestCases(input, fallbackCases) {
+  if (!Array.isArray(input)) return fallbackCases;
+  if (input.length > 50) throw new Error("A maximum of 50 reviewed test cases is allowed in the demo.");
+
+  const seen = new Set();
+  const normalized = [];
+
+  input.forEach((raw, index) => {
+    if (!raw || typeof raw !== "object") return;
+
+    let id = cleanString(raw.id, 20).toUpperCase();
+    if (!TEST_ID_REGEX.test(id) || seen.has(id)) {
+      id = `TC-H${String(index + 1).padStart(3, "0")}`;
+      while (seen.has(id)) {
+        id = `TC-H${String(index + 2).padStart(3, "0")}`;
+      }
+    }
+
+    const title = cleanString(raw.title, 300);
+    if (!title) return;
+
+    const typeCandidate = cleanString(raw.type, 30).toLowerCase();
+    const priorityCandidate = cleanString(raw.priority, 30).toLowerCase();
+
+    const steps = Array.isArray(raw.steps)
+      ? raw.steps.slice(0, 30).map((step) => {
+          if (typeof step === "string") {
+            return { action: cleanString(step, 500), target: "", value: null };
+          }
+          return {
+            action: cleanString(step?.action, 500),
+            target: cleanString(step?.target, 300),
+            value: step?.value === null || step?.value === undefined ? null : cleanString(step.value, 300),
+          };
+        }).filter((step) => step.action || step.target)
+      : [];
+
+    const expectedResults = Array.isArray(raw.expectedResults)
+      ? raw.expectedResults.slice(0, 20).map((value) => cleanString(value, 600)).filter(Boolean)
+      : [];
+
+    const preconditions = Array.isArray(raw.preconditions)
+      ? raw.preconditions.slice(0, 20).map((value) => cleanString(value, 500)).filter(Boolean)
+      : [];
+
+    normalized.push({
+      id,
+      title,
+      type: ALLOWED_TYPES.has(typeCandidate) ? typeCandidate : "functional",
+      priority: ALLOWED_PRIORITIES.has(priorityCandidate) ? priorityCandidate : "medium",
+      preconditions,
+      testData: raw.testData && typeof raw.testData === "object" && !Array.isArray(raw.testData) ? raw.testData : {},
+      steps,
+      expectedResults,
+      source: raw.source === "human" || id.startsWith("TC-H") ? "human" : "ai-reviewed",
+    });
+
+    seen.add(id);
+  });
+
+  if (!normalized.length) throw new Error("No valid reviewed test cases were supplied.");
+  return normalized;
 }
 
 function formatTestCaseList(testCases) {
@@ -52,6 +124,8 @@ router.post("/api/chat", async (req, res) => {
     additionalPaths = [],
     environment = "Test",
     credentials = null,
+    reviewedTestCases = null,
+    approvedIds: explicitApprovedIds = null,
   } = req.body || {};
 
   const session = getSession(sessionId);
@@ -83,7 +157,7 @@ router.post("/api/chat", async (req, res) => {
         environment,
       });
 
-      session.testCases = generated.testCases;
+      session.testCases = generated.testCases.map((tc) => ({ ...tc, source: "ai" }));
       session.state = "AWAITING_APPROVAL";
 
       return res.json({
@@ -97,9 +171,16 @@ router.post("/api/chat", async (req, res) => {
     }
 
     if (session.state === "AWAITING_APPROVAL") {
+      session.testCases = normalizeReviewedTestCases(reviewedTestCases, session.testCases);
+
       const allIds = session.testCases.map((tc) => tc.id);
-      const approvedIds = parseApproval(message, allIds);
-      if (!approvedIds) throw new Error('Approve test cases using "approve all" or a list such as "approve TC001,TC003".');
+      const approvedIds = Array.isArray(explicitApprovedIds)
+        ? explicitApprovedIds.map((id) => String(id).toUpperCase()).filter((id) => allIds.includes(id))
+        : parseApproval(message, allIds);
+
+      if (!approvedIds || !approvedIds.length) {
+        throw new Error("Select at least one reviewed test case to execute.");
+      }
 
       const approvedTestCases = session.testCases.filter((tc) => approvedIds.includes(tc.id));
       if (!approvedTestCases.length) throw new Error("No test cases were approved.");
@@ -142,7 +223,7 @@ router.post("/api/chat", async (req, res) => {
       const summary = execResult.summary;
       const analyses = [];
       for (const test of summary.tests.filter((t) => t.fail)) {
-        const tcId = String(test.title || "").match(/TC(?:\d{3}|-C\d+)/)?.[0];
+        const tcId = String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
         const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title };
         const analysis = await qwen.analyzeFailure({
           story: session.story,
@@ -171,12 +252,13 @@ router.post("/api/chat", async (req, res) => {
         summary,
         failureAnalyses: analyses,
         generatedScript: generated,
+        reviewedTestCases: session.testCases,
         reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
       });
     }
 
     return res.json({
-      reply: 'This run is complete. Start a new story to create another run.',
+      reply: "This run is complete. Start a new story to create another run.",
       summary: session.lastResults?.summary || null,
       failureAnalyses: session.failureAnalyses || [],
       reportUrl: session.reportHtml ? `/api/reports/${encodeURIComponent(sessionId)}` : null,
