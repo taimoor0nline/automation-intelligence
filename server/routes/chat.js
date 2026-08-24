@@ -1,4 +1,5 @@
 const express = require("express");
+const fs = require("fs");
 const router = express.Router();
 
 const { getSession, resetSession } = require("../data/sessionStore");
@@ -116,6 +117,29 @@ function formatTestCaseList(testCases) {
   return testCases.map((tc) => `• ${tc.id} [${tc.type}/${tc.priority}] — ${tc.title}`).join("\n");
 }
 
+function addEvidenceUrls(summary, sessionId, artifacts) {
+  if (!summary) return summary;
+  const encodedSession = encodeURIComponent(sessionId);
+  return {
+    ...summary,
+    tests: (summary.tests || []).map((test) => {
+      if (!test.fail) return test;
+      const testCaseId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0] || null;
+      const hasScreenshot = Boolean(testCaseId && artifacts?.screenshotsByTestCase?.[testCaseId]);
+      return {
+        ...test,
+        evidence: {
+          ...(test.evidence || {}),
+          videoUrl: artifacts?.videoPath ? `/api/artifacts/${encodedSession}/video` : null,
+          screenshotUrl: hasScreenshot
+            ? `/api/artifacts/${encodedSession}/screenshot/${encodeURIComponent(testCaseId)}`
+            : null,
+        },
+      };
+    }),
+  };
+}
+
 router.post("/api/chat", async (req, res) => {
   const {
     sessionId = "default",
@@ -220,7 +244,8 @@ router.post("/api/chat", async (req, res) => {
         });
       }
 
-      const summary = execResult.summary;
+      session.artifacts = execResult.artifacts || null;
+      const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
       const analyses = [];
       for (const test of summary.tests.filter((t) => t.fail)) {
         const tcId = String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
@@ -273,6 +298,22 @@ router.get("/api/reports/:sessionId", (req, res) => {
   const session = getSession(req.params.sessionId);
   if (!session.reportHtml) return res.status(404).send("Report not found or the run has not completed.");
   res.type("html").send(session.reportHtml);
+});
+
+router.get("/api/artifacts/:sessionId/video", (req, res) => {
+  const session = getSession(req.params.sessionId);
+  const filePath = session.artifacts?.videoPath;
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).send("Video evidence not found.");
+  res.sendFile(filePath);
+});
+
+router.get("/api/artifacts/:sessionId/screenshot/:testCaseId", (req, res) => {
+  const session = getSession(req.params.sessionId);
+  const testCaseId = String(req.params.testCaseId || "").toUpperCase();
+  if (!TEST_ID_REGEX.test(testCaseId)) return res.status(400).send("Invalid test case id.");
+  const filePath = session.artifacts?.screenshotsByTestCase?.[testCaseId];
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).send("Screenshot evidence not found.");
+  res.sendFile(filePath);
 });
 
 router.post("/api/reset", (req, res) => {
