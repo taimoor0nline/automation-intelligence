@@ -1,5 +1,9 @@
 const cheerio = require("cheerio");
 
+const MAX_AUTO_DISCOVERY_PAGES = 6;
+const SKIP_PATH_PREFIXES = ["/api/"];
+const SKIP_EXTENSIONS = /\.(?:js|css|map|png|jpe?g|gif|svg|ico|webp|woff2?|ttf|eot|pdf|zip|json|xml)(?:$|[?#])/i;
+
 function labelFor($, id) {
   if (!id) return null;
   let text = null;
@@ -50,6 +54,42 @@ function controlSelector($el) {
   if ($el.attr("id")) return `#${$el.attr("id")}`;
   if ($el.attr("name")) return `[name="${$el.attr("name")}"]`;
   return null;
+}
+
+function isUsefulPageUrl(candidate, pageUrl) {
+  try {
+    const base = new URL(pageUrl);
+    const url = new URL(candidate, base);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    if (url.origin !== base.origin) return null;
+    if (SKIP_PATH_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) return null;
+    if (SKIP_EXTENSIONS.test(url.pathname)) return null;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function extractRouteHints($, html, pageUrl) {
+  const hints = new Set();
+
+  const add = (raw) => {
+    const resolved = isUsefulPageUrl(raw, pageUrl);
+    if (resolved) hints.add(resolved);
+  };
+
+  $("a[href]").each((_, el) => add($(el).attr("href")));
+  $("form[action]").each((_, el) => add($(el).attr("action")));
+
+  // The current demo uses a JavaScript redirect after login. Collect root-relative
+  // route literals from the real page source so Known pages can remain optional.
+  // This is deliberately bounded and same-origin; production discovery will use a browser.
+  const routeLiteral = /["'](\/[A-Za-z0-9][^"'\s<>]*)["']/g;
+  let match;
+  while ((match = routeLiteral.exec(html)) !== null) add(match[1]);
+
+  return [...hints];
 }
 
 async function discoverPage(url) {
@@ -121,8 +161,6 @@ async function discoverPage(url) {
     });
   });
 
-  // Assertion targets are discovered separately so the model can see
-  // validation/success elements even when their runtime text is initially empty.
   const messages = [];
   $("[role='alert'], .error, .success, .success-panel").each((_, el) => {
     const $el = $(el);
@@ -142,13 +180,41 @@ async function discoverPage(url) {
     pageTitle: $("title").text().trim() || $("h1").first().text().trim() || url,
     elements,
     messages,
+    routeHints: extractRouteHints($, html, res.url || url),
   };
 }
 
 async function discoverPages(urls) {
-  const unique = [...new Set((urls || []).filter(Boolean))];
+  const seeds = [...new Set((urls || []).filter(Boolean))];
+  if (!seeds.length) return [];
+
+  const firstOrigin = new URL(seeds[0]).origin;
+  const queue = [...seeds];
+  const queued = new Set(queue);
+  const visited = new Set();
   const pages = [];
-  for (const url of unique) pages.push(await discoverPage(url));
+
+  while (queue.length && pages.length < MAX_AUTO_DISCOVERY_PAGES) {
+    const url = queue.shift();
+    if (visited.has(url)) continue;
+    visited.add(url);
+
+    const page = await discoverPage(url);
+    pages.push(page);
+
+    for (const hint of page.routeHints || []) {
+      try {
+        if (new URL(hint).origin !== firstOrigin) continue;
+      } catch {
+        continue;
+      }
+      if (!visited.has(hint) && !queued.has(hint) && queue.length + pages.length < MAX_AUTO_DISCOVERY_PAGES) {
+        queue.push(hint);
+        queued.add(hint);
+      }
+    }
+  }
+
   return pages;
 }
 
