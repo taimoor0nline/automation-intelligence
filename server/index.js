@@ -1,12 +1,14 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
 const path = require("path");
 
 const chatRoutes = require("./routes/chat");
 const runRoutes = require("./routes/run");
 const qwen = require("./services/qwenClient");
 const { normalizeGeneratedScript } = require("./services/automationScriptNormalizer");
+const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
 
 // Keep Qwen as the source of the automation, but normalize the small class of
 // assertions that are known to be brittle in this demo. In particular, the
@@ -26,6 +28,14 @@ const PORT = process.env.SERVER_PORT || 5000;
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+
+// Serve persisted HTML reports first. This keeps old report URLs working even
+// after the Node process restarts and the in-memory session has been cleared.
+app.get("/api/reports/:sessionId", (req, res, next) => {
+  const filePath = path.join(REPORT_DIR, reportFileName(req.params.sessionId));
+  if (!fs.existsSync(filePath)) return next();
+  return res.sendFile(filePath);
+});
 
 // The optimized run router intercepts only approved execution requests and
 // calls next() for normal story/test-case generation requests.
