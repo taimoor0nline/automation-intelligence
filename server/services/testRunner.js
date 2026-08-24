@@ -155,7 +155,7 @@ function summarize(result) {
       pending: result.totalPending || 0,
       skipped: result.totalSkipped || 0,
       durationMs: Number.isFinite(Number(result.totalDuration)) ? Math.round(Number(result.totalDuration)) : null,
-      browser: runs[0]?.browser?.displayName || runs[0]?.browser?.name || null,
+      browser: result.browser?.displayName || result.browser?.name || runs[0]?.browser?.displayName || runs[0]?.browser?.name || null,
       tests,
     },
     artifacts: {
@@ -163,56 +163,6 @@ function summarize(result) {
       screenshotsByTestCase,
     },
     diagnostic: null,
-  };
-}
-
-function mergeRunSummaries(parts) {
-  const tests = [];
-  const videosByTestCase = {};
-  const screenshotsByTestCase = {};
-  let total = 0;
-  let passed = 0;
-  let failed = 0;
-  let pending = 0;
-  let skipped = 0;
-  let durationMs = 0;
-  let hasDuration = false;
-  let browser = null;
-
-  for (const part of parts) {
-    const summary = part.summary;
-    total += summary.total || 0;
-    passed += summary.passed || 0;
-    failed += summary.failed || 0;
-    pending += summary.pending || 0;
-    skipped += summary.skipped || 0;
-    tests.push(...(summary.tests || []));
-    browser ||= summary.browser || null;
-
-    if (Number.isFinite(Number(summary.durationMs))) {
-      durationMs += Number(summary.durationMs);
-      hasDuration = true;
-    }
-
-    Object.assign(videosByTestCase, part.artifacts?.videosByTestCase || {});
-    Object.assign(screenshotsByTestCase, part.artifacts?.screenshotsByTestCase || {});
-  }
-
-  return {
-    summary: {
-      total,
-      passed,
-      failed,
-      pending,
-      skipped,
-      durationMs: hasDuration ? Math.round(durationMs) : null,
-      browser,
-      tests,
-    },
-    artifacts: {
-      videosByTestCase,
-      screenshotsByTestCase,
-    },
   };
 }
 
@@ -231,58 +181,58 @@ async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
 
     removeOldArtifacts();
 
+    // Cypress resolves `spec` from the Node process working directory, not from
+    // the `project` option. npm start runs from the repository root, so include
+    // automation-system/ in the spec path. All specs run in one Cypress run;
+    // Cypress still creates a separate video for each spec/test case.
+    const cwdRelativeSpecPattern = path
+      .join(path.relative(process.cwd(), SPEC_DIR), "*.cy.js")
+      .replace(/\\/g, "/");
+
     console.log(
-      `[test-runner] Running ${writtenSpecs.length} test case(s) independently in ${browser} (${headed ? "headed" : "headless"})` +
+      `[test-runner] Running ${writtenSpecs.length} test case(s) in ${browser} (${headed ? "headed" : "headless"})` +
       (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
     );
+    console.log(`[test-runner] Spec pattern: ${cwdRelativeSpecPattern}`);
 
-    const completedParts = [];
+    const result = await automationEngine.run({
+      project: AUTOMATION_DIR,
+      configFile: ENGINE_CONFIG,
+      testingType: "e2e",
+      spec: cwdRelativeSpecPattern,
+      browser,
+      headed,
+      env: {
+        TEST_USERNAME: executionContext.credentials?.username || "",
+        TEST_PASSWORD: executionContext.credentials?.password || "",
+        DEMO_STEP_DELAY_MS: demoStepDelayMs,
+      },
+      config: {
+        baseUrl,
+        video,
+        screenshotOnRunFailure,
+        videosFolder: "artifacts/videos",
+        screenshotsFolder: "artifacts/screenshots",
+      },
+    });
 
-    // Run one concrete relative spec path at a time. This is more reliable on Windows
-    // than passing an absolute wildcard glob and also guarantees one recording per case.
-    for (const spec of writtenSpecs) {
-      console.log(`[test-runner] ${spec.testCaseId}: ${spec.relativeSpecPath}`);
-
-      const result = await automationEngine.run({
-        project: AUTOMATION_DIR,
-        configFile: ENGINE_CONFIG,
-        spec: spec.relativeSpecPath,
-        browser,
-        headed,
-        env: {
-          TEST_USERNAME: executionContext.credentials?.username || "",
-          TEST_PASSWORD: executionContext.credentials?.password || "",
-          DEMO_STEP_DELAY_MS: demoStepDelayMs,
-        },
-        config: {
-          baseUrl,
-          video,
-          screenshotOnRunFailure,
-          videosFolder: "artifacts/videos",
-          screenshotsFolder: "artifacts/screenshots",
-        },
-      });
-
-      const part = summarize(result);
-      if (!part.summary) {
-        return {
-          specPaths: writtenSpecs.map((item) => item.specPath),
-          ok: false,
-          summary: null,
-          artifacts: null,
-          error: `${spec.testCaseId} could not execute: ${part.diagnostic}`,
-        };
-      }
-
-      completedParts.push(part);
+    const { summary, diagnostic, artifacts } = summarize(result);
+    if (!summary) {
+      console.error("[test-runner] Engine result:", result);
+      return {
+        specPaths: writtenSpecs.map((item) => item.specPath),
+        ok: false,
+        summary: null,
+        artifacts: null,
+        error: diagnostic,
+      };
     }
 
-    const merged = mergeRunSummaries(completedParts);
     return {
       specPaths: writtenSpecs.map((item) => item.specPath),
       ok: true,
-      summary: merged.summary,
-      artifacts: merged.artifacts,
+      summary,
+      artifacts,
       error: null,
     };
   } catch (err) {
