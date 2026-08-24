@@ -84,7 +84,8 @@ Rules:
 - Cover only behaviour that appears in the business story and discovered page inventory.
 - Include a useful mix of positive, negative, validation and boundary coverage.
 - Tests must describe the EXPECTED behaviour. Never manufacture an assertion just to make a test fail. A failed run should mean the real application did not meet the expected behaviour.
-- For a five-case demo, prefer this balanced shape when the discovered controls support it: one positive end-to-end journey, one authentication/required-field negative case, one later-form required-field case, and two meaningful format/boundary validation cases.
+- For a five-case demo, use this shape when the discovered controls support it: one positive end-to-end journey, one authentication/required-field negative case, one later-form required-field case, and two defect-detection validation/boundary cases.
+- DEMO CALIBRATION: if the discovered feedback form contains an Age field with min=18, TC004 MUST test age 17 and expect the submission to be rejected by the age rule. If the discovered feedback form contains a Website field of type=url, TC005 MUST use the malformed value "abc" and expect the submission to be rejected by the website URL rule. These are legitimate expected-behaviour tests derived from discovered constraints; do not describe them as intentionally failing tests.
 - When the story and discovered controls contain explicit boundaries, formats or validation constraints, prioritize them because they are good defect-detection scenarios.
 - Treat the supplied page inventory as the source of truth. Never invent fields, pages, buttons, selectors, messages or dropdown values.
 - Multi-page journeys are allowed. If the story describes login followed by another page, create end-to-end cases that reflect that flow.
@@ -108,8 +109,8 @@ Return JSON only using:
   ]
 }`;
 
-const CYPRESS_GENERATOR_PROMPT = `You are a senior Cypress automation engineer.
-Generate a complete Cypress JavaScript spec for ONLY the approved test cases.
+const AUTOMATION_GENERATOR_PROMPT = `You are a senior browser automation engineer.
+Generate a complete JavaScript end-to-end spec for ONLY the approved test cases using the current runtime's cy.* API.
 
 STRICT RULES:
 1. Use only selectors, data-testid values, ids, names, messages, option values and URLs that appear in pageDiscoveries.
@@ -123,14 +124,15 @@ STRICT RULES:
 7. For a login journey, use the discovered username/password fields and discovered login button, then assert the discovered destination/page outcome.
 8. Before testing a validation rule on a later form, populate the other required fields with valid values using only discovered controls/options.
 9. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
-10. Assertions must use real discovered elements/messages. If a precise assertion target is unavailable, use a safe URL/visibility assertion that is supported by discovery rather than inventing text.
+10. Assertions must use real discovered elements/messages. For a rejection/validation case, assert the discovered field-specific error element becomes visible/non-empty and/or the discovered success state remains absent. Do not use a weak assertion that can pass even when invalid data is accepted.
 11. Every approved test case must map to one it() block whose title begins with its TC id.
+12. For an age-minimum case using 17, the assertion must prove the age rule rejected 17. For an invalid-website case using "abc", the assertion must prove the URL rule rejected "abc".
 
 Return JSON only:
-{"fileName": string, "framework": "cypress", "language": "javascript", "script": string}`;
+{"fileName": string, "framework": "browser-automation", "language": "javascript", "script": string}`;
 
 const FAILURE_ANALYST_PROMPT = `You are a QA failure analyst.
-Classify a failed automated test using the business story, test case, expected result and actual Cypress error.
+Classify a failed automated test using the business story, test case, expected result and actual browser-automation error.
 Do not assume the application is wrong: selector/generator mistakes are AUTOMATION_DEFECT, bad input is TEST_DATA_PROBLEM, unreachable systems are ENVIRONMENT_PROBLEM.
 Return JSON only:
 {
@@ -161,14 +163,14 @@ function validateTestCases(result, requestedCount = TEST_CASE_COUNT) {
   return result;
 }
 
-function validateCypress(result) {
+function validateAutomation(result) {
   if (!result || typeof result.script !== "string" || !result.script.includes("describe(") || !result.script.includes("it(")) {
-    throw new Error("Qwen did not return a valid Cypress spec.");
+    throw new Error("Qwen did not return a valid automation spec.");
   }
-  if (result.script.length > 200000) throw new Error("Generated Cypress spec is unexpectedly large.");
+  if (result.script.length > 200000) throw new Error("Generated automation spec is unexpectedly large.");
   return {
     fileName: result.fileName || "ai-generated.cy.js",
-    framework: "cypress",
+    framework: "browser-automation",
     language: "javascript",
     script: result.script,
   };
@@ -199,8 +201,8 @@ async function generateTestCases({ story, pageDiscoveries, environment }) {
   return validateTestCases(result, TEST_CASE_COUNT);
 }
 
-async function generateCypressCode({ approvedTestCases, pageDiscoveries, fileName, executionContext }) {
-  const result = await callQwen(CYPRESS_GENERATOR_PROMPT, {
+async function generateAutomationCode({ approvedTestCases, pageDiscoveries, fileName, executionContext }) {
+  const result = await callQwen(AUTOMATION_GENERATOR_PROMPT, {
     approvedTestCases,
     pageDiscoveries,
     fileName,
@@ -210,7 +212,7 @@ async function generateCypressCode({ approvedTestCases, pageDiscoveries, fileNam
       credentialKeys: executionContext.hasCredentials ? ["TEST_USERNAME", "TEST_PASSWORD"] : [],
     },
   });
-  return validateCypress(result);
+  return validateAutomation(result);
 }
 
 async function analyzeFailure({ story, testCase, expected, actual }) {
@@ -220,7 +222,7 @@ async function analyzeFailure({ story, testCase, expected, actual }) {
 
 module.exports = {
   generateTestCases,
-  generateCypressCode,
+  generateAutomationCode,
   analyzeFailure,
   isConfigured,
   QWEN_MODEL,
