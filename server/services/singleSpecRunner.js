@@ -178,17 +178,21 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}) {
       (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
     );
     console.log(`[single-spec-runner] Spec: ${prepared.cwdRelativeSpecPath}`);
+    console.log("[single-spec-runner] Runner UI disabled; the visible browser shows only the application under test and should close automatically when execution finishes.");
 
-    const result = await automationEngine.run({
+    const runOptions = {
       project: AUTOMATION_DIR,
       configFile: ENGINE_CONFIG,
       testingType: "e2e",
       spec: prepared.cwdRelativeSpecPath,
       browser,
       headed,
-      headless: !headed,
       exit: true,
-      runnerUi: headed,
+      // Cypress 15 renders the full Runner UI by default during a headed run.
+      // We only need the real browser/application for the demo. Hiding the
+      // runner avoids leaving the interactive command-log UI parked after the
+      // spec has finished and also removes framework branding from the demo.
+      runnerUi: false,
       env: {
         TEST_USERNAME: executionContext.credentials?.username || "",
         TEST_PASSWORD: executionContext.credentials?.password || "",
@@ -201,7 +205,10 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}) {
         videosFolder: "artifacts/videos",
         screenshotsFolder: "artifacts/screenshots",
       },
-    });
+    };
+
+    const result = await automationEngine.run(runOptions);
+    console.log("[single-spec-runner] Automation engine returned results; continuing with analytics and AI analysis.");
 
     const part = summarize(result);
     if (!part.summary) {
