@@ -58,12 +58,26 @@ http://localhost:5000
 The user provides:
 
 1. target URL;
-2. optional additional page paths, such as `/feedback`;
+2. optional **Known pages** hints, such as `/feedback`;
 3. environment;
 4. test username/password;
 5. a business user story.
 
+Known pages are optional in the UI. In this demo they help static discovery inspect additional same-origin pages relevant to the journey. They are not intended to remain a required field in the production architecture.
+
 Credentials are kept in the in-memory session and injected into Cypress at execution time. Their values are **not included in the Qwen prompt**. Generated Cypress is instructed to read `TEST_USERNAME` and `TEST_PASSWORD` using Cypress `cy.env()`.
+
+## Human-in-the-loop test design
+
+Qwen proposes the initial test set, but the human remains in control before automation code is generated. A tester can:
+
+- include or exclude AI-generated cases;
+- edit an AI-generated case;
+- delete a case;
+- add a human-authored case;
+- start a new case from Functional, Validation, Boundary, Negative or Blank templates.
+
+The add/edit dialog explains the purpose of Functional, Positive, Negative, Boundary and Custom test types and provides starter preconditions, steps and expected results. Cypress code is generated only from the final reviewed set.
 
 ## Real Qwen only
 
@@ -119,13 +133,13 @@ successful submission.
 Use these page settings in the UI:
 
 ```text
-Target URL:            http://localhost:4000/
-Additional page paths: /feedback
-Username:              admin
-Password:              admin123
+Target URL:             http://localhost:4000/
+Known pages (optional): /feedback
+Username:               admin
+Password:               admin123
 ```
 
-Click **Generate AI Test Cases**, review the Qwen-generated cases, then click **Run Approved Tests**. Cypress launches a real Chrome window automatically. When execution finishes, the UI shows pass/fail results and exposes **Open HTML Analytics Report**.
+Click **Generate AI Test Cases**, review or modify the Qwen-generated cases, then click **Run Approved Tests**. Cypress launches a real Chrome window automatically. When execution finishes, the UI shows pass/fail results and exposes **Open HTML Analytics Report**.
 
 ## Important implementation details
 
@@ -152,11 +166,18 @@ Click **Generate AI Test Cases**, review the Qwen-generated cases, then click **
 ```env
 CYPRESS_BROWSER=chrome
 CYPRESS_HEADED=true
+CYPRESS_STEP_DELAY_MS=350
 ```
 
 ### Analytics
 
 `server/services/reportGenerator.js` builds a standalone HTML analytics page after the run. It includes totals, pass/fail rate, test-level results and Qwen failure analysis. The HTML is stored only in the current in-memory session and served from `/api/reports/:sessionId`.
+
+## Production direction: Playwright
+
+Cypress is intentionally kept for this demonstration. The intended production architecture is to move browser discovery **and** test execution to Playwright. In that model, the user should normally provide only the starting URL, credentials and business story. A bounded Playwright discovery agent can navigate the real application, observe authenticated routes and controls, build the relevant journey, and remove the need for manually supplied Known pages in most cases.
+
+Known pages can remain as an optional advanced hint or override for special routes that automated discovery cannot reach reliably.
 
 ## Project layout
 
