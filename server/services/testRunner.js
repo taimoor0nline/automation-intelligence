@@ -1,10 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 
-const AUTOMATION_DIR = path.join(__dirname, "..", "..", "automation");
-const SPEC_DIR = path.join(AUTOMATION_DIR, "cypress", "e2e", "generated");
-const VIDEO_DIR = path.join(AUTOMATION_DIR, "cypress", "videos");
-const SCREENSHOT_DIR = path.join(AUTOMATION_DIR, "cypress", "screenshots");
+const AUTOMATION_DIR = path.join(__dirname, "..", "..", "automation-system");
+const SPEC_DIR = path.join(AUTOMATION_DIR, "tests", "e2e", "generated");
+const VIDEO_DIR = path.join(AUTOMATION_DIR, "artifacts", "videos");
+const SCREENSHOT_DIR = path.join(AUTOMATION_DIR, "artifacts", "screenshots");
+const ENGINE_CONFIG = path.join(AUTOMATION_DIR, "engine.config.js");
 const TEST_ID_REGEX = /TC(?:\d{3}|-H\d{3})/i;
 
 function boolEnv(value, fallback) {
@@ -42,24 +43,40 @@ function removeOldArtifacts() {
   fs.rmSync(SCREENSHOT_DIR, { recursive: true, force: true });
 }
 
-async function loadCypress() {
-  const cypressModulePath = path.join(AUTOMATION_DIR, "node_modules", "cypress");
+async function loadAutomationEngine() {
+  const engineModulePath = path.join(AUTOMATION_DIR, "node_modules", "cypress");
   try {
-    return require(cypressModulePath);
+    return require(engineModulePath);
   } catch (err) {
     throw new Error(
-      `Cypress is not installed inside automation/. Run: cd automation && npm install. Details: ${err.message}`
+      `Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install. Details: ${err.message}`
     );
   }
 }
 
+function resolveDurationMs(test, attempt, run) {
+  const candidates = [
+    attempt?.wallClockDuration,
+    attempt?.duration,
+    test?.duration,
+    run?.stats?.duration,
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n);
+  }
+
+  return null;
+}
+
 function summarize(result) {
   if (!result || typeof result.totalTests !== "number") {
-    return { summary: null, diagnostic: "Cypress returned an unexpected result shape.", artifacts: null };
+    return { summary: null, diagnostic: "Automation engine returned an unexpected result shape.", artifacts: null };
   }
 
   const runs = Array.isArray(result.runs) ? result.runs : [];
-  if (!runs.length) return { summary: null, diagnostic: "Cypress completed without run details.", artifacts: null };
+  if (!runs.length) return { summary: null, diagnostic: "Automation completed without run details.", artifacts: null };
 
   const tests = [];
   const videosByTestCase = {};
@@ -92,7 +109,7 @@ function summarize(result) {
         pass: test.state === "passed",
         fail: test.state === "failed",
         state: test.state,
-        durationMs: attempt.wallClockDuration ?? null,
+        durationMs: resolveDurationMs(test, attempt, run),
         err: test.displayError ? { message: test.displayError } : null,
         evidence: {
           videoAvailable: Boolean(testCaseId && videosByTestCase[testCaseId]),
@@ -109,7 +126,7 @@ function summarize(result) {
       failed: result.totalFailed,
       pending: result.totalPending || 0,
       skipped: result.totalSkipped || 0,
-      durationMs: result.totalDuration || null,
+      durationMs: Number.isFinite(Number(result.totalDuration)) ? Math.round(Number(result.totalDuration)) : null,
       browser: runs[0]?.browser?.displayName || runs[0]?.browser?.name || null,
       tests,
     },
@@ -125,24 +142,25 @@ async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
   const writtenSpecs = writeSpecs(generatedSpecs);
 
   try {
-    const cypress = await loadCypress();
-    const headed = boolEnv(process.env.CYPRESS_HEADED, true);
-    const browser = process.env.CYPRESS_BROWSER || "chrome";
+    const automationEngine = await loadAutomationEngine();
+    const headed = boolEnv(process.env.AUTOMATION_HEADED, true);
+    const browser = process.env.AUTOMATION_BROWSER || "chrome";
     const baseUrl = executionContext.baseUrl || process.env.TEST_BASE_URL || "http://localhost:4000";
-    const demoStepDelayMs = Math.max(0, Math.min(numberEnv(process.env.CYPRESS_STEP_DELAY_MS, 0), 3000));
-    const video = boolEnv(process.env.CYPRESS_VIDEO, true);
-    const screenshotOnRunFailure = boolEnv(process.env.CYPRESS_SCREENSHOT_ON_FAILURE, true);
+    const demoStepDelayMs = Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_STEP_DELAY_MS, 0), 3000));
+    const video = boolEnv(process.env.AUTOMATION_VIDEO, true);
+    const screenshotOnRunFailure = boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true);
 
     removeOldArtifacts();
 
     console.log(
-      `[test-runner] Running ${writtenSpecs.length} Cypress test-case spec(s) in ${browser} (${headed ? "headed" : "headless"})` +
+      `[test-runner] Running ${writtenSpecs.length} test case(s) in ${browser} (${headed ? "headed" : "headless"})` +
       (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
     );
 
     const specPattern = path.join(SPEC_DIR, "*.cy.js").replace(/\\/g, "/");
-    const result = await cypress.run({
+    const result = await automationEngine.run({
       project: AUTOMATION_DIR,
+      configFile: ENGINE_CONFIG,
       spec: specPattern,
       browser,
       headed,
@@ -155,6 +173,8 @@ async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
         baseUrl,
         video,
         screenshotOnRunFailure,
+        videosFolder: "artifacts/videos",
+        screenshotsFolder: "artifacts/screenshots",
       },
     });
 
@@ -167,7 +187,7 @@ async function executeGeneratedTests(generatedSpecs, executionContext = {}) {
       error: diagnostic,
     };
   } catch (err) {
-    console.error("[test-runner] Cypress execution failed:", err);
+    console.error("[test-runner] Automation execution failed:", err);
     return {
       specPaths: writtenSpecs.map((item) => item.specPath),
       ok: false,
