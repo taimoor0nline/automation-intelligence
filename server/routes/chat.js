@@ -220,11 +220,11 @@ router.post("/api/chat", async (req, res) => {
         credentials: session.credentials,
       };
 
-      // Generate one physical Cypress spec per approved case. Cypress records one video per spec,
-      // giving every failed case its own dedicated video rather than a shared run recording.
+      // Generate one physical automation spec per approved case so every failed case
+      // receives its own dedicated video rather than sharing a full-run recording.
       const generatedSpecs = [];
       for (const testCase of approvedTestCases) {
-        const generated = await qwen.generateCypressCode({
+        const generated = await qwen.generateAutomationCode({
           approvedTestCases: [testCase],
           pageDiscoveries: session.pageDiscoveries,
           fileName: `${testCase.id}.cy.js`,
@@ -234,7 +234,7 @@ router.post("/api/chat", async (req, res) => {
         const validation = validateScript(generated.script);
         if (!validation.valid) {
           return res.status(422).json({
-            reply: `Generated Cypress code for ${testCase.id} failed validation and was not executed: ${validation.errors.join(" | ")}`,
+            reply: `Generated automation code for ${testCase.id} failed validation and was not executed: ${validation.errors.join(" | ")}`,
             validationErrors: validation.errors,
             testCaseId: testCase.id,
           });
@@ -254,7 +254,7 @@ router.post("/api/chat", async (req, res) => {
       if (!execResult.ok || !execResult.summary) {
         session.state = "AWAITING_APPROVAL";
         return res.status(500).json({
-          reply: `Cypress could not complete: ${execResult.error || "unknown error"}`,
+          reply: `Automation execution could not complete: ${execResult.error || "unknown error"}`,
           generatedScripts: generatedSpecs,
         });
       }
@@ -269,7 +269,7 @@ router.post("/api/chat", async (req, res) => {
           story: session.story,
           testCase: tc,
           expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
-          actual: test.err?.message || "Cypress assertion failed",
+          actual: test.err?.message || "Automation assertion failed",
         });
         analyses.push({ testCase: tc.id, ...analysis });
       }
