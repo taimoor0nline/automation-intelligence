@@ -1,6 +1,7 @@
 const QWEN_MODEL = process.env.QWEN_MODEL || "qwen3.7-flash";
 const REQUEST_TIMEOUT_MS = 90000;
 const MAX_RETRIES = 1;
+const TEST_CASE_COUNT = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 5) || 5, 20));
 
 function isConfigured() {
   return Boolean(process.env.QWEN_API_KEY && process.env.QWEN_BASE_URL);
@@ -79,8 +80,12 @@ const TEST_ANALYST_PROMPT = `You are a senior QA test analyst.
 Convert the supplied business user story and discovered web-page inventory into a concise set of executable test cases.
 
 Rules:
-- Generate 6-15 cases unless the story genuinely requires more.
-- Cover the story only: positive, negative, validation and important boundary cases.
+- Generate EXACTLY requestedTestCaseCount test cases. Do not generate more or fewer.
+- Cover only behaviour that appears in the business story and discovered page inventory.
+- Include a useful mix of positive, negative, validation and boundary coverage.
+- Tests must describe the EXPECTED behaviour. Never manufacture an assertion just to make a test fail. A failed run should mean the real application did not meet the expected behaviour.
+- For a five-case demo, prefer this balanced shape when the discovered controls support it: one positive end-to-end journey, one authentication/required-field negative case, one later-form required-field case, and two meaningful format/boundary validation cases.
+- When the story and discovered controls contain explicit boundaries, formats or validation constraints, prioritize them because they are good defect-detection scenarios.
 - Treat the supplied page inventory as the source of truth. Never invent fields, pages, buttons, selectors, messages or dropdown values.
 - Multi-page journeys are allowed. If the story describes login followed by another page, create end-to-end cases that reflect that flow.
 - Do not include actual passwords or secrets in test data.
@@ -138,9 +143,12 @@ Return JSON only:
   "confidence": number
 }`;
 
-function validateTestCases(result) {
+function validateTestCases(result, requestedCount = TEST_CASE_COUNT) {
   if (!result || !Array.isArray(result.testCases) || result.testCases.length === 0) {
     throw new Error("Qwen response did not contain testCases.");
+  }
+  if (result.testCases.length !== requestedCount) {
+    throw new Error(`Qwen returned ${result.testCases.length} test cases; this demo requires exactly ${requestedCount}. Retry generation.`);
   }
   result.testCases.forEach((tc, i) => {
     if (!tc.id || !tc.title || !Array.isArray(tc.steps) || !Array.isArray(tc.expectedResults)) {
@@ -182,8 +190,13 @@ function validateFailure(result) {
 }
 
 async function generateTestCases({ story, pageDiscoveries, environment }) {
-  const result = await callQwen(TEST_ANALYST_PROMPT, { story, pageDiscoveries, environment });
-  return validateTestCases(result);
+  const result = await callQwen(TEST_ANALYST_PROMPT, {
+    story,
+    pageDiscoveries,
+    environment,
+    requestedTestCaseCount: TEST_CASE_COUNT,
+  });
+  return validateTestCases(result, TEST_CASE_COUNT);
 }
 
 async function generateCypressCode({ approvedTestCases, pageDiscoveries, fileName, executionContext }) {
@@ -211,4 +224,5 @@ module.exports = {
   analyzeFailure,
   isConfigured,
   QWEN_MODEL,
+  TEST_CASE_COUNT,
 };
