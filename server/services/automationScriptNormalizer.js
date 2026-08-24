@@ -1,27 +1,15 @@
-function normalizeSuccessPanelAssertions(script) {
+function normalizeGeneratedScript(script) {
   let normalized = String(script || "");
 
-  // Qwen can occasionally use exact whole-element text equality for the
-  // success panel. The demo success panel also contains a dynamic feedback
-  // reference, so exact equality turns a successful business flow into an
-  // automation defect. Keep the assertion meaningful but tolerant of the
-  // dynamic suffix by requiring visibility plus the known static text.
-  normalized = normalized.replace(
-    /(cy\.get\(\s*['"]\[data-testid=['"]success-panel['"]\]['"]\s*\)(?:\s*\.[a-zA-Z]+\([^;]*?\))*?\s*)\.should\(\s*['"]have\.text['"]\s*,\s*([^\)]+)\)/gs,
-    "$1.should('be.visible').and('contain.text', $2)"
-  );
-
-  // Handle the common direct form without intermediate chaining separately.
-  normalized = normalized.replace(
-    /(cy\.get\(\s*['"]\[data-testid=['"]success-panel['"]\]['"]\s*\))\s*\.should\(\s*['"]have\.text['"]\s*,\s*([^\)]+)\)/gs,
-    "$1.should('be.visible').and('contain.text', $2)"
-  );
+  // Exact whole-element text assertions are brittle in this demo because
+  // success/error containers can include dynamic references and whitespace.
+  // Qwen may format the chain across multiple lines, so normalize the assertion
+  // operator itself rather than trying to match one specific selector layout.
+  normalized = normalized
+    .replace(/\.should\(\s*(['"])have\.text\1\s*,/g, ".should('contain.text',")
+    .replace(/\.and\(\s*(['"])have\.text\1\s*,/g, ".and('contain.text',");
 
   return normalized;
-}
-
-function normalizeGeneratedScript(script) {
-  return normalizeSuccessPanelAssertions(script);
 }
 
 module.exports = { normalizeGeneratedScript };
