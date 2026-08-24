@@ -1,0 +1,14 @@
+{
+  "name": "ai-testpilot-automation-system",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Browser automation runtime for AI TestPilot generated tests",
+  "scripts": {
+    "engine:open": "cypress open --config-file engine.config.js",
+    "engine:run": "cypress run --config-file engine.config.js",
+    "engine:verify": "cypress verify"
+  },
+  "devDependencies": {
+    "cypress": "15.21.0"
+  }
+}
