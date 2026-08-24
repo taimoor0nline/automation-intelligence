@@ -13,11 +13,11 @@ Structured test cases / use cases
       ↓
 Human review and approval
       ↓
-Qwen Cypress Engineer
+Qwen Automation Engineer
       ↓
 Security + syntax validation
       ↓
-Cypress 15 in visible Chrome
+Visible browser automation
       ↓
 PASS / FAIL
       ↓
@@ -42,10 +42,12 @@ Username: admin
 Password: admin123
 ```
 
-The feedback API intentionally keeps two demo defects so the automation has genuine failures to detect:
+The feedback API intentionally keeps two application defects so the automation has genuine failures to detect:
 
 - age `17` is incorrectly accepted although the UI/specification says 18–100;
-- a website such as `abc` is incorrectly accepted by the server validation.
+- a website such as `abc` is incorrectly accepted although the field requires a valid URL.
+
+For the five-case demonstration, Qwen is instructed to include these two expected-behaviour checks as TC004 and TC005 when the discovered controls support them. The assertions are not fake failures: they test the discovered business constraints and fail only because the demo application violates them.
 
 ## AI TestPilot UI
 
@@ -65,7 +67,7 @@ The user provides:
 
 Known pages are optional in the UI. In this demo they help static discovery inspect additional same-origin pages relevant to the journey. They are not intended to remain a required field in the production architecture.
 
-Credentials are kept in the in-memory session and injected into Cypress at execution time. Their values are **not included in the Qwen prompt**. Generated Cypress is instructed to read `TEST_USERNAME` and `TEST_PASSWORD` using Cypress `cy.env()`.
+Credentials are kept in the in-memory session and injected into the browser automation runtime at execution time. Their values are **not included in the Qwen prompt**. Generated automation reads `TEST_USERNAME` and `TEST_PASSWORD` from the secure runtime environment.
 
 ## Human-in-the-loop test design
 
@@ -77,7 +79,7 @@ Qwen proposes the initial test set, but the human remains in control before auto
 - add a human-authored case;
 - start a new case from Functional, Validation, Boundary, Negative or Blank templates.
 
-The add/edit dialog explains the purpose of Functional, Positive, Negative, Boundary and Custom test types and provides starter preconditions, steps and expected results. Cypress code is generated only from the final reviewed set.
+The add/edit dialog explains the purpose of Functional, Positive, Negative, Boundary and Custom test types and provides starter preconditions, steps and expected results. Automation code is generated only from the final reviewed set.
 
 ## Real Qwen only
 
@@ -99,12 +101,12 @@ From the repository root:
 npm install
 ```
 
-Install Cypress in its dedicated automation project:
+Install the dedicated browser automation runtime:
 
 ```bash
-cd automation
+cd automation-system
 npm install
-npx cypress verify
+npm run engine:verify
 cd ..
 ```
 
@@ -139,7 +141,9 @@ Username:               admin
 Password:               admin123
 ```
 
-Click **Generate AI Test Cases**, review or modify the Qwen-generated cases, then click **Run Approved Tests**. Cypress launches a real Chrome window automatically. When execution finishes, the UI shows pass/fail results and exposes **Open HTML Analytics Report**.
+Click **Generate AI Test Cases**, review or modify the Qwen-generated cases, then click **Run Approved Tests**. A real Chrome window opens automatically. When execution finishes, the UI shows pass/fail results and exposes **Open HTML Analytics Report**.
+
+Each approved case is executed independently so every failed case can have its own video and failure screenshot.
 
 ## Important implementation details
 
@@ -152,8 +156,8 @@ Click **Generate AI Test Cases**, review or modify the Qwen-generated cases, the
 `server/services/qwenClient.js` contains three prompts:
 
 - Test Analyst — story + discovered pages → structured test cases;
-- Cypress Engineer — approved test cases + discovered pages → Cypress JavaScript;
-- Failure Analyst — Cypress error + expected behaviour → business-readable classification.
+- Automation Engineer — approved test case + discovered pages → executable JavaScript automation;
+- Failure Analyst — runtime error + expected behaviour → business-readable classification.
 
 ### Generated-code safety
 
@@ -161,21 +165,27 @@ Click **Generate AI Test Cases**, review or modify the Qwen-generated cases, the
 
 ### Visible execution
 
-`server/services/testRunner.js` launches Cypress through the Node API using Chrome and headed mode by default. Configure locally if needed:
+`server/services/testRunner.js` launches the current browser automation engine using Chrome and headed mode by default. Configure locally if needed:
 
 ```env
-CYPRESS_BROWSER=chrome
-CYPRESS_HEADED=true
-CYPRESS_STEP_DELAY_MS=350
+AUTOMATION_BROWSER=chrome
+AUTOMATION_HEADED=true
+AUTOMATION_STEP_DELAY_MS=350
+AUTOMATION_VIDEO=true
+AUTOMATION_SCREENSHOT_ON_FAILURE=true
 ```
+
+### Duration
+
+The runner records duration per independent case. It first uses test-attempt timing when provided by the runtime, then falls back to the per-spec run duration. This keeps the Duration column populated even when attempt-level timing is unavailable.
 
 ### Analytics
 
-`server/services/reportGenerator.js` builds a standalone HTML analytics page after the run. It includes totals, pass/fail rate, test-level results and Qwen failure analysis. The HTML is stored only in the current in-memory session and served from `/api/reports/:sessionId`.
+`server/services/reportGenerator.js` builds a standalone HTML analytics page after the run. It includes totals, pass/fail rate, test-level duration, per-failure evidence links and Qwen failure analysis. The HTML is stored only in the current in-memory session and served from `/api/reports/:sessionId`.
 
 ## Production direction: Playwright
 
-Cypress is intentionally kept for this demonstration. The intended production architecture is to move browser discovery **and** test execution to Playwright. In that model, the user should normally provide only the starting URL, credentials and business story. A bounded Playwright discovery agent can navigate the real application, observe authenticated routes and controls, build the relevant journey, and remove the need for manually supplied Known pages in most cases.
+The intended production architecture is to use **Playwright for both browser discovery and test execution**. In that model, the user should normally provide only the starting URL, credentials and business story. A bounded Playwright discovery agent can navigate the real application, observe authenticated routes and controls, build the relevant journey, and remove the need for manually supplied Known pages in most cases.
 
 Known pages can remain as an optional advanced hint or override for special routes that automated discovery cannot reach reliably.
 
@@ -183,12 +193,12 @@ Known pages can remain as an optional advanced hint or override for special rout
 
 ```text
 automation-intelligence/
-├── automation/                 Cypress project and generated specs
+├── automation-system/          Browser automation runtime, generated specs and evidence
 ├── testpilot-ui/               AI TestPilot browser UI
 ├── demo-app/                   Login + feedback target application
 └── server/
     ├── data/sessionStore.js    In-memory run state
-    ├── routes/chat.js          Story → AI → Cypress orchestration
+    ├── routes/chat.js          Story → AI → automation orchestration
     └── services/
         ├── pageDiscovery.js
         ├── qwenClient.js
