@@ -10,6 +10,16 @@ module.exports = defineConfig({
     screenshotsFolder: "artifacts/screenshots",
     screenshotOnRunFailure: true,
     setupNodeEvents(on, config) {
+      on("after:spec", (_spec, results) => {
+        if (results) {
+          console.log(`[automation-engine] Spec execution finished: ${results.stats?.passes || 0} passed, ${results.stats?.failures || 0} failed`);
+        }
+      });
+
+      on("after:run", (results) => {
+        console.log(`[automation-engine] Run teardown finished: ${results?.totalPassed || 0} passed, ${results?.totalFailed || 0} failed`);
+      });
+
       return config;
     },
   },
