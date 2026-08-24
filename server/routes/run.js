@@ -105,12 +105,18 @@ function addEvidenceUrls(summary, sessionId, artifacts) {
   };
 }
 
-router.post("/api/run", async (req, res) => {
+// This router is mounted before the normal /api/chat router. It intercepts only
+// the reviewed/approved execution request; initial story generation falls through.
+router.post("/api/chat", async (req, res, next) => {
   const {
     sessionId = "default",
+    message = "",
     reviewedTestCases = null,
     approvedIds = [],
   } = req.body || {};
+
+  const isRunRequest = message === "approve reviewed cases" || Array.isArray(req.body?.approvedIds);
+  if (!isRunRequest) return next();
 
   const session = getSession(sessionId);
 
@@ -135,7 +141,7 @@ router.post("/api/run", async (req, res) => {
       credentials: session.credentials,
     };
 
-    console.log(`[api/run] Generating one automation spec for ${approvedTestCases.length} approved case(s)`);
+    console.log(`[single-spec] Generating one automation file for ${approvedTestCases.length} approved case(s)`);
 
     // One Qwen call generates one file containing all approved it() blocks.
     // This avoids five model round-trips and five separate browser launches.
@@ -208,8 +214,8 @@ router.post("/api/run", async (req, res) => {
     });
     session.state = "DONE";
 
-    // Keep the browser response deliberately compact. Generated source remains
-    // in memory/on disk and does not need to be sent back to DevTools/UI.
+    // Keep the response small: the generated source stays in memory/on disk and
+    // is not sent back to the browser unless a dedicated source endpoint is added.
     return res.json({
       reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`,
       summary,
@@ -218,7 +224,7 @@ router.post("/api/run", async (req, res) => {
       generatedFile: "ai-generated.cy.js",
     });
   } catch (err) {
-    console.error("[api/run]", err);
+    console.error("[single-spec]", err);
     session.state = session.state === "RUNNING" ? "AWAITING_APPROVAL" : session.state;
     return res.status(500).json({ reply: `Error: ${err.message}` });
   }
