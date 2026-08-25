@@ -5,13 +5,16 @@ const router = express.Router();
 const { getSession, resetSession } = require("../data/sessionStore");
 const { discoverPages } = require("../services/pageDiscovery");
 const { compactDiscoveriesForModel } = require("../services/modelDiscoveryView");
+const { normalizeProfile } = require("../services/aiModelProfiles");
 const qwen = require("../services/qwenClient");
 const { readinessSummary } = require("../services/testCaseFeasibility");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
 const FIXED_ENVIRONMENT = "Test";
-const DISCOVERY_CACHE_TTL_MS = Math.max(0, Math.min(Number(process.env.DISCOVERY_CACHE_TTL_MS || 300000) || 300000, 3600000));
+const rawDiscoveryTtl = process.env.DISCOVERY_CACHE_TTL_MS;
+const parsedDiscoveryTtl = rawDiscoveryTtl === undefined || rawDiscoveryTtl === "" ? 300000 : Number(rawDiscoveryTtl);
+const DISCOVERY_CACHE_TTL_MS = Math.max(0, Math.min(Number.isFinite(parsedDiscoveryTtl) ? parsedDiscoveryTtl : 300000, 3600000));
 const DISCOVERY_CACHE_MAX = 20;
 const discoveryCache = new Map();
 
@@ -30,9 +33,9 @@ function resolveDiscoveryUrls(targetUrl, additionalPaths = []) {
   const base = new URL(targetUrl);
   const urls = [targetUrl];
   for (const raw of additionalPaths) {
-    const path = String(raw || "").trim();
-    if (!path) continue;
-    urls.push(new URL(path, `${base.protocol}//${base.host}/`).toString());
+    const pagePath = String(raw || "").trim();
+    if (!pagePath) continue;
+    urls.push(new URL(pagePath, `${base.protocol}//${base.host}/`).toString());
   }
   return [...new Set(urls)];
 }
@@ -64,22 +67,20 @@ function trimDiscoveryCache() {
   for (const [key, entry] of discoveryCache.entries()) {
     if (!entry || entry.expiresAt <= now) discoveryCache.delete(key);
   }
-  while (discoveryCache.size > DISCOVERY_CACHE_MAX) {
-    discoveryCache.delete(discoveryCache.keys().next().value);
-  }
+  while (discoveryCache.size > DISCOVERY_CACHE_MAX) discoveryCache.delete(discoveryCache.keys().next().value);
 }
 
-async function discoverPagesCached(urls) {
-  if (!DISCOVERY_CACHE_TTL_MS) return { pages: await discoverPages(urls), cacheHit: false };
+async function discoverPagesCached(urls, bypassCache = false) {
+  if (bypassCache || !DISCOVERY_CACHE_TTL_MS) return { pages: await discoverPages(urls), cacheHit: false, bypassed: Boolean(bypassCache) };
   trimDiscoveryCache();
   const key = discoveryCacheKey(urls);
   const cached = discoveryCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return { pages: cached.pages, cacheHit: true };
+  if (cached && cached.expiresAt > Date.now()) return { pages: cached.pages, cacheHit: true, bypassed: false };
 
   const pages = await discoverPages(urls);
   discoveryCache.set(key, { pages, expiresAt: Date.now() + DISCOVERY_CACHE_TTL_MS });
   trimDiscoveryCache();
-  return { pages, cacheHit: false };
+  return { pages, cacheHit: false, bypassed: false };
 }
 
 router.post("/api/chat", async (req, res) => {
@@ -89,9 +90,12 @@ router.post("/api/chat", async (req, res) => {
     targetUrl: explicitTargetUrl,
     additionalPaths = [],
     credentials = null,
+    aiModelTier = "fast",
+    bypassDiscoveryCache = false,
   } = req.body || {};
 
   const session = getSession(sessionId);
+  let stage = "request validation";
 
   try {
     if (session.state === "IDLE") {
@@ -108,52 +112,50 @@ router.post("/api/chat", async (req, res) => {
       session.targetUrl = targetUrl;
       session.environment = FIXED_ENVIRONMENT;
       session.additionalPaths = Array.isArray(additionalPaths) ? additionalPaths : [];
+      session.aiModelTier = normalizeProfile(aiModelTier);
       session.credentials = credentials && typeof credentials === "object"
         ? { username: String(credentials.username || ""), password: String(credentials.password || "") }
         : null;
 
+      stage = "page discovery";
       const discoveryUrls = resolveDiscoveryUrls(targetUrl, session.additionalPaths);
       const discoveryStartedAt = Date.now();
-      const discoveryResult = await discoverPagesCached(discoveryUrls);
+      const discoveryResult = await discoverPagesCached(discoveryUrls, Boolean(bypassDiscoveryCache));
       session.pageDiscoveries = discoveryResult.pages;
       const discoveryMs = Date.now() - discoveryStartedAt;
 
-      // Keep the full discovery evidence in the session for deterministic validation,
-      // but send only the fields the AI needs. This materially reduces prompt size
-      // on pages with verbose DOM metadata while preserving selectors, constraints,
-      // messages, options and routes needed for grounded test generation.
+      stage = "AI test generation";
       const modelDiscoveries = compactDiscoveriesForModel(session.pageDiscoveries);
       const aiStartedAt = Date.now();
       const generated = await qwen.generateTestCases({
         story,
         pageDiscoveries: modelDiscoveries,
         environment: FIXED_ENVIRONMENT,
+        modelTier: session.aiModelTier,
       });
       const aiGenerationMs = Date.now() - aiStartedAt;
 
-      // Return AI-generated cases to the reviewer immediately. Readiness is a
-      // separate deterministic phase started by the browser after rendering.
-      session.testCases = generated.testCases.map((tc) => ({
-        ...tc,
-        source: "ai",
-        automationReadiness: null,
-      }));
+      stage = "prepare human review";
+      session.testCases = generated.testCases.map((tc) => ({ ...tc, source: "ai", automationReadiness: null }));
       session.automationReadiness = pendingReadinessSummary(session.testCases);
       session.state = "AWAITING_APPROVAL";
 
       const totalMs = Date.now() - requestStartedAt;
-      console.log(`[test-generation] discovery=${discoveryMs}ms${discoveryResult.cacheHit ? " (cache)" : ""} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length}`);
+      const cacheLabel = discoveryResult.cacheHit ? " cache-hit" : discoveryResult.bypassed ? " cache-bypassed" : " fresh";
+      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length}`);
 
       return res.json({
-        reply: `AI generated ${session.testCases.length} story-driven test cases from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately in the background.\n\n${formatTestCaseList(session.testCases)}`,
+        reply: `AI generated ${session.testCases.length} story-driven test cases from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately.\n\n${formatTestCaseList(session.testCases)}`,
         feature: generated.feature || null,
         testCases: session.testCases,
         pageDiscoveries: session.pageDiscoveries,
         automationReadiness: session.automationReadiness,
         readinessPending: true,
+        aiModelTier: session.aiModelTier,
         generationTiming: {
           discoveryMs,
           discoveryCacheHit: discoveryResult.cacheHit,
+          discoveryCacheBypassed: discoveryResult.bypassed,
           aiGenerationMs,
           totalMs,
         },
@@ -175,8 +177,8 @@ router.post("/api/chat", async (req, res) => {
       reportUrl: session.reportHtml ? `/api/reports/${encodeURIComponent(sessionId)}` : null,
     });
   } catch (err) {
-    console.error("[api/chat]", err);
-    return res.status(500).json({ reply: `Error: ${err.message}` });
+    console.error(`[api/chat] failed during ${stage}:`, err);
+    return res.status(500).json({ reply: `Generation failed during ${stage}: ${err.message}` });
   }
 });
 
