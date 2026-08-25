@@ -1,6 +1,6 @@
 /**
- * Security gate for AI-generated browser automation specs.
- * The model output is validated before any code is written/executed.
+ * Security and grounding gate for AI-generated browser automation specs.
+ * Model output is validated before any code is written or executed.
  */
 const vm = require("vm");
 
@@ -21,6 +21,7 @@ const DENYLIST_PATTERNS = [
 const ALLOWED_IMPORT_PATTERN = /require\(\s*['"]cypress['"]\s*\)/;
 const MAX_SCRIPT_LENGTH = 200000;
 const MIN_SCRIPT_LENGTH = 40;
+const TEST_ID_REGEX = /TC(?:\d{3}|-H\d{3})/gi;
 
 function validateScript(script) {
   const errors = [];
@@ -52,4 +53,140 @@ function validateScript(script) {
   return { valid: errors.length === 0, errors };
 }
 
-module.exports = { validateScript };
+function addSelector(set, selector) {
+  const value = String(selector || "").trim();
+  if (value) set.add(value);
+}
+
+function discoveredGrounding(pageDiscoveries = []) {
+  const selectors = new Set();
+  const paths = new Set(["/"]);
+
+  for (const page of pageDiscoveries || []) {
+    try {
+      const url = new URL(page?.finalUrl || page?.url || "http://local/");
+      paths.add(`${url.pathname}${url.search}` || "/");
+    } catch {
+      // Ignore malformed discovery URLs; they cannot become execution evidence.
+    }
+
+    for (const item of page?.elements || []) {
+      addSelector(selectors, item.selector);
+      if (item.testId) addSelector(selectors, `[data-testid="${item.testId}"]`);
+      if (item.id) addSelector(selectors, `#${item.id}`);
+      if (item.name) addSelector(selectors, `[name="${item.name}"]`);
+
+      const error = item.errorElement;
+      if (error?.selector) addSelector(selectors, error.selector);
+      if (error?.testId) addSelector(selectors, `[data-testid="${error.testId}"]`);
+      if (error?.id) addSelector(selectors, `#${error.id}`);
+    }
+
+    for (const message of page?.messages || []) {
+      addSelector(selectors, message.selector);
+      if (message.testId) addSelector(selectors, `[data-testid="${message.testId}"]`);
+      if (message.id) addSelector(selectors, `#${message.id}`);
+    }
+  }
+
+  return { selectors, paths };
+}
+
+function extractLiteralArgs(script, command) {
+  const values = [];
+  const pattern = new RegExp(`\\b${command}\\(\\s*(['\"\\`])([^'\"\\`]+)\\1`, "g");
+  let match;
+  while ((match = pattern.exec(script))) values.push(match[2]);
+  return values;
+}
+
+function extractTestTitles(script) {
+  const titles = [];
+  const pattern = /\bit\s*\(\s*(['"`])([^'"`]+)\1/g;
+  let match;
+  while ((match = pattern.exec(script))) titles.push(match[2]);
+  return titles;
+}
+
+function validateGroundedScript(script, { approvedTestCases = [], pageDiscoveries = [], hasCredentials = false } = {}) {
+  const base = validateScript(script);
+  const errors = [...base.errors];
+
+  // Generated test bodies must be independent. A generated beforeEach/afterEach
+  // can abort or contaminate every approved case, so lifecycle plumbing belongs
+  // to the deterministic framework rather than the model.
+  if (/\b(?:beforeEach|afterEach|before|after)\s*\(/.test(script)) {
+    errors.push("Generated specs may not define suite/test lifecycle hooks. Keep every approved case self-contained.");
+  }
+
+  // Runtime credentials are framework-owned. Generated code may only invoke the
+  // deterministic login helper and must never read or assign credential values.
+  if (/\b(?:cy|Cypress)\.env\s*\(/.test(script)) {
+    errors.push("Generated specs may not access Cypress environment credentials directly; use cy.loginWithRuntimeCredentials(...). ");
+  }
+  if (/\bTEST_(?:USERNAME|PASSWORD)\b|this\.TEST_(?:USERNAME|PASSWORD)/.test(script)) {
+    errors.push("Generated specs may not reference TEST_USERNAME/TEST_PASSWORD identifiers directly.");
+  }
+  if (!hasCredentials && /\bcy\.loginWithRuntimeCredentials\s*\(/.test(script)) {
+    errors.push("Generated spec requested runtime credential login but no credentials were supplied.");
+  }
+
+  // The model must create exactly one it() block for every approved case and no
+  // extra TC-labelled cases. This prevents scope expansion and missing coverage.
+  const approvedIds = approvedTestCases.map((tc) => String(tc?.id || "").toUpperCase()).filter(Boolean);
+  const titles = extractTestTitles(script);
+  for (const id of approvedIds) {
+    const matches = titles.filter((title) => title.toUpperCase().startsWith(id));
+    if (matches.length !== 1) errors.push(`Approved test ${id} must map to exactly one it() block; found ${matches.length}.`);
+  }
+  const generatedIds = [...new Set((script.match(TEST_ID_REGEX) || []).map((id) => id.toUpperCase()))];
+  for (const id of generatedIds) {
+    if (!approvedIds.includes(id)) errors.push(`Generated script contains unapproved test id ${id}.`);
+  }
+
+  const grounding = discoveredGrounding(pageDiscoveries);
+
+  // Every literal cy.get selector must come from discovery. Dynamic selectors are
+  // rejected by the prompt; this check prevents invented data-testid/id/name use.
+  for (const selector of extractLiteralArgs(script, "cy\\.get")) {
+    if (!grounding.selectors.has(selector)) {
+      errors.push(`Selector is not grounded in page discovery: ${selector}`);
+    }
+  }
+
+  // The same rule applies to selectors passed into the deterministic login helper.
+  const helperPattern = /\bcy\.loginWithRuntimeCredentials\s*\(\s*\{([\s\S]*?)\}\s*\)/g;
+  let helperMatch;
+  while ((helperMatch = helperPattern.exec(script))) {
+    const body = helperMatch[1];
+    const selectorPattern = /(?:usernameSelector|passwordSelector|submitSelector)\s*:\s*(['"`])([^'"`]+)\1/g;
+    let selectorMatch;
+    const found = [];
+    while ((selectorMatch = selectorPattern.exec(body))) {
+      found.push(selectorMatch[2]);
+      if (!grounding.selectors.has(selectorMatch[2])) {
+        errors.push(`Login helper selector is not grounded in page discovery: ${selectorMatch[2]}`);
+      }
+    }
+    if (found.length !== 3) errors.push("loginWithRuntimeCredentials must provide exactly the discovered username, password and submit selectors.");
+  }
+
+  // Literal navigation is restricted to discovered same-application paths.
+  for (const target of extractLiteralArgs(script, "cy\\.visit")) {
+    let path = target;
+    try {
+      const url = new URL(target);
+      path = `${url.pathname}${url.search}` || "/";
+    } catch {
+      if (!target.startsWith("/")) {
+        errors.push(`cy.visit target must be a discovered relative path: ${target}`);
+        continue;
+      }
+    }
+    if (!grounding.paths.has(path)) errors.push(`Navigation path is not grounded in page discovery: ${path}`);
+  }
+
+  return { valid: errors.length === 0, errors: [...new Set(errors)] };
+}
+
+module.exports = { validateScript, validateGroundedScript };
