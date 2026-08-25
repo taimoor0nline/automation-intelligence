@@ -88,6 +88,8 @@ app.get("/health", (req, res) => {
 // Keep the checked-in demo UI generic at runtime:
 // - Known pages starts empty so discovery is not biased toward /feedback.
 // - Newly added human test cases are inserted at the top for immediate review.
+// - Public-facing branding stays provider-neutral while the backend continues
+//   to use the configured AI service internally.
 // These replacements are intentionally narrow and fail harmlessly if the UI is
 // later refactored; static assets continue to be served normally below.
 app.get("/", (req, res, next) => {
@@ -97,7 +99,9 @@ app.get("/", (req, res, next) => {
 
     const adjusted = html
       .replace('id="additionalPaths" value="/feedback"', 'id="additionalPaths" value=""')
-      .replace("if(index<0)testCases.push(tc);else testCases[index]=tc;", "if(index<0)testCases.unshift(tc);else testCases[index]=tc;");
+      .replace("if(index<0)testCases.push(tc);else testCases[index]=tc;", "if(index<0)testCases.unshift(tc);else testCases[index]=tc;")
+      .replace("User Story → Qwen → Human Review → Automated Execution → Analytics", "User Story → IA → Human Review → Automated Execution → Analytics")
+      .replace("$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthText').textContent=data.qwenConfigured?'Connected':'Not connected'");
 
     res.type("html").send(adjusted);
   });
