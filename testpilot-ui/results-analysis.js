@@ -19,14 +19,19 @@
   }
 
   function markReadyForRerun(summary) {
-    const runBtn = document.getElementById('runBtn');
-    const runHint = document.getElementById('runHint');
-    if (!runBtn || !summary) return;
-    runBtn.textContent = 'Run Again';
-    runBtn.disabled = false;
-    if (runHint) {
-      runHint.textContent = `${summary.passed || 0} passed · ${summary.failed || 0} failed · adjust selections or run the approved set again`;
-    }
+    if (!summary) return;
+    // Defer one tick because the base run handler restores its original button text
+    // in finally after renderResults returns.
+    setTimeout(() => {
+      const runBtn = document.getElementById('runBtn');
+      const runHint = document.getElementById('runHint');
+      if (!runBtn) return;
+      runBtn.textContent = 'Run Again';
+      runBtn.disabled = false;
+      if (runHint) {
+        runHint.textContent = `${summary.passed || 0} passed · ${summary.failed || 0} failed · adjust selections or run the approved set again`;
+      }
+    }, 0);
   }
 
   async function analyzeResults() {
