@@ -5,15 +5,10 @@ const router = express.Router();
 const { getSession, resetSession } = require("../data/sessionStore");
 const { discoverPages } = require("../services/pageDiscovery");
 const qwen = require("../services/qwenClient");
-const { validateScript } = require("../services/scriptValidator");
-const { executeGeneratedTests } = require("../services/testRunner");
-const { buildAnalyticsReport } = require("../services/reportGenerator");
+const { assessTestCases, readinessSummary } = require("../services/testCaseFeasibility");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
-const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
-const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional", "custom"]);
-const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
 const FIXED_ENVIRONMENT = "Test";
 
 function extractUrl(text) {
@@ -38,110 +33,11 @@ function resolveDiscoveryUrls(targetUrl, additionalPaths = []) {
   return [...new Set(urls)];
 }
 
-function parseApproval(text, allIds) {
-  const normalized = String(text || "").trim().toLowerCase();
-  if (["approve all", "approve", "yes"].includes(normalized)) return allIds;
-  const ids = String(text || "").toUpperCase().match(TEST_ID_GLOBAL_REGEX) || [];
-  if (/reject/i.test(text)) return allIds.filter((id) => !ids.includes(id));
-  return ids.length ? ids : null;
-}
-
-function cleanString(value, max = 1000) {
-  return String(value ?? "").trim().slice(0, max);
-}
-
-function normalizeReviewedTestCases(input, fallbackCases) {
-  if (!Array.isArray(input)) return fallbackCases;
-  if (input.length > 50) throw new Error("A maximum of 50 reviewed test cases is allowed in the demo.");
-
-  const seen = new Set();
-  const normalized = [];
-
-  input.forEach((raw, index) => {
-    if (!raw || typeof raw !== "object") return;
-
-    let id = cleanString(raw.id, 20).toUpperCase();
-    if (!TEST_ID_REGEX.test(id) || seen.has(id)) {
-      id = `TC-H${String(index + 1).padStart(3, "0")}`;
-      while (seen.has(id)) {
-        id = `TC-H${String(index + 2).padStart(3, "0")}`;
-      }
-    }
-
-    const title = cleanString(raw.title, 300);
-    if (!title) return;
-
-    const typeCandidate = cleanString(raw.type, 30).toLowerCase();
-    const priorityCandidate = cleanString(raw.priority, 30).toLowerCase();
-
-    const steps = Array.isArray(raw.steps)
-      ? raw.steps.slice(0, 30).map((step) => {
-          if (typeof step === "string") {
-            return { action: cleanString(step, 500), target: "", value: null };
-          }
-          return {
-            action: cleanString(step?.action, 500),
-            target: cleanString(step?.target, 300),
-            value: step?.value === null || step?.value === undefined ? null : cleanString(step.value, 300),
-          };
-        }).filter((step) => step.action || step.target)
-      : [];
-
-    const expectedResults = Array.isArray(raw.expectedResults)
-      ? raw.expectedResults.slice(0, 20).map((value) => cleanString(value, 600)).filter(Boolean)
-      : [];
-
-    const preconditions = Array.isArray(raw.preconditions)
-      ? raw.preconditions.slice(0, 20).map((value) => cleanString(value, 500)).filter(Boolean)
-      : [];
-
-    normalized.push({
-      id,
-      title,
-      type: ALLOWED_TYPES.has(typeCandidate) ? typeCandidate : "functional",
-      priority: ALLOWED_PRIORITIES.has(priorityCandidate) ? priorityCandidate : "medium",
-      preconditions,
-      testData: raw.testData && typeof raw.testData === "object" && !Array.isArray(raw.testData) ? raw.testData : {},
-      steps,
-      expectedResults,
-      source: raw.source === "human" || id.startsWith("TC-H") ? "human" : "ai-reviewed",
-    });
-
-    seen.add(id);
-  });
-
-  if (!normalized.length) throw new Error("No valid reviewed test cases were supplied.");
-  return normalized;
-}
-
 function formatTestCaseList(testCases) {
-  return testCases.map((tc) => `• ${tc.id} [${tc.type}/${tc.priority}] — ${tc.title}`).join("\n");
-}
-
-function addEvidenceUrls(summary, sessionId, artifacts) {
-  if (!summary) return summary;
-  const encodedSession = encodeURIComponent(sessionId);
-  return {
-    ...summary,
-    tests: (summary.tests || []).map((test) => {
-      if (!test.fail) return test;
-      const testCaseId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0] || null;
-      const hasVideo = Boolean(testCaseId && artifacts?.videosByTestCase?.[testCaseId]);
-      const hasScreenshot = Boolean(testCaseId && artifacts?.screenshotsByTestCase?.[testCaseId]);
-      return {
-        ...test,
-        evidence: {
-          ...(test.evidence || {}),
-          videoUrl: hasVideo
-            ? `/api/artifacts/${encodedSession}/video/${encodeURIComponent(testCaseId)}`
-            : null,
-          screenshotUrl: hasScreenshot
-            ? `/api/artifacts/${encodedSession}/screenshot/${encodeURIComponent(testCaseId)}`
-            : null,
-        },
-      };
-    }),
-  };
+  return testCases.map((tc) => {
+    const readiness = tc.automationReadiness?.status || "UNKNOWN";
+    return `• ${tc.id} [${tc.type}/${tc.priority}] [${readiness}] — ${tc.title}`;
+  }).join("\n");
 }
 
 router.post("/api/chat", async (req, res) => {
@@ -151,15 +47,13 @@ router.post("/api/chat", async (req, res) => {
     targetUrl: explicitTargetUrl,
     additionalPaths = [],
     credentials = null,
-    reviewedTestCases = null,
-    approvedIds: explicitApprovedIds = null,
   } = req.body || {};
 
   const session = getSession(sessionId);
 
   try {
     if (session.state === "IDLE") {
-      if (!qwen.isConfigured()) throw new Error("Real Qwen is required for this demo. Configure QWEN_API_KEY and QWEN_BASE_URL in .env.");
+      if (!qwen.isConfigured()) throw new Error("The configured AI provider is required for this demo.");
 
       const rawUrl = explicitTargetUrl || extractUrl(message);
       if (!rawUrl) throw new Error("Please provide a target URL.");
@@ -184,119 +78,28 @@ router.post("/api/chat", async (req, res) => {
         environment: FIXED_ENVIRONMENT,
       });
 
-      session.testCases = generated.testCases.map((tc) => ({ ...tc, source: "ai" }));
+      const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
+      session.testCases = assessTestCases(
+        generated.testCases.map((tc) => ({ ...tc, source: "ai" })),
+        { pageDiscoveries: session.pageDiscoveries, hasCredentials }
+      );
+      session.automationReadiness = readinessSummary(session.testCases);
       session.state = "AWAITING_APPROVAL";
 
       return res.json({
-        reply: `Qwen generated ${session.testCases.length} story-driven test cases from ${session.pageDiscoveries.length} discovered page(s).\n\n${formatTestCaseList(session.testCases)}`,
+        reply: `AI generated ${session.testCases.length} story-driven test cases from ${session.pageDiscoveries.length} discovered page(s). Each case was checked for Cypress automation readiness before human review.\n\n${formatTestCaseList(session.testCases)}`,
         feature: generated.feature || null,
         testCases: session.testCases,
         pageDiscoveries: session.pageDiscoveries,
-        usingRealQwen: true,
-        qwenModel: qwen.QWEN_MODEL,
+        automationReadiness: session.automationReadiness,
       });
     }
 
     if (session.state === "AWAITING_APPROVAL") {
-      session.testCases = normalizeReviewedTestCases(reviewedTestCases, session.testCases);
-
-      const allIds = session.testCases.map((tc) => tc.id);
-      const approvedIds = Array.isArray(explicitApprovedIds)
-        ? explicitApprovedIds.map((id) => String(id).toUpperCase()).filter((id) => allIds.includes(id))
-        : parseApproval(message, allIds);
-
-      if (!approvedIds || !approvedIds.length) {
-        throw new Error("Select at least one reviewed test case to execute.");
-      }
-
-      const approvedTestCases = session.testCases.filter((tc) => approvedIds.includes(tc.id));
-      if (!approvedTestCases.length) throw new Error("No test cases were approved.");
-      session.approvedIds = approvedIds;
-
-      const base = new URL(session.targetUrl);
-      const executionContext = {
-        baseUrl: `${base.protocol}//${base.host}`,
-        hasCredentials: Boolean(session.credentials?.username || session.credentials?.password),
-        credentials: session.credentials,
-      };
-
-      const generatedSpecs = await Promise.all(
-        approvedTestCases.map(async (testCase) => {
-          const generated = await qwen.generateAutomationCode({
-            approvedTestCases: [testCase],
-            pageDiscoveries: session.pageDiscoveries,
-            fileName: `${testCase.id}.cy.js`,
-            executionContext,
-          });
-
-          const validation = validateScript(generated.script);
-          if (!validation.valid) {
-            const error = new Error(
-              `Generated automation code for ${testCase.id} failed validation: ${validation.errors.join(" | ")}`
-            );
-            error.statusCode = 422;
-            error.validationErrors = validation.errors;
-            error.testCaseId = testCase.id;
-            throw error;
-          }
-
-          return {
-            ...generated,
-            testCaseId: testCase.id,
-            fileName: `${testCase.id}.cy.js`,
-          };
-        })
-      );
-
-      session.generatedScript = generatedSpecs;
-      session.state = "RUNNING";
-
-      const execResult = await executeGeneratedTests(generatedSpecs, executionContext);
-      if (!execResult.ok || !execResult.summary) {
-        session.state = "AWAITING_APPROVAL";
-        return res.status(500).json({
-          reply: `Automation execution could not complete: ${execResult.error || "unknown error"}`,
-          generatedScripts: generatedSpecs,
-        });
-      }
-
-      session.artifacts = execResult.artifacts || null;
-      const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
-
-      const analyses = await Promise.all(
-        summary.tests.filter((t) => t.fail).map(async (test) => {
-          const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
-          const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title };
-          const analysis = await qwen.analyzeFailure({
-            story: session.story,
-            testCase: tc,
-            expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
-            actual: test.err?.message || "Automation assertion failed",
-          });
-          return { testCase: tc.id, ...analysis };
-        })
-      );
-
-      session.failureAnalyses = analyses;
-      session.lastResults = { execResult, summary };
-      session.reportHtml = buildAnalyticsReport({
-        sessionId,
-        story: session.story,
-        targetUrl: session.targetUrl,
-        environment: session.environment,
-        summary,
-        analyses,
-        model: qwen.QWEN_MODEL,
-      });
-      session.state = "DONE";
-
-      return res.json({
-        reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`,
-        summary,
-        failureAnalyses: analyses,
-        generatedScripts: generatedSpecs,
-        reviewedTestCases: session.testCases,
-        reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
+      return res.status(409).json({
+        reply: "Test cases are awaiting human review. Select only Automation Ready cases and use Run Approved Tests.",
+        testCases: session.testCases,
+        automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []),
       });
     }
 
@@ -308,13 +111,6 @@ router.post("/api/chat", async (req, res) => {
     });
   } catch (err) {
     console.error("[api/chat]", err);
-    if (err.statusCode === 422) {
-      return res.status(422).json({
-        reply: err.message,
-        validationErrors: err.validationErrors || [],
-        testCaseId: err.testCaseId || null,
-      });
-    }
     return res.status(500).json({ reply: `Error: ${err.message}` });
   }
 });
