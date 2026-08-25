@@ -17,6 +17,25 @@ function withDemoDelay(chain) {
   );
 }
 
+// Credentials are owned by the deterministic automation framework, not by the
+// generated test code. AI-generated specs call this helper with selectors that
+// came from page discovery; they never read, copy, assign or log credentials.
+Cypress.Commands.add("loginWithRuntimeCredentials", ({ usernameSelector, passwordSelector, submitSelector }) => {
+  const username = Cypress.env("TEST_USERNAME");
+  const password = Cypress.env("TEST_PASSWORD");
+
+  if (!username || !password) {
+    throw new Error("Valid runtime test credentials were not supplied to the automation engine.");
+  }
+  if (!usernameSelector || !passwordSelector || !submitSelector) {
+    throw new Error("Login helper requires discovered username, password and submit selectors.");
+  }
+
+  cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
+  cy.get(passwordSelector).clear({ log: false }).type(String(password), { log: false });
+  cy.get(submitSelector).click();
+});
+
 // Slow only visible user interactions for presentation/demo purposes.
 // Assertions and retry behaviour stay at normal speed.
 ["click", "type", "select", "check", "uncheck", "clear"].forEach((commandName) => {
