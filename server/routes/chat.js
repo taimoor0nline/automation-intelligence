@@ -8,6 +8,7 @@ const { compactDiscoveriesForModel } = require("../services/modelDiscoveryView")
 const { normalizeProfile } = require("../services/aiModelProfiles");
 const qwen = require("../services/qwenClient");
 const { readinessSummary } = require("../services/testCaseFeasibility");
+const { MAX_GENERATED_CASES, pruneGeneratedTestCases } = require("../services/testCaseScopeFilter");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
@@ -113,18 +114,28 @@ router.post("/api/chat", async (req, res) => {
       const generated = await qwen.generateTestCases({ story, pageDiscoveries: modelDiscoveries, environment: FIXED_ENVIRONMENT, modelTier: session.aiModelTier });
       const aiGenerationMs = Date.now() - aiStartedAt;
 
+      stage = "scope test cases";
+      const scopedCases = pruneGeneratedTestCases(generated.testCases, {
+        story,
+        pageDiscoveries: modelDiscoveries,
+        maxCases: MAX_GENERATED_CASES,
+      });
+      if (scopedCases.length !== generated.testCases.length) {
+        console.log(`[test-scope] Retained ${scopedCases.length}/${generated.testCases.length} distinct evidence-supported case(s); maximum=${MAX_GENERATED_CASES}.`);
+      }
+
       stage = "prepare human review";
-      session.testCases = generated.testCases.map((tc) => ({ ...tc, source: "ai", automationReadiness: null }));
+      session.testCases = scopedCases.map((tc) => ({ ...tc, source: "ai", automationReadiness: null }));
       session.automationReadiness = pendingReadinessSummary(session.testCases);
       session.readinessValidated = false;
       session.state = "AWAITING_APPROVAL";
 
       const totalMs = Date.now() - requestStartedAt;
       const cacheLabel = discoveryResult.cacheHit ? " cache-hit" : discoveryResult.bypassed ? " cache-bypassed" : " fresh";
-      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length}`);
+      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length} cases=${session.testCases.length}`);
 
       return res.json({
-        reply: `AI generated ${session.testCases.length} story-driven test cases from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately.\n\n${formatTestCaseList(session.testCases)}`,
+        reply: `AI generated ${session.testCases.length} story-driven test case(s), up to a maximum of ${MAX_GENERATED_CASES}, from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately.\n\n${formatTestCaseList(session.testCases)}`,
         feature: generated.feature || null,
         testCases: session.testCases,
         pageDiscoveries: session.pageDiscoveries,
