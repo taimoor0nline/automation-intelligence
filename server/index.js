@@ -116,14 +116,14 @@ function serveUi(req, res, next) {
       .replace("if(index<0)testCases.push(tc);else testCases[index]=tc;", "if(index<0)testCases.unshift(tc);else testCases[index]=tc;")
       .replace("User Story → Qwen → Human Review → Automated Execution → Analytics", "User Story → AI → Human Review → Automated Execution → Analytics")
       .replace("They are not sent to Qwen.", "They are not sent to the AI model.")
-      .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation system runs the reviewed cases; AI then explains failures.")
+      .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation system runs the reviewed cases deterministically; AI analysis is available on demand after execution.")
       .replace("$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthDot').className='dot '+(data.aiConnected?'ok':'bad');$('healthText').textContent=data.aiConnected?'Connected':'Not connected'")
       .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages and generating AI test cases. Readiness will be checked after the cases appear.")
       .replace("Discovering pages & asking Qwen…", "Discovering pages & generating tests…")
       .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checking`")
       .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The automation system is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
       .replace("Qwen failure analysis", "AI failure analysis")
-      .replace("</body>", `<script src="/readiness.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
+      .replace("</body>", `<script src="/readiness.js"></script><script src="/results-analysis.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
 
     res.type("html").send(adjusted);
   });
