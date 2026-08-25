@@ -89,12 +89,17 @@
         btn.disabled = false;
         btn.textContent = 'Analyze Test Results with AI';
         if (hint) hint.textContent = `${failed} failed test(s) are ready for optional AI analysis. Browser execution has already finished.`;
+        // The base page still receives a raw report URL from the execution response.
+        // Keep that report hidden until the user explicitly requests AI analysis.
+        setTimeout(() => {
+          const reportBox = document.getElementById('reportBox');
+          if (reportBox) reportBox.style.display = 'none';
+        }, 0);
       } else if (hasAnalyses && btn) {
         btn.style.display = 'none';
         if (hint) hint.textContent = 'AI analysis completed for the failed test cases.';
       }
     };
-    // Keep the classic-script global binding aligned with the wrapped function.
     try { renderResults = window.renderResults; } catch {}
   }
 })();
