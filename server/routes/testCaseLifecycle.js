@@ -93,7 +93,7 @@ router.post("/api/test-cases/revalidate", async (req, res) => {
 });
 
 router.post("/api/test-cases/generate-one", async (req, res) => {
-  const { sessionId = "default", requestText = "", testCases = null, credentials = null } = req.body || {};
+  const { sessionId = "default", requestText = "", testCases = null, credentials = null, requestedId = null } = req.body || {};
   const session = getSession(sessionId);
 
   try {
@@ -105,7 +105,9 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
     if (!request) throw new Error("Describe the specific test case you want the AI to generate.");
 
     const supplied = Array.isArray(testCases) ? testCases.map((tc, i) => normalizeTestCase(tc, `TC-H${String(i + 1).padStart(3, "0")}`)) : session.testCases;
-    const id = nextOnDemandId(session, supplied);
+    const requested = /^TC-H\d{3}$/i.test(String(requestedId || "")) ? String(requestedId).toUpperCase() : null;
+    const id = requested || nextOnDemandId(session, supplied);
+
     let candidate = await generateSingleTestCase({
       id,
       requestText: request,
@@ -113,10 +115,11 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
       pageDiscoveries: session.pageDiscoveries,
     });
     candidate.createdBy = "human-request";
+    candidate.source = "ai-on-demand";
     candidate.repairHistory = [];
     candidate.automationReadiness = classifyTestCase(candidate, context(session));
 
-    // Only legitimate, deterministic AI-repairable issues get one automatic repair attempt.
+    // Only legitimate deterministic AI-repairable issues get one automatic repair attempt.
     if (candidate.automationReadiness.resolutionType === RESOLUTION_AI_REPAIRABLE) {
       const before = candidate.automationReadiness;
       const repair = await repairTestCase({
@@ -141,14 +144,14 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
       }
     }
 
-    upsertSessionCase(session, candidate);
-    session.automationReadiness = readinessSummary(session.testCases);
-
+    // Preview only. The candidate is not persisted into the suite until the user
+    // reviews/modifies it and clicks Save Test Case in the editor.
     return res.json({
       ok: true,
+      preview: true,
       testCase: candidate,
       automationReadiness: candidate.automationReadiness,
-      readinessSummary: session.automationReadiness,
+      readinessSummary: readinessSummary([candidate]),
     });
   } catch (err) {
     return res.status(422).json({ ok: false, reply: err.message });
