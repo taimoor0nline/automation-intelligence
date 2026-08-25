@@ -14,6 +14,7 @@ const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
 const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
 const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional", "custom"]);
 const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
+const FIXED_ENVIRONMENT = "Test";
 
 function extractUrl(text) {
   const m = String(text || "").match(URL_REGEX);
@@ -149,7 +150,6 @@ router.post("/api/chat", async (req, res) => {
     message = "",
     targetUrl: explicitTargetUrl,
     additionalPaths = [],
-    environment = "Test",
     credentials = null,
     reviewedTestCases = null,
     approvedIds: explicitApprovedIds = null,
@@ -169,7 +169,7 @@ router.post("/api/chat", async (req, res) => {
 
       session.story = story;
       session.targetUrl = targetUrl;
-      session.environment = environment;
+      session.environment = FIXED_ENVIRONMENT;
       session.additionalPaths = Array.isArray(additionalPaths) ? additionalPaths : [];
       session.credentials = credentials && typeof credentials === "object"
         ? { username: String(credentials.username || ""), password: String(credentials.password || "") }
@@ -181,7 +181,7 @@ router.post("/api/chat", async (req, res) => {
       const generated = await qwen.generateTestCases({
         story,
         pageDiscoveries: session.pageDiscoveries,
-        environment,
+        environment: FIXED_ENVIRONMENT,
       });
 
       session.testCases = generated.testCases.map((tc) => ({ ...tc, source: "ai" }));
@@ -220,9 +220,6 @@ router.post("/api/chat", async (req, res) => {
         credentials: session.credentials,
       };
 
-      // The five demo cases are independent, so ask Qwen for their scripts in
-      // parallel instead of waiting for five sequential model round-trips.
-      // Each result is still written to its own physical spec file for evidence.
       const generatedSpecs = await Promise.all(
         approvedTestCases.map(async (testCase) => {
           const generated = await qwen.generateAutomationCode({
@@ -266,8 +263,6 @@ router.post("/api/chat", async (req, res) => {
       session.artifacts = execResult.artifacts || null;
       const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
 
-      // Failure explanations are independent too, so analyze multiple failures
-      // concurrently rather than adding another sequential wait to the demo.
       const analyses = await Promise.all(
         summary.tests.filter((t) => t.fail).map(async (test) => {
           const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
