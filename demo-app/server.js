@@ -16,6 +16,7 @@ const path = require("path");
 
 const app = express();
 const PORT = process.env.DEMO_APP_PORT || 4000;
+const HOST = process.env.DEMO_APP_HOST || "0.0.0.0";
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -193,13 +194,10 @@ app.post("/api/feedback", (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(
-    `[demo-app] Customer Feedback Form running at http://localhost:${PORT}/feedback`
-  );
-  console.log(
-    `[demo-app] Login page available at http://localhost:${PORT}/`
-  );
+app.listen(PORT, HOST, () => {
+  console.log(`[demo-app] Listening on ${HOST}:${PORT}`);
+  console.log(`[demo-app] Customer Feedback Form available at http://${HOST}:${PORT}/feedback`);
+  console.log(`[demo-app] Login page available at http://${HOST}:${PORT}/`);
 });
 
 module.exports = app;
