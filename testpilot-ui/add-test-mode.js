@@ -7,14 +7,10 @@
   style.textContent = `
     .test-create-mode{margin:0 0 14px;padding:14px;border:1px solid var(--border);border-radius:11px;background:#fff}
     .test-create-mode-title{font-size:12px;font-weight:800;color:#111827;margin-bottom:4px}
-    .test-create-mode-note{font-size:10.5px;line-height:1.45;color:#64748b;margin-bottom:10px}
-    .test-create-mode-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    .test-create-choice{appearance:none;text-align:left;border:1px solid var(--border);border-radius:10px;background:#f8fafc;padding:12px;cursor:pointer;transition:border-color .15s,box-shadow .15s,background .15s}
-    .test-create-choice:hover{border-color:#93c5fd;background:#f8fbff}
-    .test-create-choice.active{border-color:var(--blue);box-shadow:0 0 0 3px #eaf0ff;background:#f8fbff}
-    .test-create-choice strong{display:block;font-size:12px;color:#111827;margin-bottom:4px}
-    .test-create-choice span{display:block;font-size:10.5px;line-height:1.4;color:#64748b;font-weight:500}
-    @media(max-width:640px){.test-create-mode-options{grid-template-columns:1fr}}
+    .test-create-mode-note{font-size:10.5px;line-height:1.45;color:#64748b;margin-bottom:9px}
+    .test-create-mode select{width:100%;border:1px solid var(--border);border-radius:9px;padding:10px 11px;background:#fff;color:#111827;font-weight:700}
+    .test-create-mode select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px #eaf0ff}
+    .test-create-stage-note{margin-top:8px;padding:8px 10px;border-radius:8px;background:#f8fafc;border:1px solid var(--border);font-size:10.5px;line-height:1.45;color:#64748b}
   `;
   document.head.appendChild(style);
 
@@ -23,33 +19,56 @@
   chooser.className = 'test-create-mode';
   chooser.style.display = 'none';
   chooser.innerHTML = `
-    <div class="test-create-mode-title">How do you want to create this test?</div>
-    <div class="test-create-mode-note">Choose one creation method. You can still review and edit every field before saving.</div>
-    <div class="test-create-mode-options">
-      <button id="createWithAiBtn" class="test-create-choice" type="button">
-        <strong>Create with AI</strong>
-        <span>Describe one specific scenario and let AI prepare a grounded test-case candidate.</span>
-      </button>
-      <button id="createManuallyBtn" class="test-create-choice" type="button">
-        <strong>Create Manually</strong>
-        <span>Start from a Functional, Validation, Boundary, Negative or Blank template and edit it yourself.</span>
-      </button>
-    </div>`;
+    <div class="test-create-mode-title">Create test case</div>
+    <div class="test-create-mode-note">Choose how you want to start. In both modes you review and can edit every test-case field before saving.</div>
+    <select id="testCreationModeSelect" aria-label="Test case creation method">
+      <option value="">Select creation method…</option>
+      <option value="ai">Create with AI</option>
+      <option value="manual">Create Manually</option>
+    </select>
+    <div id="testCreationModeHint" class="test-create-stage-note">Select a creation method to continue.</div>`;
 
   const readiness = document.getElementById('editorReadiness');
   if (readiness) readiness.insertAdjacentElement('beforebegin', chooser);
   else card.querySelector('.section-head')?.insertAdjacentElement('afterend', chooser);
 
-  const aiBtn = document.getElementById('createWithAiBtn');
-  const manualBtn = document.getElementById('createManuallyBtn');
+  const modeSelect = document.getElementById('testCreationModeSelect');
+  const modeHint = document.getElementById('testCreationModeHint');
   const templateSection = document.getElementById('templateSection');
   const aiGenerator = document.getElementById('editorAiGenerator');
+  const saveBtn = document.getElementById('saveEditorBtn');
+  const cancelBtn = document.getElementById('cancelEditorBtn');
+
+  const detailNodes = [
+    document.getElementById('editId')?.closest('.field'),
+    document.getElementById('editTitle')?.closest('.field'),
+    document.getElementById('editType')?.closest('.two'),
+    document.getElementById('editPreconditions')?.closest('.field'),
+    document.getElementById('editSteps')?.closest('.field'),
+    document.getElementById('editExpected')?.closest('.field'),
+    document.getElementById('editorReadiness'),
+  ].filter(Boolean);
+
+  function showDetails(show) {
+    detailNodes.forEach((node) => { node.style.display = show ? '' : 'none'; });
+    if (saveBtn) saveBtn.style.display = show ? '' : 'none';
+    // Cancel remains visible in every stage so the user can leave without saving.
+    if (cancelBtn) cancelBtn.style.display = '';
+  }
+
+  function resetAiGenerator() {
+    const prompt = document.getElementById('editorAiPrompt');
+    const status = document.getElementById('editorAiStatus');
+    const btn = document.getElementById('editorAiGenerateBtn');
+    if (prompt) prompt.value = '';
+    if (status) { status.textContent = ''; status.className = 'status'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Generate'; }
+  }
 
   function setMode(mode) {
     const isAi = mode === 'ai';
     const isManual = mode === 'manual';
-    aiBtn?.classList.toggle('active', isAi);
-    manualBtn?.classList.toggle('active', isManual);
+
     if (templateSection) templateSection.style.display = isManual ? 'block' : 'none';
     if (aiGenerator) aiGenerator.style.display = isAi ? 'block' : 'none';
 
@@ -58,12 +77,43 @@
       heading.textContent = isAi ? 'Add Test Case · AI' : isManual ? 'Add Test Case · Manual' : 'Add Test Case';
     }
 
-    if (isAi) setTimeout(() => document.getElementById('editorAiPrompt')?.focus(), 20);
-    if (isManual) setTimeout(() => document.getElementById('templateSelect')?.focus(), 20);
+    if (!mode) {
+      showDetails(false);
+      if (modeHint) modeHint.textContent = 'Select a creation method to continue.';
+      return;
+    }
+
+    if (isManual) {
+      showDetails(true);
+      if (modeHint) modeHint.textContent = 'Choose a template, then review or edit all fields before saving.';
+      setTimeout(() => document.getElementById('templateSelect')?.focus(), 20);
+      return;
+    }
+
+    // AI mode is intentionally staged: first ask AI for a scenario candidate,
+    // then reveal the full editable form for human review before Save is enabled.
+    showDetails(false);
+    resetAiGenerator();
+    if (modeHint) modeHint.textContent = 'Describe one scenario and generate a candidate. The full test-case fields will appear for review before you can save.';
+    setTimeout(() => document.getElementById('editorAiPrompt')?.focus(), 20);
   }
 
-  aiBtn?.addEventListener('click', () => setMode('ai'));
-  manualBtn?.addEventListener('click', () => setMode('manual'));
+  modeSelect?.addEventListener('change', () => setMode(modeSelect.value));
+
+  // readiness.js fills the editor when the AI candidate arrives. Watch its status
+  // and reveal all fields only after generation succeeds so human review remains mandatory.
+  const aiStatus = document.getElementById('editorAiStatus');
+  if (aiStatus) {
+    const observer = new MutationObserver(() => {
+      if (modeSelect?.value !== 'ai') return;
+      if (/candidate generated/i.test(aiStatus.textContent || '')) {
+        showDetails(true);
+        if (modeHint) modeHint.textContent = 'AI candidate generated. Review or edit every field below, then save the test case.';
+        setTimeout(() => document.getElementById('editTitle')?.focus(), 20);
+      }
+    });
+    observer.observe(aiStatus, { childList: true, characterData: true, subtree: true });
+  }
 
   const previousOpenEditor = window.openEditor;
   if (typeof previousOpenEditor === 'function') {
@@ -73,14 +123,21 @@
       chooser.style.display = isNew ? 'block' : 'none';
 
       if (isNew) {
-        setMode(null);
+        if (modeSelect) modeSelect.value = '';
         if (templateSection) templateSection.style.display = 'none';
         if (aiGenerator) aiGenerator.style.display = 'none';
+        showDetails(false);
+        resetAiGenerator();
         const heading = document.getElementById('editorHeading');
         if (heading) heading.textContent = 'Add Test Case';
+        if (modeHint) modeHint.textContent = 'Select a creation method to continue.';
+        setTimeout(() => modeSelect?.focus(), 20);
       } else {
+        // Editing an existing case is always a direct full-form review/edit flow.
         if (templateSection) templateSection.style.display = 'none';
         if (aiGenerator) aiGenerator.style.display = 'none';
+        showDetails(true);
+        if (saveBtn) saveBtn.style.display = '';
       }
     };
     try { openEditor = window.openEditor; } catch {}
