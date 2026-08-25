@@ -11,7 +11,10 @@ function numberEnv(value, fallback = 0) {
 }
 
 module.exports = defineConfig({
-  allowCypressEnv: false,
+  // Runtime credentials/selectors and demo timing are injected by the server and
+  // consumed only by the framework-owned support layer. Generated specs are still
+  // rejected by scriptValidator if they attempt direct Cypress.env()/cy.env() access.
+  allowCypressEnv: true,
   experimentalMemoryManagement: true,
   numTestsKeptInMemory: 0,
   e2e: {
