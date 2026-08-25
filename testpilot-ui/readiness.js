@@ -8,16 +8,22 @@
   const readinessLabel = (status) => status === 'READY' ? 'Automation Ready' : status === 'NEEDS_PREFLIGHT' ? 'Checking readiness' : String(status || 'NEEDS_PREFLIGHT').replaceAll('_', ' ');
   const readinessClass = (status) => status === 'READY' ? 'ready' : status === 'NEEDS_PREFLIGHT' ? 'preflight' : 'blocked';
 
+  function lockRunForReadiness(message = 'Automation readiness is being checked. Run Approved Tests will unlock after validation completes.') {
+    const runBtn = $('runBtn');
+    if (runBtn) runBtn.disabled = true;
+    const hint = $('runHint');
+    if (hint) hint.textContent = message;
+  }
+
   // Add provider-neutral AI quality controls without exposing server-side model IDs.
   const passwordField = $('password')?.closest('.field');
   if (passwordField && !$('aiModelTier')) {
     const controls = document.createElement('div');
     controls.innerHTML = '<div class="field"><label>AI quality profile</label><select id="aiModelTier"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="strong">Strong</option></select><small>Fast prioritizes response time. Balanced and Strong use progressively more capable server-side models configured in .env.</small></div><div class="field" style="margin-top:9px"><label style="font-weight:600"><input id="bypassDiscoveryCache" type="checkbox" style="width:auto;margin:0 6px 0 0">Fresh page discovery</label><small>Enable this to ignore the in-memory discovery cache for this generation.</small></div>';
     passwordField.insertAdjacentElement('afterend', controls);
+    if ($('aiModelTier')) $('aiModelTier').value = 'strong';
   }
 
-  // The original page owns the main generation handler. Enrich only its /api/chat
-  // request with the selected profile and cache policy, keeping the UI/provider boundary clean.
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
     const url = typeof input === 'string' ? input : input?.url;
@@ -28,7 +34,7 @@
         const payload = JSON.parse(init.body);
         initialGeneration = payload.message !== 'approve reviewed cases';
         if (initialGeneration) {
-          payload.aiModelTier = $('aiModelTier')?.value || 'fast';
+          payload.aiModelTier = $('aiModelTier')?.value || 'strong';
           payload.bypassDiscoveryCache = Boolean($('bypassDiscoveryCache')?.checked);
         }
         nextInit = { ...init, body: JSON.stringify(payload) };
@@ -38,9 +44,7 @@
     const response = await nativeFetch(input, nextInit);
     if (initialGeneration) {
       response.clone().json().then((data) => {
-        if (data?.generationTiming) {
-          lastGenerationMeta = data.generationTiming;
-        }
+        if (data?.generationTiming) lastGenerationMeta = data.generationTiming;
       }).catch(() => {});
     }
     return response;
@@ -49,6 +53,7 @@
   async function refreshReadiness() {
     if (!sessionId || !testCases.length || readinessRefreshInFlight) return;
     readinessRefreshInFlight = true;
+    lockRunForReadiness('Checking automation readiness… Run Approved Tests is locked.');
     try {
       const r = await fetch('/api/test-cases/revalidate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -59,17 +64,22 @@
         testCases = data.testCases;
         renderCases();
       } else if (!r.ok) {
+        lockRunForReadiness('Readiness validation did not complete. Resolve the error before running tests.');
         showError(data.reply || 'Automation readiness validation failed.');
       }
     } catch (err) {
+      lockRunForReadiness('Readiness validation did not complete. Resolve the connection error before running tests.');
       console.warn('[readiness] refresh failed', err);
+      showError('Automation readiness could not be checked. Run Approved Tests remains locked.');
     } finally {
       readinessRefreshInFlight = false;
+      if (testCases.every((tc) => tc.automationReadiness)) renderCases();
     }
   }
 
   function scheduleReadiness(delayMs = 180) {
     clearTimeout(readinessTimer);
+    lockRunForReadiness();
     readinessTimer = setTimeout(refreshReadiness, delayMs);
   }
 
@@ -80,6 +90,7 @@
     $('addCaseBtn').disabled = !sessionId;
     if (!testCases.length) {
       $('cases').innerHTML = '<div class="empty">No test cases returned.</div>';
+      lockRunForReadiness('Generate test cases before running automation.');
       return;
     }
 
@@ -98,11 +109,11 @@
       if (isReady) ready++; else if (isPreflight) preflight++; else blocked++;
       const cls = readinessClass(status);
       const label = readinessLabel(status);
-      const reason = readiness?.reason || (isPreflight ? 'The automation system is checking this test against discovered application evidence and supported capabilities.' : '');
+      const reason = readiness?.reason || (isPreflight ? 'The automation system is validating this test against discovered application evidence and compiling its deterministic automation plan.' : '');
       const reasonCode = readiness?.reasonCode || '';
       const resolution = readiness?.resolutionType || '';
-      const checked = isReady || isPreflight ? 'checked' : '';
-      const disabled = !isReady && !isPreflight ? 'disabled' : '';
+      const checked = isReady ? 'checked' : '';
+      const disabled = isReady ? '' : 'disabled';
       let actions = '';
       if (resolution === 'AI_REPAIRABLE') actions = '<button class="btn ghost" type="button" onclick="repairCaseWithAI(' + i + ')">Fix with AI</button>';
       else if (resolution === 'USER_INPUT_REQUIRED') actions = '<button class="btn ghost" type="button" onclick="focusRequiredInput(' + i + ')">Provide required input</button>';
@@ -119,23 +130,26 @@
         '<div class="case-actions"><button class="btn ghost" onclick="openEditor(' + i + ')">Edit</button><button class="btn ghost danger" onclick="deleteCase(' + i + ')">Delete</button></div></div>';
     }).join('');
 
-    $('runHint').textContent = ready + ' Automation Ready · ' + preflight + ' checking · ' + blocked + ' action/manual';
-    // Do not let a user start while the visible readiness phase is still pending.
-    $('runBtn').disabled = preflight > 0 || ready === 0;
+    if (preflight > 0 || readinessRefreshInFlight || needsRefresh) {
+      lockRunForReadiness(preflight + ' case(s) checking readiness · Run Approved Tests locked');
+    } else {
+      $('runHint').textContent = ready + ' Automation Ready · ' + blocked + ' action/manual';
+      $('runBtn').disabled = ready === 0;
+    }
 
     if (needsRefresh) {
-      // Keep the Checking state visible long enough for the reviewer to actually see
-      // generation and readiness as two separate phases.
       setTimeout(() => {
         const cacheText = lastGenerationMeta?.discoveryCacheBypassed ? ' · fresh discovery' : lastGenerationMeta?.discoveryCacheHit ? ' · discovery cache used' : '';
-        $('caseSubtitle').textContent = 'AI test cases generated · checking automation readiness…' + cacheText;
+        $('caseSubtitle').textContent = 'AI test cases generated · applying automation readiness checks…' + cacheText;
       }, 0);
-      scheduleReadiness(850);
-    } else {
+      // Keep the pending phase visible so the reviewer can clearly see generation
+      // and deterministic readiness as separate gates.
+      scheduleReadiness(1500);
+    } else if (!readinessRefreshInFlight) {
       setTimeout(() => {
-        const profile = $('aiModelTier')?.selectedOptions?.[0]?.textContent || 'Fast';
+        const profile = $('aiModelTier')?.selectedOptions?.[0]?.textContent || 'Strong';
         const timing = lastGenerationMeta?.totalMs ? ' · generated in ' + (lastGenerationMeta.totalMs / 1000).toFixed(1) + 's' : '';
-        $('caseSubtitle').textContent = profile + ' AI profile · readiness checked' + timing;
+        $('caseSubtitle').textContent = profile + ' AI profile · automation readiness completed' + timing;
       }, 0);
     }
   };
@@ -152,6 +166,7 @@
     const tc = testCases[index];
     if (!tc) return;
     clearError();
+    lockRunForReadiness('AI repair in progress. Readiness will be rechecked before execution.');
     const button = document.querySelector('.case:nth-child(' + (index + 1) + ') .readiness-actions button');
     if (button) { button.disabled = true; button.textContent = 'Repairing…'; }
     try {
@@ -165,7 +180,12 @@
     } catch (err) { showError(err.message); renderCases(); }
   };
 
-  ['username', 'password'].forEach((id) => $(id).addEventListener('input', () => { if (sessionId && testCases.length) scheduleReadiness(); }));
+  ['username', 'password'].forEach((id) => $(id).addEventListener('input', () => {
+    if (sessionId && testCases.length) {
+      lockRunForReadiness('Execution inputs changed · rechecking automation readiness…');
+      scheduleReadiness(350);
+    }
+  }));
 
   const modalCard = $('editorModal')?.querySelector('.modal-card');
   if (modalCard && !$('editorReadiness')) {
@@ -191,7 +211,7 @@
     const r = tc?.automationReadiness;
     const history = tc?.repairHistory || [];
     if (!r) {
-      box.innerHTML = '<strong>Automation readiness</strong><div>This new or edited test will be revalidated before execution.</div>';
+      box.innerHTML = '<strong>Checking required</strong><div>This new or edited test must pass deterministic automation readiness before it can be selected for execution.</div>';
       return;
     }
     const historyHtml = history.length ? '<div class="history"><b>Repair history</b><br>' + history.map((x) => 'Attempt ' + escapeHtml(x.attempt) + ': ' + escapeHtml(x.reasonCode || x.originalStatus) + ' → ' + escapeHtml(x.result || 'review')).join('<br>') + '</div>' : '';
@@ -262,6 +282,7 @@
   $('saveEditorBtn').addEventListener('click', () => {
     const generated = pendingGeneratedCase;
     const savedId = $('editId').value;
+    lockRunForReadiness('Test case changed · rechecking automation readiness…');
     setTimeout(() => {
       if (generated) {
         const index = testCases.findIndex((tc) => tc.id === savedId);
@@ -273,7 +294,7 @@
         }
         pendingGeneratedCase = null;
       }
-      scheduleReadiness(180);
+      scheduleReadiness(350);
     }, 40);
   });
 })();
