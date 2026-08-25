@@ -47,16 +47,64 @@ function resolveLoginRuntime(pageDiscoveries = []) {
 }
 
 function isPreExecutionAutomationFailure(test) {
-  const duration = Number(test?.durationMs);
   const message = String(test?.err?.message || "");
-  if (Number.isFinite(duration) && duration <= 50) return true;
-  return /\.type\(\).*empty|empty string|cannot type|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution/i.test(message);
+  return /runtime login credentials are not configured|runtime login controls were not grounded|allowCypressEnv|returned a promise from a command|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution|could not verify that this server is running|browser.*(?:failed|closed|crashed)|support file.*(?:error|failed)/i.test(message);
 }
 
 function automationFailureAnalysis(tc, test) {
   const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
-  const actual = test.err?.message || "The generated automation failed before meaningful application validation completed.";
-  return { testCase: tc.id, summary: "The test case itself was Automation Ready, but the generated runtime implementation failed before meaningful application validation completed.", classification: "AUTOMATION_DEFECT", expected, actual, probableCause: "A runtime implementation defect escaped pre-execution validation. Test-case readiness and generated-runtime validity are intentionally tracked as separate gates.", severity: "medium", confidence: 0.99 };
+  const actual = test.err?.message || "The automation runtime failed before meaningful application validation completed.";
+  return {
+    testCase: tc.id,
+    summary: "The test case was Automation Ready, but the automation runtime failed before meaningful application validation completed.",
+    classification: "AUTOMATION_DEFECT",
+    expected,
+    actual,
+    probableCause: "A runtime or framework implementation problem prevented the approved test from reaching meaningful application validation.",
+    severity: "medium",
+    confidence: 0.99,
+  };
+}
+
+function failedAssertionFor(tc, test) {
+  const assertions = tc?.automationReadiness?.automationPlan?.assertions || [];
+  const message = String(test?.err?.message || "");
+  if (/not to be empty|to not be empty|expected '' not to be empty/i.test(message)) {
+    return assertions.find((item) => item.operation === "ASSERT_TEXT_NOT_EMPTY") || null;
+  }
+  if (/be visible|to be visible/i.test(message)) {
+    return assertions.find((item) => item.operation === "ASSERT_VISIBLE") || null;
+  }
+  if (/url/i.test(message)) {
+    return assertions.find((item) => item.operation === "ASSERT_URL_INCLUDES" || item.operation === "ASSERT_URL_NOT_INCLUDES") || null;
+  }
+  if (/hidden|not exist|not be visible/i.test(message)) {
+    return assertions.find((item) => item.operation === "ASSERT_HIDDEN_OR_ABSENT") || null;
+  }
+  return assertions.length === 1 ? assertions[0] : null;
+}
+
+function describeObservedFailure(tc, test) {
+  const raw = String(test?.err?.message || "Automation assertion failed");
+  const assertion = failedAssertionFor(tc, test);
+  if (!assertion) return raw;
+  const target = assertion.selector || assertion.path || "the expected target";
+  if (assertion.operation === "ASSERT_TEXT_NOT_EMPTY") {
+    return `The deterministic test reached its assertion phase. Expected ${target} to contain non-empty validation text, but it remained empty until the assertion timed out. Runtime message: ${raw}`;
+  }
+  if (assertion.operation === "ASSERT_VISIBLE") {
+    return `The deterministic test reached its assertion phase. Expected ${target} to be visible, but the visibility assertion failed. Runtime message: ${raw}`;
+  }
+  if (assertion.operation === "ASSERT_HIDDEN_OR_ABSENT") {
+    return `The deterministic test reached its assertion phase. Expected ${target} to remain hidden or absent, but that assertion failed. Runtime message: ${raw}`;
+  }
+  if (assertion.operation === "ASSERT_URL_INCLUDES") {
+    return `The deterministic test reached its assertion phase. Expected the current URL to include ${target}, but the URL assertion failed. Runtime message: ${raw}`;
+  }
+  if (assertion.operation === "ASSERT_URL_NOT_INCLUDES") {
+    return `The deterministic test reached its assertion phase. Expected the current URL not to include ${target}, but the URL assertion failed. Runtime message: ${raw}`;
+  }
+  return raw;
 }
 
 function analysisContainsOutOfScopeContent(analysis) {
@@ -64,7 +112,7 @@ function analysisContainsOutOfScopeContent(analysis) {
 }
 function constrainLoginAnalysis(analysis, tc, test) {
   if (!analysisContainsOutOfScopeContent(analysis)) return { testCase: tc.id, ...analysis };
-  const actual = test.err?.message || "The login negative test did not produce the expected authentication rejection behavior.";
+  const actual = describeObservedFailure(tc, test);
   const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
   const classification = analysis?.classification === "APPLICATION_DEFECT" ? "APPLICATION_DEFECT" : analysis?.classification || "UNKNOWN";
   return { testCase: tc.id, summary: classification === "APPLICATION_DEFECT" ? "The login negative test reached the application but did not observe the expected login rejection behavior." : "The login negative test failed, and the analysis has been constrained to the authentication scope defined by the business story.", classification, expected, actual, probableCause: classification === "APPLICATION_DEFECT" ? "The login validation or authentication rejection behavior may not match the expected result." : "The failure requires review within the login/authentication flow.", severity: analysis?.severity || "medium", confidence: Math.min(Number(analysis?.confidence) || 0.5, 0.85) };
@@ -105,6 +153,65 @@ function addEvidenceUrls(summary, sessionId, artifacts) {
     return { ...test, evidence: { ...(test.evidence || {}), videoUrl: hasVideo ? `/api/artifacts/${encodedSession}/video/${encodeURIComponent(testCaseId)}` : null, screenshotUrl: hasScreenshot ? `/api/artifacts/${encodedSession}/screenshot/${encodeURIComponent(testCaseId)}` : null } };
   }) };
 }
+
+async function analyzeStoredFailures(session, modelTier) {
+  const summary = session.lastResults?.summary;
+  if (!summary) throw new Error("No completed automation results are available for analysis.");
+  const loginOnly = isLoginOnlyStory(session.story);
+  const failedTests = (summary.tests || []).filter((test) => test.fail);
+  if (!failedTests.length) return [];
+
+  return Promise.all(failedTests.map(async (test) => {
+    const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
+    const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title, expectedResults: [] };
+    if (isPreExecutionAutomationFailure(test)) return automationFailureAnalysis(tc, test);
+    const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
+    const actual = describeObservedFailure(tc, test);
+    const analysis = await qwen.analyzeFailure({
+      story: session.story,
+      testCase: tc,
+      expected,
+      actual,
+      modelTier,
+    });
+    if (loginOnly) return constrainLoginAnalysis(analysis, tc, test);
+    return { testCase: tc.id, ...analysis, actual: analysis.actual || actual };
+  }));
+}
+
+router.post("/api/test-results/analyze", async (req, res) => {
+  const { sessionId = "default" } = req.body || {};
+  const session = getSession(sessionId);
+  try {
+    if (!session.lastResults?.summary) return res.status(409).json({ reply: "Run approved tests before requesting AI result analysis." });
+    if (session.state === "RUNNING") return res.status(409).json({ reply: "Automation is still running. AI analysis is available only after browser execution completes." });
+
+    const modelTier = session.aiModelTier || "strong";
+    console.log(`[result-analysis] Starting on-demand AI analysis for ${session.lastResults.summary.failed || 0} failed test(s) using profile=${modelTier}.`);
+    const analyses = await analyzeStoredFailures(session, modelTier);
+    session.failureAnalyses = analyses;
+    session.reportHtml = buildAnalyticsReport({
+      sessionId,
+      story: session.story,
+      targetUrl: session.targetUrl,
+      environment: session.environment,
+      summary: session.lastResults.summary,
+      analyses,
+      model: modelTier,
+    });
+    console.log(`[result-analysis] Completed on-demand AI analysis for ${analyses.length} failed test(s).`);
+    return res.json({
+      ok: true,
+      failureAnalyses: analyses,
+      summary: session.lastResults.summary,
+      aiModelTier: modelTier,
+      reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
+    });
+  } catch (err) {
+    console.error("[result-analysis]", err);
+    return res.status(500).json({ reply: `AI result analysis could not complete: ${err.message}` });
+  }
+});
 
 router.post("/api/chat", async (req, res, next) => {
   const { sessionId = "default", message = "", reviewedTestCases = null, approvedIds = [] } = req.body || {};
@@ -156,30 +263,38 @@ router.post("/api/chat", async (req, res, next) => {
       return res.status(500).json({ reply: "The deterministic automation compiler produced an invalid runtime script. Execution was not started.", validationErrors: validation.errors, automationReadiness: session.automationReadiness });
     }
     console.log("[automation-contract] Deterministic runtime script validated successfully; no AI code-generation step was required.");
+    console.log("[execution] Browser execution is deterministic. No AI calls will be made until execution is complete and the user explicitly requests result analysis.");
 
     session.generatedScript = [{ fileName: generated.fileName, framework: generated.framework, language: generated.language, generationMode: generated.generationMode, script: generated.script, testCaseIds: approved }];
     session.approvedIds = approved;
+    session.failureAnalyses = [];
     session.state = "RUNNING";
+
     const execResult = await executeSingleGeneratedSpec(generated, executionContext);
-    if (!execResult.ok || !execResult.summary) { session.state = "AWAITING_APPROVAL"; return res.status(500).json({ reply: `Automation execution could not complete: ${execResult.error || "unknown error"}` }); }
+    if (!execResult.ok || !execResult.summary) {
+      session.state = "AWAITING_APPROVAL";
+      return res.status(500).json({ reply: `Automation execution could not complete: ${execResult.error || "unknown error"}` });
+    }
 
     session.artifacts = execResult.artifacts || null;
     const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
-    const loginOnly = isLoginOnlyStory(session.story);
-    const analyses = await Promise.all(summary.tests.filter((test) => test.fail).map(async (test) => {
-      const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
-      const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title, expectedResults: [] };
-      if (isPreExecutionAutomationFailure(test)) return automationFailureAnalysis(tc, test);
-      const analysis = await qwen.analyzeFailure({ story: session.story, testCase: tc, expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "", actual: test.err?.message || "Automation assertion failed", modelTier });
-      if (loginOnly) return constrainLoginAnalysis(analysis, tc, test);
-      return { testCase: tc.id, ...analysis };
-    }));
-
-    session.failureAnalyses = analyses;
     session.lastResults = { execResult, summary };
-    session.reportHtml = buildAnalyticsReport({ sessionId, story: session.story, targetUrl: session.targetUrl, environment: session.environment, summary, analyses, model: modelTier });
+    session.reportHtml = buildAnalyticsReport({ sessionId, story: session.story, targetUrl: session.targetUrl, environment: session.environment, summary, analyses: [], model: modelTier });
     session.state = "DONE";
-    return res.json({ reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`, summary, failureAnalyses: analyses, automationReadiness: session.automationReadiness, runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath, generationMode: "deterministic-dsl" }, aiModelTier: modelTier, reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`, generatedFile: generated.fileName });
+
+    console.log(`[execution] Browser execution completed: ${summary.passed} passed, ${summary.failed} failed. AI analysis has not been called.`);
+    return res.json({
+      reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`,
+      summary,
+      failureAnalyses: [],
+      analysisPending: summary.failed > 0,
+      analysisUrl: summary.failed > 0 ? "/api/test-results/analyze" : null,
+      automationReadiness: session.automationReadiness,
+      runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath, generationMode: "deterministic-dsl" },
+      aiModelTier: modelTier,
+      reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
+      generatedFile: generated.fileName,
+    });
   } catch (err) {
     console.error("[single-spec]", err);
     session.state = session.state === "RUNNING" ? "AWAITING_APPROVAL" : session.state;
