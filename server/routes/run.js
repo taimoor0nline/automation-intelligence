@@ -35,21 +35,42 @@ function selectorFor(item) {
   return "";
 }
 
-function resolveLoginSelectors(pageDiscoveries = []) {
-  const elements = (pageDiscoveries || []).flatMap((page) => page?.elements || []);
-  const byIdentity = (names) => elements.find((item) => names.includes(String(item?.testId || "").toLowerCase()) || names.includes(String(item?.id || "").toLowerCase()) || names.includes(String(item?.name || "").toLowerCase()));
+function pagePath(page) {
+  try {
+    const url = new URL(page?.finalUrl || page?.url || "/");
+    return `${url.pathname}${url.search}` || "/";
+  } catch {
+    return "/";
+  }
+}
 
-  const username = byIdentity(["username", "user-name", "login-username", "email"])
-    || elements.find((item) => /user.?name|email/i.test(String(item?.label || "")) && String(item?.type || "").toLowerCase() !== "password");
-  const password = byIdentity(["password", "login-password"])
-    || elements.find((item) => String(item?.type || "").toLowerCase() === "password");
-  const submit = byIdentity(["login-button", "signin-button", "sign-in-button", "submit-login"])
-    || elements.find((item) => /sign\s*in|log\s*in|login/i.test(String(item?.label || item?.text || "")) && ["button", "submit"].includes(String(item?.type || "").toLowerCase()));
+function resolveLoginRuntime(pageDiscoveries = []) {
+  const entries = [];
+  for (const page of pageDiscoveries || []) {
+    for (const item of page?.elements || []) entries.push({ page, item });
+  }
 
+  const byIdentity = (names) => entries.find(({ item }) =>
+    names.includes(String(item?.testId || "").toLowerCase()) ||
+    names.includes(String(item?.id || "").toLowerCase()) ||
+    names.includes(String(item?.name || "").toLowerCase())
+  );
+
+  const usernameEntry = byIdentity(["username", "user-name", "login-username", "email"])
+    || entries.find(({ item }) => /user.?name|email/i.test(String(item?.label || "")) && String(item?.type || "").toLowerCase() !== "password");
+  const passwordEntry = byIdentity(["password", "login-password"])
+    || entries.find(({ item }) => String(item?.type || "").toLowerCase() === "password");
+  const submitEntry = byIdentity(["login-button", "signin-button", "sign-in-button", "submit-login"])
+    || entries.find(({ item }) => /sign\s*in|log\s*in|login/i.test(String(item?.label || item?.text || "")) && ["button", "submit"].includes(String(item?.type || "").toLowerCase()));
+
+  const loginPage = usernameEntry?.page || passwordEntry?.page || submitEntry?.page || pageDiscoveries?.[0] || null;
   return {
-    username: selectorFor(username),
-    password: selectorFor(password),
-    submit: selectorFor(submit),
+    path: pagePath(loginPage),
+    selectors: {
+      username: selectorFor(usernameEntry?.item),
+      password: selectorFor(passwordEntry?.item),
+      submit: selectorFor(submitEntry?.item),
+    },
   };
 }
 
@@ -65,11 +86,11 @@ function automationFailureAnalysis(tc, test) {
   const actual = test.err?.message || "The generated automation failed before meaningful application validation completed.";
   return {
     testCase: tc.id,
-    summary: "The test could not meaningfully validate the application because the generated automation failed before or at the start of execution.",
+    summary: "The test case itself was Automation Ready, but the generated runtime implementation failed before meaningful application validation completed.",
     classification: "AUTOMATION_DEFECT",
     expected,
     actual,
-    probableCause: "The generated browser automation contained a runtime defect that escaped pre-execution validation.",
+    probableCause: "A runtime implementation defect escaped pre-execution validation. Test-case readiness and generated-runtime validity are intentionally tracked as separate gates.",
     severity: "medium",
     confidence: 0.99,
   };
@@ -137,7 +158,9 @@ function normalizeReviewedTestCases(input, fallbackCases) {
       testData: raw.testData && typeof raw.testData === "object" && !Array.isArray(raw.testData) ? raw.testData : {},
       steps,
       expectedResults,
-      source: raw.source === "human" || id.startsWith("TC-H") ? "human" : "ai-reviewed",
+      source: raw.source === "human" || id.startsWith("TC-H") ? (raw.source || "human") : "ai-reviewed",
+      createdBy: raw.createdBy || null,
+      repairHistory: Array.isArray(raw.repairHistory) ? raw.repairHistory.slice(-10) : [],
     });
     seen.add(id);
   });
@@ -195,7 +218,7 @@ router.post("/api/chat", async (req, res, next) => {
     if (blocked.length) {
       console.warn(`[readiness] Blocked ${blocked.length} unsupported approved case(s) before AI automation generation.`);
       return res.status(422).json({
-        reply: "One or more selected test cases are not Automation Ready. They were blocked before AI code generation and were not sent to Cypress.",
+        reply: "One or more selected test cases are not Automation Ready. They were blocked before automation generation and were not sent to runtime execution.",
         unsupportedTestCases: blocked.map((tc) => ({ id: tc.id, title: tc.title, automationReadiness: tc.automationReadiness })),
         automationReadiness: session.automationReadiness,
         testCases: session.testCases,
@@ -203,15 +226,17 @@ router.post("/api/chat", async (req, res, next) => {
     }
 
     const base = new URL(session.targetUrl);
-    const loginSelectors = resolveLoginSelectors(session.pageDiscoveries);
+    const loginRuntime = resolveLoginRuntime(session.pageDiscoveries);
     const executionContext = {
       baseUrl: `${base.protocol}//${base.host}`,
       hasCredentials,
       credentials: session.credentials,
-      loginSelectors,
+      loginPath: loginRuntime.path,
+      loginSelectors: loginRuntime.selectors,
     };
 
     console.log(`[readiness] ${approvedTestCases.length}/${approvedTestCases.length} approved case(s) are Automation Ready.`);
+    console.log(`[runtime-preflight] Grounded login path: ${executionContext.loginPath}`);
     console.log(`[single-spec] Generating one grounded automation file for ${approvedTestCases.length} approved case(s)`);
 
     let generated = null;
@@ -235,17 +260,17 @@ router.post("/api/chat", async (req, res, next) => {
       });
 
       if (validation.valid) {
-        console.log(`[single-spec] Grounded automation accepted on generation attempt ${attempt}.`);
+        console.log(`[runtime-preflight] Generated automation accepted on attempt ${attempt}.`);
         break;
       }
 
       validationFeedback = validation.errors;
-      console.warn(`[single-spec] Generation attempt ${attempt} rejected before execution: ${validation.errors.join(" | ")}`);
+      console.warn(`[runtime-preflight] Generation attempt ${attempt} rejected before execution: ${validation.errors.join(" | ")}`);
     }
 
     if (!generated || !validation.valid) {
       return res.status(422).json({
-        reply: "Automation generation was rejected by deterministic validation after automatic correction. No browser test was started, so this is not recorded as an automation execution defect.",
+        reply: "Automation generation was rejected by deterministic runtime validation after automatic correction. No browser test was started, so this is not recorded as an execution defect.",
         validationErrors: validation.errors,
         automationReadiness: session.automationReadiness,
       });
@@ -298,6 +323,7 @@ router.post("/api/chat", async (req, res, next) => {
       summary,
       failureAnalyses: analyses,
       automationReadiness: session.automationReadiness,
+      runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath },
       reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
       generatedFile: "ai-generated.cy.js",
     });
