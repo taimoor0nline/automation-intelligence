@@ -65,6 +65,32 @@ const HOST = process.env.SERVER_HOST || "0.0.0.0";
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
+// Prevent browser-facing JSON responses from exposing which AI provider/model
+// is configured on the server. Internal implementation names stay server-side.
+function sanitizePublicPayload(value) {
+  if (Array.isArray(value)) return value.map(sanitizePublicPayload);
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (["qwenModel", "qwenConfigured", "usingRealQwen"].includes(key)) continue;
+      out[key] = sanitizePublicPayload(item);
+    }
+    return out;
+  }
+  if (typeof value === "string") {
+    return value
+      .replace(/Qwen/gi, "AI")
+      .replace(/qwen\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?/gi, "AI");
+  }
+  return value;
+}
+
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (payload) => originalJson(sanitizePublicPayload(payload));
+  next();
+});
+
 // Serve persisted HTML reports first. This keeps old report URLs working even
 // after the Node process restarts and the in-memory session has been cleared.
 app.get("/api/reports/:sessionId", (req, res, next) => {
