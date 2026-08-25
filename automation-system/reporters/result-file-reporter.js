@@ -12,13 +12,26 @@ function safeError(err) {
 module.exports = function ResultFileReporter(runner) {
   const startedAt = Date.now();
   const tests = [];
+  const testStartedAt = new WeakMap();
+
+  runner.on("test", (test) => {
+    testStartedAt.set(test, Date.now());
+  });
+
+  function durationFor(test) {
+    const reported = Number(test?.duration);
+    if (Number.isFinite(reported) && reported > 0) return Math.round(reported);
+    const started = testStartedAt.get(test);
+    if (Number.isFinite(started)) return Math.max(0, Date.now() - started);
+    return Number.isFinite(reported) ? Math.round(reported) : null;
+  }
 
   function push(test, state, err = null) {
     const title = typeof test.fullTitle === "function" ? test.fullTitle() : test.title;
     tests.push({
       title: String(title || ""),
       state,
-      durationMs: Number.isFinite(Number(test.duration)) ? Math.round(Number(test.duration)) : null,
+      durationMs: durationFor(test),
       err: safeError(err),
     });
   }
