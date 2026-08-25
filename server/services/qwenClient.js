@@ -52,7 +52,7 @@ async function callQwen(systemPrompt, userPayload, attempt = 0) {
           { role: "user", content: JSON.stringify(userPayload) },
         ],
         response_format: { type: "json_object" },
-        temperature: 0.1,
+        temperature: 0.05,
       }),
       signal: controller.signal,
     });
@@ -81,20 +81,23 @@ async function callQwen(systemPrompt, userPayload, attempt = 0) {
   }
 }
 
-const TEST_ANALYST_PROMPT = `You are a senior QA test analyst.
+const TEST_ANALYST_PROMPT = `You are a senior QA test analyst operating under a strict evidence-grounding contract.
 Convert the supplied business user story and discovered web-page inventory into a concise set of executable test cases.
 
 Rules:
-- The BUSINESS USER STORY is the authoritative scope. Generate tests ONLY for the behaviour requested by the story.
+- The BUSINESS USER STORY is the authoritative scope. Generate tests ONLY for behaviour explicitly requested by the story.
+- PAGE DISCOVERY is the authoritative source for pages, controls, selectors, validation attributes, messages and option values.
+- Never invent a page, field, selector, validation rule, message, option, boundary, workflow step or business rule that is absent from the story/discovery evidence.
+- If a fact is not available in the supplied evidence, do not assume it.
 - A discovered page is evidence that a page/control exists; discovery is NOT permission to test unrelated features.
 - If the story is limited to login/authentication, every generated test case must remain on login/authentication. Do not create feedback, profile, dashboard, registration, checkout, or other downstream feature tests merely because those pages were discovered.
-- If the story explicitly asks for negative testing, prioritize negative, validation, required-field and invalid-input scenarios within that same feature. Do not add a positive end-to-end journey unless it is necessary to establish the negative scenario.
+- If the story explicitly asks for negative testing, prioritize negative, validation, required-field and invalid-input scenarios within that same feature.
 - Generate EXACTLY requestedTestCaseCount test cases. Do not generate more or fewer.
-- Cover only behaviour that appears in BOTH the business-story scope and the usable discovered controls.
-- Tests must describe the EXPECTED behaviour. Never manufacture an assertion just to make a test fail. A failed run should mean the real application did not meet the expected behaviour.
+- Cover only behaviour that appears in BOTH the business-story scope and usable discovered evidence.
+- Tests must describe EXPECTED behaviour. Never manufacture an assertion merely to make a test fail.
 - When the story and discovered controls contain explicit required fields, boundaries, formats or validation constraints, prioritize them.
-- Treat selectors, fields, messages and option values in the supplied page inventory as the source of truth. Never invent fields, pages, buttons, selectors, messages or dropdown values.
-- Multi-page journeys are allowed ONLY when the story itself requires a multi-page journey.
+- Use selector/target values exactly as supplied by discovery when a selector is needed. Never synthesize data-testid/id/name values.
+- Multi-page journeys are allowed ONLY when the story itself requires a multi-page journey and the relevant paths were discovered.
 - Do not include actual passwords or secrets in test data.
 - Each case must be independently understandable and have concrete expected results.
 
@@ -115,32 +118,36 @@ Return JSON only using:
   ]
 }`;
 
-const AUTOMATION_GENERATOR_PROMPT = `You are a senior browser automation engineer.
-Generate a complete JavaScript end-to-end spec for ONLY the approved test cases using the current runtime's cy.* API.
+const AUTOMATION_GENERATOR_PROMPT = `You are a senior browser automation engineer operating under a strict evidence-grounding contract.
+Generate one complete JavaScript end-to-end spec for ONLY the approved test cases using the current runtime's cy.* API.
 
 STRICT RULES:
-1. APPROVED TEST CASES define the execution scope. Do not navigate to or interact with a discovered page/control unless an approved test case requires it.
-2. Use only selectors, data-testid values, ids, names, messages, option values and URLs that appear in pageDiscoveries or the approved test case itself.
-3. Never invent a selector or assertion text.
-4. Prefer an explicit selector supplied in a test step; otherwise prefer data-testid, then id, then name from discovery.
-5. Use relative paths with cy.visit() when pages share the supplied base URL.
-6. If login credentials are available, NEVER hardcode them. Read them securely with:
-   cy.env(['TEST_USERNAME','TEST_PASSWORD'], { log: false }).then(({ TEST_USERNAME, TEST_PASSWORD }) => { ... })
-   and type them with { log: false }.
-7. Do not send credential values to logs, assertions, screenshots, titles or comments.
-8. For login-only test cases, remain on the login/authentication flow. Do not continue to feedback or another downstream page unless that approved case explicitly requires it.
-9. Execute the approved test case steps in order.
-10. For a form validation case, populate every other field listed in that approved case before submitting. Check/select radio buttons, checkboxes and dropdowns exactly as requested.
-11. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
-12. Assertions must prove the expected result. For a rejection/validation case, assert the discovered field-specific or form-level error state and that the disallowed transition does not occur.
-13. Every approved test case must map to one it() block whose title begins with its TC id.
-14. For containers containing dynamic values such as generated reference IDs or timestamps, do not use exact whole-element text equality; assert visibility and known static text separately.
+1. APPROVED TEST CASES define execution scope. Generate exactly one it() block per approved test id and no additional tests.
+2. PAGE DISCOVERY is the only source of selectors, data-testid values, ids, names, messages, option values and navigation paths. NEVER invent any of them.
+3. If a selector/path/message is not present in discovery or the approved case, do not guess or derive a new one.
+4. Prefer the exact selector supplied in an approved step; otherwise use an exact discovered selector. Do not construct dynamic selectors.
+5. Use only discovered relative paths with cy.visit().
+6. VALID LOGIN CREDENTIALS ARE FRAMEWORK-OWNED. Never use cy.env(), Cypress.env(), TEST_USERNAME, TEST_PASSWORD, this.TEST_USERNAME, this.TEST_PASSWORD, variables, hooks or assignments for credentials.
+7. When an approved case requires a VALID login and executionContext.hasCredentials is true, use ONLY:
+   cy.loginWithRuntimeCredentials({ usernameSelector: "<exact discovered selector>", passwordSelector: "<exact discovered selector>", submitSelector: "<exact discovered selector>" });
+8. Invalid-login tests must use only the explicit invalid username/password supplied by the approved test case and must not call the runtime credential helper.
+9. Do not define beforeEach, afterEach, before or after hooks. Every it() block must be self-contained so one setup failure cannot skip other approved cases.
+10. Do not send credential values to logs, assertions, screenshots, titles or comments.
+11. Execute approved steps in order. Do not add interactions merely because a control was discovered.
+12. For form validation, populate only the other fields required by the approved case using exact discovered controls/options.
+13. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
+14. Assertions must prove the expected result using discovered evidence. For rejection/validation, assert the discovered error state and that the disallowed transition does not occur.
+15. For dynamic containers, avoid exact whole-element text equality; use visibility plus known static discovered text.
+16. Do not use unsupported Chai/Cypress hybrids such as .and('have.text').to.not.be.empty. Use .invoke('text').should('not.be.empty').
+17. Do not use .type('') for an intentionally blank field; leave it untouched or use .clear() only when required.
+18. validationFeedback, when supplied, contains deterministic validator errors from a previous attempt. Correct every listed error and do not repeat the rejected pattern.
 
 Return JSON only:
 {"fileName": string, "framework": "browser-automation", "language": "javascript", "script": string}`;
 
 const FAILURE_ANALYST_PROMPT = `You are a QA failure analyst.
 Classify a failed automated test using the business story, test case, expected result and actual browser-automation error.
+Use only supplied evidence. Do not invent application behaviour, selectors, fields or causes that are not supported by the failure and test context.
 Do not assume the application is wrong: selector/generator mistakes are AUTOMATION_DEFECT, bad input is TEST_DATA_PROBLEM, unreachable systems are ENVIRONMENT_PROBLEM.
 Return JSON only:
 {
@@ -168,6 +175,65 @@ function validateTestCases(result, requestedCount = TEST_CASE_COUNT) {
       throw new Error(`Qwen test case ${i + 1} has invalid id '${tc.id}'. Expected TC001 style ids.`);
     }
   });
+  return result;
+}
+
+function discoveryGrounding(pageDiscoveries = []) {
+  const selectors = new Set();
+  const paths = new Set();
+  for (const page of pageDiscoveries || []) {
+    try {
+      const url = new URL(page?.finalUrl || page?.url || "http://local/");
+      paths.add(`${url.pathname}${url.search}` || "/");
+    } catch {}
+
+    for (const item of page?.elements || []) {
+      if (item.selector) selectors.add(String(item.selector));
+      if (item.testId) selectors.add(`[data-testid="${item.testId}"]`);
+      if (item.id) selectors.add(`#${item.id}`);
+      if (item.name) selectors.add(`[name="${item.name}"]`);
+      const error = item.errorElement;
+      if (error?.selector) selectors.add(String(error.selector));
+      if (error?.testId) selectors.add(`[data-testid="${error.testId}"]`);
+      if (error?.id) selectors.add(`#${error.id}`);
+    }
+    for (const message of page?.messages || []) {
+      if (message.selector) selectors.add(String(message.selector));
+      if (message.testId) selectors.add(`[data-testid="${message.testId}"]`);
+      if (message.id) selectors.add(`#${message.id}`);
+    }
+  }
+  return { selectors, paths };
+}
+
+function validateTestCaseGrounding(result, pageDiscoveries, story) {
+  const { selectors, paths } = discoveryGrounding(pageDiscoveries);
+  const errors = [];
+  const loginOnly = isLoginScopedStory(story);
+  const forbiddenLoginScope = /\b(feedback|profile|dashboard|registration|register|checkout|payment|order|search|cart)\b/i;
+
+  for (const tc of result.testCases || []) {
+    if (loginOnly && forbiddenLoginScope.test(JSON.stringify(tc))) {
+      errors.push(`${tc.id} contains behaviour outside the login/authentication story scope.`);
+    }
+
+    for (const step of tc.steps || []) {
+      const target = String(step?.target || "").trim();
+      if (target && (target.startsWith("[") || target.startsWith("#")) && !selectors.has(target)) {
+        errors.push(`${tc.id} uses an undiscovered selector: ${target}`);
+      }
+
+      const action = String(step?.action || "").toLowerCase();
+      const value = String(step?.value ?? "").trim();
+      if (/navigate|open|visit|continue to/.test(action) && value.startsWith("/") && !paths.has(value)) {
+        errors.push(`${tc.id} uses an undiscovered navigation path: ${value}`);
+      }
+    }
+  }
+
+  if (errors.length) {
+    throw new Error(`AI test cases failed grounding validation: ${[...new Set(errors)].join(" | ")}`);
+  }
   return result;
 }
 
@@ -257,12 +323,7 @@ function scopeDiscoveriesForStory(pageDiscoveries, story) {
   });
 
   const scoped = loginPages.length ? loginPages : (pageDiscoveries || []).slice(0, 1);
-  return scoped.map((page) => ({
-    ...page,
-    // A redirect hint tells discovery that another route exists, but for a
-    // login-only story it must not broaden the test scope into that feature.
-    routeHints: [],
-  }));
+  return scoped.map((page) => ({ ...page, routeHints: [] }));
 }
 
 function buildDemoCalibration(result, pageDiscoveries, story) {
@@ -323,20 +384,14 @@ function buildDemoCalibration(result, pageDiscoveries, story) {
     demoCalibrated: true,
     testCases: [
       {
-        id: "TC001",
-        title: "Login and submit valid customer feedback",
-        type: "positive",
-        priority: "high",
+        id: "TC001", title: "Login and submit valid customer feedback", type: "positive", priority: "high",
         preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
         testData: { category: firstNonEmptyOption(category, "service"), age: "30", website: "https://example.com" },
         steps: [...loginSteps(), ...feedbackSteps()],
         expectedResults: [`The feedback form at ${feedbackPath} is opened after login`, "The valid feedback submission is accepted", `The success element ${successTarget} is visible after submission`],
       },
       {
-        id: "TC002",
-        title: "Reject invalid login credentials",
-        type: "negative",
-        priority: "high",
+        id: "TC002", title: "Reject invalid login credentials", type: "negative", priority: "high",
         preconditions: ["Target application is available"],
         testData: { username: "invalid-user", password: "invalid-password" },
         steps: [
@@ -348,33 +403,21 @@ function buildDemoCalibration(result, pageDiscoveries, story) {
         expectedResults: ["Login is rejected", loginErrorTarget ? `The login error element ${loginErrorTarget} is visible and non-empty` : "A discovered login error is shown", `The user is not taken to ${feedbackPath}`],
       },
       {
-        id: "TC003",
-        title: "Reject feedback submission when email is missing",
-        type: "negative",
-        priority: "medium",
+        id: "TC003", title: "Reject feedback submission when email is missing", type: "negative", priority: "medium",
         preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
-        testData: { email: null },
-        steps: [...loginSteps(), ...feedbackSteps({ emailValue: null })],
+        testData: { email: null }, steps: [...loginSteps(), ...feedbackSteps({ emailValue: null })],
         expectedResults: ["Feedback submission is rejected because email is required", `The email validation element ${errorTarget(email)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
       },
       {
-        id: "TC004",
-        title: "Reject age below the minimum of 18",
-        type: "boundary",
-        priority: "high",
+        id: "TC004", title: "Reject age below the minimum of 18", type: "boundary", priority: "high",
         preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
-        testData: { age: "17", minimumAge: "18" },
-        steps: [...loginSteps(), ...feedbackSteps({ ageValue: "17" })],
+        testData: { age: "17", minimumAge: "18" }, steps: [...loginSteps(), ...feedbackSteps({ ageValue: "17" })],
         expectedResults: ["Age 17 is rejected because the discovered minimum age is 18", `The age validation element ${errorTarget(age)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
       },
       {
-        id: "TC005",
-        title: "Reject malformed website URL",
-        type: "negative",
-        priority: "high",
+        id: "TC005", title: "Reject malformed website URL", type: "negative", priority: "high",
         preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
-        testData: { website: "abc" },
-        steps: [...loginSteps(), ...feedbackSteps({ websiteValue: "abc" })],
+        testData: { website: "abc" }, steps: [...loginSteps(), ...feedbackSteps({ websiteValue: "abc" })],
         expectedResults: ["Website value abc is rejected because the discovered field requires a URL", `The website validation element ${errorTarget(website)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
       },
     ],
@@ -393,10 +436,11 @@ async function generateTestCases({ story, pageDiscoveries, environment }) {
       : "Follow the business story exactly; discovered pages do not broaden scope.",
   });
   const validated = validateTestCases(result, TEST_CASE_COUNT);
-  return buildDemoCalibration(validated, pageDiscoveries, story);
+  const calibrated = buildDemoCalibration(validated, pageDiscoveries, story);
+  return validateTestCaseGrounding(calibrated, pageDiscoveries, story);
 }
 
-async function generateAutomationCode({ approvedTestCases, pageDiscoveries, fileName, executionContext }) {
+async function generateAutomationCode({ approvedTestCases, pageDiscoveries, fileName, executionContext, validationFeedback = [] }) {
   const result = await callQwen(AUTOMATION_GENERATOR_PROMPT, {
     approvedTestCases,
     pageDiscoveries,
@@ -404,8 +448,11 @@ async function generateAutomationCode({ approvedTestCases, pageDiscoveries, file
     executionContext: {
       baseUrl: executionContext.baseUrl,
       hasCredentials: Boolean(executionContext.hasCredentials),
-      credentialKeys: executionContext.hasCredentials ? ["TEST_USERNAME", "TEST_PASSWORD"] : [],
+      credentialHelper: executionContext.hasCredentials
+        ? "cy.loginWithRuntimeCredentials({ usernameSelector, passwordSelector, submitSelector })"
+        : null,
     },
+    validationFeedback: Array.isArray(validationFeedback) ? validationFeedback.slice(0, 20) : [],
   });
   return validateAutomation(result);
 }
