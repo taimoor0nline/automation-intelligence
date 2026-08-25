@@ -9,6 +9,14 @@ function normalizeGeneratedScript(script) {
     .replace(/\.should\(\s*(['"])have\.text\1\s*,/g, ".should('contain.text',")
     .replace(/\.and\(\s*(['"])have\.text\1\s*,/g, ".and('contain.text',");
 
+  // Cypress rejects .type('') / .type(\"\") before the browser interaction even
+  // starts. For negative required-field tests, an empty value means the field
+  // should simply remain empty. Normalise accidental empty typing to .clear(),
+  // which is valid whether the input starts empty or contains a prior value.
+  normalized = normalized
+    .replace(/\.type\(\s*''\s*(?:,\s*\{[^)]*\})?\s*\)/g, ".clear()")
+    .replace(/\.type\(\s*\"\"\s*(?:,\s*\{[^)]*\})?\s*\)/g, ".clear()");
+
   return normalized;
 }
 
