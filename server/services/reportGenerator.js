@@ -45,7 +45,7 @@ function saveReportHtml(sessionId, html) {
   return filePath;
 }
 
-function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summary, analyses, model }) {
+function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summary, analyses }) {
   const successRate = pct(summary.passed, summary.total);
   const analysisById = new Map((analyses || []).map((a) => [a.testCase, a]));
 
@@ -83,7 +83,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
 <body><div class="wrap">
   <div class="hero">
     <div><h1>AI TestPilot Analytics</h1><div class="muted">Story-driven AI automation execution report</div></div>
-    <div class="meta">Run: ${esc(sessionId)}<br>Model: ${esc(model)}<br>Generated: ${esc(new Date().toLocaleString())}</div>
+    <div class="meta">Run: ${esc(sessionId)}<br>Generated: ${esc(new Date().toLocaleString())}</div>
   </div>
   <div class="cards">
     <div class="card"><div class="label">Tests</div><div class="metric">${esc(summary.total)}</div></div>
@@ -96,7 +96,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   <div class="card story">${esc(story)}</div>
   <h2 class="section-title">Execution results</h2>
   <table><thead><tr><th>Case</th><th>Test</th><th>Status</th><th>Duration</th><th>Evidence</th><th>AI analysis / error</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="muted" style="margin-top:12px">This optimized branch runs all approved cases in one generated spec. Failed cases keep individual screenshots; Video links, when enabled, point to the shared full-run recording.</div>
+  <div class="muted" style="margin-top:12px">All approved cases are executed in one generated automation run. Failed cases keep individual screenshots; video links, when enabled, point to the shared full-run recording.</div>
 </div></body></html>`;
 
   saveReportHtml(sessionId, html);
