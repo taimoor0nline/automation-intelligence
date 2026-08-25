@@ -93,8 +93,14 @@ function discoveredGrounding(pageDiscoveries = []) {
 }
 
 function extractLiteralArgs(script, command) {
+  const patterns = {
+    "cy.get": /\bcy\.get\(\s*(['"`])([^'"`]+)\1/g,
+    "cy.visit": /\bcy\.visit\(\s*(['"`])([^'"`]+)\1/g,
+  };
+  const pattern = patterns[command];
+  if (!pattern) return [];
+
   const values = [];
-  const pattern = new RegExp(`\\b${command}\\(\\s*(['\"\\`])([^'\"\\`]+)\\1`, "g");
   let match;
   while ((match = pattern.exec(script))) values.push(match[2]);
   return values;
@@ -112,17 +118,12 @@ function validateGroundedScript(script, { approvedTestCases = [], pageDiscoverie
   const base = validateScript(script);
   const errors = [...base.errors];
 
-  // Generated test bodies must be independent. A generated beforeEach/afterEach
-  // can abort or contaminate every approved case, so lifecycle plumbing belongs
-  // to the deterministic framework rather than the model.
   if (/\b(?:beforeEach|afterEach|before|after)\s*\(/.test(script)) {
     errors.push("Generated specs may not define suite/test lifecycle hooks. Keep every approved case self-contained.");
   }
 
-  // Runtime credentials are framework-owned. Generated code may only invoke the
-  // deterministic login helper and must never read or assign credential values.
   if (/\b(?:cy|Cypress)\.env\s*\(/.test(script)) {
-    errors.push("Generated specs may not access Cypress environment credentials directly; use cy.loginWithRuntimeCredentials(...). ");
+    errors.push("Generated specs may not access Cypress environment credentials directly; use cy.loginWithRuntimeCredentials(...).");
   }
   if (/\bTEST_(?:USERNAME|PASSWORD)\b|this\.TEST_(?:USERNAME|PASSWORD)/.test(script)) {
     errors.push("Generated specs may not reference TEST_USERNAME/TEST_PASSWORD identifiers directly.");
@@ -131,8 +132,6 @@ function validateGroundedScript(script, { approvedTestCases = [], pageDiscoverie
     errors.push("Generated spec requested runtime credential login but no credentials were supplied.");
   }
 
-  // The model must create exactly one it() block for every approved case and no
-  // extra TC-labelled cases. This prevents scope expansion and missing coverage.
   const approvedIds = approvedTestCases.map((tc) => String(tc?.id || "").toUpperCase()).filter(Boolean);
   const titles = extractTestTitles(script);
   for (const id of approvedIds) {
@@ -146,15 +145,12 @@ function validateGroundedScript(script, { approvedTestCases = [], pageDiscoverie
 
   const grounding = discoveredGrounding(pageDiscoveries);
 
-  // Every literal cy.get selector must come from discovery. Dynamic selectors are
-  // rejected by the prompt; this check prevents invented data-testid/id/name use.
-  for (const selector of extractLiteralArgs(script, "cy\\.get")) {
+  for (const selector of extractLiteralArgs(script, "cy.get")) {
     if (!grounding.selectors.has(selector)) {
       errors.push(`Selector is not grounded in page discovery: ${selector}`);
     }
   }
 
-  // The same rule applies to selectors passed into the deterministic login helper.
   const helperPattern = /\bcy\.loginWithRuntimeCredentials\s*\(\s*\{([\s\S]*?)\}\s*\)/g;
   let helperMatch;
   while ((helperMatch = helperPattern.exec(script))) {
@@ -171,8 +167,7 @@ function validateGroundedScript(script, { approvedTestCases = [], pageDiscoverie
     if (found.length !== 3) errors.push("loginWithRuntimeCredentials must provide exactly the discovered username, password and submit selectors.");
   }
 
-  // Literal navigation is restricted to discovered same-application paths.
-  for (const target of extractLiteralArgs(script, "cy\\.visit")) {
+  for (const target of extractLiteralArgs(script, "cy.visit")) {
     let path = target;
     try {
       const url = new URL(target);
