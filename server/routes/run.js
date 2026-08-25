@@ -6,6 +6,7 @@ const qwen = require("../services/qwenClient");
 const { validateGroundedScript } = require("../services/scriptValidator");
 const { executeSingleGeneratedSpec } = require("../services/singleSpecRunner");
 const { buildAnalyticsReport } = require("../services/reportGenerator");
+const { assessTestCases, readinessSummary, READY } = require("../services/testCaseFeasibility");
 
 const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
 const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
@@ -25,25 +26,50 @@ function isLoginOnlyStory(story) {
   return login && !other;
 }
 
+function selectorFor(item) {
+  if (!item) return "";
+  if (item.selector) return String(item.selector);
+  if (item.testId) return `[data-testid="${item.testId}"]`;
+  if (item.id) return `#${item.id}`;
+  if (item.name) return `[name="${item.name}"]`;
+  return "";
+}
+
+function resolveLoginSelectors(pageDiscoveries = []) {
+  const elements = (pageDiscoveries || []).flatMap((page) => page?.elements || []);
+  const byIdentity = (names) => elements.find((item) => names.includes(String(item?.testId || "").toLowerCase()) || names.includes(String(item?.id || "").toLowerCase()) || names.includes(String(item?.name || "").toLowerCase()));
+
+  const username = byIdentity(["username", "user-name", "login-username", "email"])
+    || elements.find((item) => /user.?name|email/i.test(String(item?.label || "")) && String(item?.type || "").toLowerCase() !== "password");
+  const password = byIdentity(["password", "login-password"])
+    || elements.find((item) => String(item?.type || "").toLowerCase() === "password");
+  const submit = byIdentity(["login-button", "signin-button", "sign-in-button", "submit-login"])
+    || elements.find((item) => /sign\s*in|log\s*in|login/i.test(String(item?.label || item?.text || "")) && ["button", "submit"].includes(String(item?.type || "").toLowerCase()));
+
+  return {
+    username: selectorFor(username),
+    password: selectorFor(password),
+    submit: selectorFor(submit),
+  };
+}
+
 function isPreExecutionAutomationFailure(test) {
   const duration = Number(test?.durationMs);
   const message = String(test?.err?.message || "");
   if (Number.isFinite(duration) && duration <= 50) return true;
-
   return /\.type\(\).*empty|empty string|cannot type|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution/i.test(message);
 }
 
 function automationFailureAnalysis(tc, test) {
   const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
   const actual = test.err?.message || "The generated automation failed before meaningful application validation completed.";
-
   return {
     testCase: tc.id,
     summary: "The test could not meaningfully validate the application because the generated automation failed before or at the start of execution.",
     classification: "AUTOMATION_DEFECT",
     expected,
     actual,
-    probableCause: "The generated browser automation contains an invalid or unsupported command/input pattern and should be corrected before judging application behavior.",
+    probableCause: "The generated browser automation contained a runtime defect that escaped pre-execution validation.",
     severity: "medium",
     confidence: 0.99,
   };
@@ -56,16 +82,10 @@ function analysisContainsOutOfScopeContent(analysis) {
 }
 
 function constrainLoginAnalysis(analysis, tc, test) {
-  if (!analysisContainsOutOfScopeContent(analysis)) {
-    return { testCase: tc.id, ...analysis };
-  }
-
+  if (!analysisContainsOutOfScopeContent(analysis)) return { testCase: tc.id, ...analysis };
   const actual = test.err?.message || "The login negative test did not produce the expected authentication rejection behavior.";
   const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
-  const classification = analysis?.classification === "APPLICATION_DEFECT"
-    ? "APPLICATION_DEFECT"
-    : analysis?.classification || "UNKNOWN";
-
+  const classification = analysis?.classification === "APPLICATION_DEFECT" ? "APPLICATION_DEFECT" : analysis?.classification || "UNKNOWN";
   return {
     testCase: tc.id,
     summary: classification === "APPLICATION_DEFECT"
@@ -75,8 +95,8 @@ function constrainLoginAnalysis(analysis, tc, test) {
     expected,
     actual,
     probableCause: classification === "APPLICATION_DEFECT"
-      ? "The login validation or authentication rejection behavior may not match the expected result. Review the login-page behavior and captured evidence."
-      : "The failure requires review within the login/authentication flow; unrelated discovered features are intentionally excluded from this analysis.",
+      ? "The login validation or authentication rejection behavior may not match the expected result."
+      : "The failure requires review within the login/authentication flow.",
     severity: analysis?.severity || "medium",
     confidence: Math.min(Number(analysis?.confidence) || 0.5, 0.85),
   };
@@ -88,41 +108,25 @@ function normalizeReviewedTestCases(input, fallbackCases) {
 
   const seen = new Set();
   const normalized = [];
-
   input.forEach((raw, index) => {
     if (!raw || typeof raw !== "object") return;
-
     let id = cleanString(raw.id, 20).toUpperCase();
-    if (!TEST_ID_REGEX.test(id) || seen.has(id)) {
-      id = `TC-H${String(index + 1).padStart(3, "0")}`;
-    }
-    while (seen.has(id)) {
-      id = `TC-H${String(index + 2).padStart(3, "0")}`;
-    }
+    if (!TEST_ID_REGEX.test(id) || seen.has(id)) id = `TC-H${String(index + 1).padStart(3, "0")}`;
+    while (seen.has(id)) id = `TC-H${String(index + 2).padStart(3, "0")}`;
 
     const title = cleanString(raw.title, 300);
     if (!title) return;
-
     const typeCandidate = cleanString(raw.type, 30).toLowerCase();
     const priorityCandidate = cleanString(raw.priority, 30).toLowerCase();
-
     const steps = Array.isArray(raw.steps)
       ? raw.steps.slice(0, 30).map((step) => ({
           action: cleanString(step?.action ?? step, 500),
           target: typeof step === "object" ? cleanString(step?.target, 300) : "",
-          value: typeof step === "object" && step?.value !== null && step?.value !== undefined
-            ? cleanString(step.value, 300)
-            : null,
+          value: typeof step === "object" && step?.value !== null && step?.value !== undefined ? cleanString(step.value, 300) : null,
         })).filter((step) => step.action || step.target)
       : [];
-
-    const expectedResults = Array.isArray(raw.expectedResults)
-      ? raw.expectedResults.slice(0, 20).map((value) => cleanString(value, 600)).filter(Boolean)
-      : [];
-
-    const preconditions = Array.isArray(raw.preconditions)
-      ? raw.preconditions.slice(0, 20).map((value) => cleanString(value, 500)).filter(Boolean)
-      : [];
+    const expectedResults = Array.isArray(raw.expectedResults) ? raw.expectedResults.slice(0, 20).map((value) => cleanString(value, 600)).filter(Boolean) : [];
+    const preconditions = Array.isArray(raw.preconditions) ? raw.preconditions.slice(0, 20).map((value) => cleanString(value, 500)).filter(Boolean) : [];
 
     normalized.push({
       id,
@@ -135,7 +139,6 @@ function normalizeReviewedTestCases(input, fallbackCases) {
       expectedResults,
       source: raw.source === "human" || id.startsWith("TC-H") ? "human" : "ai-reviewed",
     });
-
     seen.add(id);
   });
 
@@ -146,7 +149,6 @@ function normalizeReviewedTestCases(input, fallbackCases) {
 function addEvidenceUrls(summary, sessionId, artifacts) {
   if (!summary) return summary;
   const encodedSession = encodeURIComponent(sessionId);
-
   return {
     ...summary,
     tests: (summary.tests || []).map((test) => {
@@ -154,59 +156,62 @@ function addEvidenceUrls(summary, sessionId, artifacts) {
       const testCaseId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0] || null;
       const hasVideo = Boolean(testCaseId && artifacts?.videosByTestCase?.[testCaseId]);
       const hasScreenshot = Boolean(testCaseId && artifacts?.screenshotsByTestCase?.[testCaseId]);
-
       return {
         ...test,
         evidence: {
           ...(test.evidence || {}),
-          videoUrl: hasVideo
-            ? `/api/artifacts/${encodedSession}/video/${encodeURIComponent(testCaseId)}`
-            : null,
-          screenshotUrl: hasScreenshot
-            ? `/api/artifacts/${encodedSession}/screenshot/${encodeURIComponent(testCaseId)}`
-            : null,
+          videoUrl: hasVideo ? `/api/artifacts/${encodedSession}/video/${encodeURIComponent(testCaseId)}` : null,
+          screenshotUrl: hasScreenshot ? `/api/artifacts/${encodedSession}/screenshot/${encodeURIComponent(testCaseId)}` : null,
         },
       };
     }),
   };
 }
 
-// This router is mounted before the normal /api/chat router. It intercepts only
-// the reviewed/approved execution request; initial story generation falls through.
 router.post("/api/chat", async (req, res, next) => {
-  const {
-    sessionId = "default",
-    message = "",
-    reviewedTestCases = null,
-    approvedIds = [],
-  } = req.body || {};
-
+  const { sessionId = "default", message = "", reviewedTestCases = null, approvedIds = [] } = req.body || {};
   const isRunRequest = message === "approve reviewed cases" || Array.isArray(req.body?.approvedIds);
   if (!isRunRequest) return next();
 
   const session = getSession(sessionId);
-
   try {
-    if (session.state !== "AWAITING_APPROVAL") {
-      throw new Error("Generate and review test cases before starting execution.");
-    }
+    if (session.state !== "AWAITING_APPROVAL") throw new Error("Generate and review test cases before starting execution.");
 
-    session.testCases = normalizeReviewedTestCases(reviewedTestCases, session.testCases);
+    const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
+    session.testCases = assessTestCases(
+      normalizeReviewedTestCases(reviewedTestCases, session.testCases),
+      { pageDiscoveries: session.pageDiscoveries, hasCredentials }
+    );
+    session.automationReadiness = readinessSummary(session.testCases);
+
     const allIds = session.testCases.map((tc) => tc.id);
     const approved = Array.isArray(approvedIds)
       ? approvedIds.map((id) => String(id).toUpperCase()).filter((id) => allIds.includes(id))
       : [];
-
     if (!approved.length) throw new Error("Select at least one reviewed test case to execute.");
 
     const approvedTestCases = session.testCases.filter((tc) => approved.includes(tc.id));
+    const blocked = approvedTestCases.filter((tc) => tc.automationReadiness?.status !== READY);
+    if (blocked.length) {
+      console.warn(`[readiness] Blocked ${blocked.length} unsupported approved case(s) before AI automation generation.`);
+      return res.status(422).json({
+        reply: "One or more selected test cases are not Automation Ready. They were blocked before AI code generation and were not sent to Cypress.",
+        unsupportedTestCases: blocked.map((tc) => ({ id: tc.id, title: tc.title, automationReadiness: tc.automationReadiness })),
+        automationReadiness: session.automationReadiness,
+        testCases: session.testCases,
+      });
+    }
+
     const base = new URL(session.targetUrl);
+    const loginSelectors = resolveLoginSelectors(session.pageDiscoveries);
     const executionContext = {
       baseUrl: `${base.protocol}//${base.host}`,
-      hasCredentials: Boolean(session.credentials?.username || session.credentials?.password),
+      hasCredentials,
       credentials: session.credentials,
+      loginSelectors,
     };
 
+    console.log(`[readiness] ${approvedTestCases.length}/${approvedTestCases.length} approved case(s) are Automation Ready.`);
     console.log(`[single-spec] Generating one grounded automation file for ${approvedTestCases.length} approved case(s)`);
 
     let generated = null;
@@ -226,70 +231,54 @@ router.post("/api/chat", async (req, res, next) => {
         approvedTestCases,
         pageDiscoveries: session.pageDiscoveries,
         hasCredentials: executionContext.hasCredentials,
+        loginSelectors: executionContext.loginSelectors,
       });
 
       if (validation.valid) {
-        if (attempt > 1) console.log(`[single-spec] Grounded automation accepted on generation attempt ${attempt}.`);
+        console.log(`[single-spec] Grounded automation accepted on generation attempt ${attempt}.`);
         break;
       }
 
       validationFeedback = validation.errors;
-      console.warn(`[single-spec] Generation attempt ${attempt} rejected by deterministic grounding: ${validation.errors.join(" | ")}`);
+      console.warn(`[single-spec] Generation attempt ${attempt} rejected before execution: ${validation.errors.join(" | ")}`);
     }
 
     if (!generated || !validation.valid) {
       return res.status(422).json({
-        reply: "AI automation could not be grounded safely to the discovered application after automatic correction. Review the approved test cases or page discovery and try again.",
+        reply: "Automation generation was rejected by deterministic validation after automatic correction. No browser test was started, so this is not recorded as an automation execution defect.",
         validationErrors: validation.errors,
+        automationReadiness: session.automationReadiness,
       });
     }
 
-    session.generatedScript = [{
-      fileName: "ai-generated.cy.js",
-      framework: generated.framework,
-      language: generated.language,
-      script: generated.script,
-      testCaseIds: approved,
-    }];
+    session.generatedScript = [{ fileName: "ai-generated.cy.js", framework: generated.framework, language: generated.language, script: generated.script, testCaseIds: approved }];
     session.approvedIds = approved;
     session.state = "RUNNING";
 
     const execResult = await executeSingleGeneratedSpec(generated, executionContext);
     if (!execResult.ok || !execResult.summary) {
       session.state = "AWAITING_APPROVAL";
-      return res.status(500).json({
-        reply: `Automation execution could not complete: ${execResult.error || "unknown error"}`,
-      });
+      return res.status(500).json({ reply: `Automation execution could not complete: ${execResult.error || "unknown error"}` });
     }
 
     session.artifacts = execResult.artifacts || null;
     const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
     const loginOnly = isLoginOnlyStory(session.story);
 
-    const analyses = await Promise.all(
-      summary.tests.filter((test) => test.fail).map(async (test) => {
-        const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
-        const tc = session.testCases.find((item) => item.id === tcId) || {
-          id: tcId || "UNKNOWN",
-          title: test.title,
-          expectedResults: [],
-        };
+    const analyses = await Promise.all(summary.tests.filter((test) => test.fail).map(async (test) => {
+      const tcId = test.testCaseId || String(test.title || "").match(TEST_ID_GLOBAL_REGEX)?.[0];
+      const tc = session.testCases.find((item) => item.id === tcId) || { id: tcId || "UNKNOWN", title: test.title, expectedResults: [] };
+      if (isPreExecutionAutomationFailure(test)) return automationFailureAnalysis(tc, test);
 
-        if (isPreExecutionAutomationFailure(test)) {
-          return automationFailureAnalysis(tc, test);
-        }
-
-        const analysis = await qwen.analyzeFailure({
-          story: session.story,
-          testCase: tc,
-          expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
-          actual: test.err?.message || "Automation assertion failed",
-        });
-
-        if (loginOnly) return constrainLoginAnalysis(analysis, tc, test);
-        return { testCase: tc.id, ...analysis };
-      })
-    );
+      const analysis = await qwen.analyzeFailure({
+        story: session.story,
+        testCase: tc,
+        expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
+        actual: test.err?.message || "Automation assertion failed",
+      });
+      if (loginOnly) return constrainLoginAnalysis(analysis, tc, test);
+      return { testCase: tc.id, ...analysis };
+    }));
 
     session.failureAnalyses = analyses;
     session.lastResults = { execResult, summary };
@@ -308,6 +297,7 @@ router.post("/api/chat", async (req, res, next) => {
       reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`,
       summary,
       failureAnalyses: analyses,
+      automationReadiness: session.automationReadiness,
       reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
       generatedFile: "ai-generated.cy.js",
     });
