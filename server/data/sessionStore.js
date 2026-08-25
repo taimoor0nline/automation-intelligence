@@ -11,7 +11,7 @@ function createSession() {
     targetUrl: null,
     environment: null,
     additionalPaths: [],
-    aiModelTier: "fast",
+    aiModelTier: "strong",
     credentials: null,
     pageDiscoveries: [],
     testCases: [],
