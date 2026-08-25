@@ -23,28 +23,39 @@ function selectorFor(item) {
   return "";
 }
 
+function pathForPage(page) {
+  try {
+    const url = new URL(page?.finalUrl || page?.url || "http://local/");
+    return `${url.pathname}${url.search}` || "/";
+  } catch {
+    return "/";
+  }
+}
+
 function buildDiscoveryIndex(pageDiscoveries = []) {
   const selectors = new Map();
+  const selectorPaths = new Map();
   const paths = new Set();
+
   for (const page of pageDiscoveries || []) {
-    try {
-      const url = new URL(page?.finalUrl || page?.url || "http://local/");
-      paths.add(`${url.pathname}${url.search}` || "/");
-    } catch {}
-    for (const item of page?.elements || []) {
+    const pagePath = pathForPage(page);
+    paths.add(pagePath);
+
+    const register = (item) => {
       const selector = selectorFor(item);
-      if (selector) selectors.set(selector, item);
-      if (item?.errorElement) {
-        const errSelector = selectorFor(item.errorElement);
-        if (errSelector) selectors.set(errSelector, item.errorElement);
-      }
+      if (!selector) return;
+      selectors.set(selector, item);
+      selectorPaths.set(selector, pagePath);
+    };
+
+    for (const item of page?.elements || []) {
+      register(item);
+      if (item?.errorElement) register(item.errorElement);
     }
-    for (const message of page?.messages || []) {
-      const selector = selectorFor(message);
-      if (selector) selectors.set(selector, message);
-    }
+    for (const message of page?.messages || []) register(message);
   }
-  return { selectors, paths };
+
+  return { selectors, selectorPaths, paths };
 }
 
 function findSelector(text) {
@@ -92,7 +103,7 @@ function compileStep(step, discovery, state) {
   const actionRaw = String(step?.action || "").trim();
   const action = actionRaw.toLowerCase();
   const target = String(step?.target || "").trim();
-  const value = step?.value === null || step?.value === undefined ? null : String(step.value);
+  let value = step?.value === null || step?.value === undefined ? null : String(step.value);
 
   if (isConfiguredCredentialStep(action) || (/click|submit/.test(action) && /sign\s*in|log\s*in|login/i.test(actionRaw) && state.validLoginRequired)) {
     if (!state.loginInserted) {
@@ -116,10 +127,16 @@ function compileStep(step, discovery, state) {
   const tag = String(element?.tag || "").toLowerCase();
 
   if (/leave .*blank|clear|empty/.test(action)) return { operation: "CLEAR", selector: target };
+
   if (/enter|type|fill|input/.test(action)) {
+    // Review/request normalization may trim an all-space value. The action itself is
+    // sufficient evidence for a whitespace-only test, so preserve that intent
+    // deterministically instead of forcing an unnecessary AI repair.
+    if ((value === null || value === "") && /white\s*space|spaces?[- ]only|blank spaces?/i.test(actionRaw)) value = " ";
     if (value === null || value === "") return { error: `Typing step is missing a value for ${target}` };
     return { operation: "TYPE", selector: target, value };
   }
+
   if (/uncheck|deselect/.test(action) && (type === "checkbox" || type === "radio")) return { operation: "UNCHECK", selector: target };
   if (/check|consent|select at least one|choose/.test(action) && type === "checkbox") return { operation: "CHECK", selector: target };
   if (/select/.test(action) && tag === "select") {
@@ -154,6 +171,18 @@ function compileExpected(expected, discovery) {
   return { narrative: text };
 }
 
+function ensureGroundedStartPage(actions, discovery) {
+  if (!actions.length) return actions;
+  if (actions[0].operation === "NAVIGATE" || actions[0].operation === "LOGIN_VALID") return actions;
+
+  const firstSelectorAction = actions.find((action) => action.selector && discovery.selectorPaths.has(action.selector));
+  if (!firstSelectorAction) return actions;
+
+  const path = discovery.selectorPaths.get(firstSelectorAction.selector);
+  if (!path || !discovery.paths.has(path)) return actions;
+  return [{ operation: "NAVIGATE", path }, ...actions];
+}
+
 function compileTestCase(testCase, { pageDiscoveries = [], hasCredentials = false } = {}) {
   const discovery = buildDiscoveryIndex(pageDiscoveries);
   const validLoginRequired = requiresValidLogin(testCase);
@@ -162,7 +191,7 @@ function compileTestCase(testCase, { pageDiscoveries = [], hasCredentials = fals
   }
 
   const state = { validLoginRequired, loginInserted: false };
-  const actions = [];
+  let actions = [];
   const errors = [];
   for (const step of testCase?.steps || []) {
     const compiled = compileStep(step, discovery, state);
@@ -172,6 +201,7 @@ function compileTestCase(testCase, { pageDiscoveries = [], hasCredentials = fals
   }
 
   if (validLoginRequired && !state.loginInserted) actions.unshift({ operation: "LOGIN_VALID" });
+  actions = ensureGroundedStartPage(actions, discovery);
 
   const assertions = [];
   const narratives = [];
