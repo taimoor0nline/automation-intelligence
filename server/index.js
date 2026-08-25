@@ -6,6 +6,7 @@ const path = require("path");
 
 const chatRoutes = require("./routes/chat");
 const runRoutes = require("./routes/run");
+const testCaseLifecycleRoutes = require("./routes/testCaseLifecycle");
 const qwen = require("./services/qwenClient");
 const { normalizeGeneratedScript } = require("./services/automationScriptNormalizer");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
@@ -78,6 +79,7 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
   return res.sendFile(filePath);
 });
 
+app.use(testCaseLifecycleRoutes);
 app.use(runRoutes);
 app.use(chatRoutes);
 
@@ -86,38 +88,115 @@ app.get("/health", (req, res) => {
 });
 
 const READINESS_CSS = `
-.readiness{margin-top:8px;padding:8px 9px;border-radius:8px;font-size:10.5px;line-height:1.4;border:1px solid var(--border)}
+.readiness{margin-top:8px;padding:9px 10px;border-radius:8px;font-size:10.5px;line-height:1.45;border:1px solid var(--border)}
 .readiness.ready{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
 .readiness.blocked{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
 .readiness.preflight{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.readiness-code{display:block;margin-top:4px;font-weight:800;font-size:9.5px;letter-spacing:.25px}.readiness-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.readiness-actions button{font-size:10px;padding:5px 7px}
 .tag.ready{background:#dcfce7;color:#15803d;font-weight:800}.tag.blocked{background:#ffedd5;color:#c2410c;font-weight:800}.tag.preflight{background:#dbeafe;color:#1d4ed8;font-weight:800}
+.editor-readiness{margin:0 0 14px;padding:12px;border-radius:10px;background:#f8fafc;border:1px solid var(--border);font-size:11px;line-height:1.5}.editor-readiness strong{font-size:11.5px}.editor-readiness .history{margin-top:7px;padding-top:7px;border-top:1px solid var(--border);color:#64748b}
 `;
 
 const READINESS_JS = `
 (function(){
-  const originalRenderCases = renderCases;
-  renderCases = function(){
+  let readinessRefreshInFlight=false;
+  let readinessTimer=null;
+  const credentialsPayload=()=>({username:$('username').value,password:$('password').value});
+  const readinessLabel=(status)=>status==='READY'?'Automation Ready':status==='NEEDS_PREFLIGHT'?'Checking readiness':String(status||'NEEDS_PREFLIGHT').replaceAll('_',' ');
+  const readinessClass=(status)=>status==='READY'?'ready':status==='NEEDS_PREFLIGHT'?'preflight':'blocked';
+
+  async function refreshReadiness(){
+    if(!sessionId||!testCases.length||readinessRefreshInFlight)return;
+    readinessRefreshInFlight=true;
+    try{
+      const r=await fetch('/api/test-cases/revalidate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,testCases,credentials:credentialsPayload()})});
+      const data=await r.json();
+      if(r.ok&&Array.isArray(data.testCases)){testCases=data.testCases;renderCases();}
+    }catch(err){console.warn('[readiness] refresh failed',err);}finally{readinessRefreshInFlight=false;}
+  }
+  window.refreshTestReadiness=refreshReadiness;
+
+  function scheduleReadiness(){clearTimeout(readinessTimer);readinessTimer=setTimeout(refreshReadiness,180);}
+
+  const originalRenderCases=renderCases;
+  renderCases=function(){
     $('caseCount').textContent=testCases.length;
     $('addCaseBtn').disabled=!sessionId;
     if(!testCases.length){$('cases').innerHTML='<div class="empty">No test cases returned.</div>';return;}
-    let ready=0,blocked=0,preflight=0;
+    let ready=0,blocked=0,preflight=0,needsRefresh=false;
     $('cases').innerHTML=testCases.map((tc,i)=>{
       const expected=(tc.expectedResults||[]).slice(0,2).join(' · '),source=(tc.source||'ai').toLowerCase(),type=(tc.type||'functional').toLowerCase(),allowedTypes=new Set(['negative','positive','functional','boundary','custom']),typeClass=allowedTypes.has(type)?'type-'+type:'type-functional';
-      const readiness=tc.automationReadiness||null;
-      const status=readiness?.status||'NEEDS_PREFLIGHT';
-      const isReady=status==='READY';
-      const needsPreflight=status==='NEEDS_PREFLIGHT';
-      if(isReady)ready++; else if(needsPreflight)preflight++; else blocked++;
-      const readinessClass=isReady?'ready':needsPreflight?'preflight':'blocked';
-      const readinessLabel=isReady?'Automation Ready':needsPreflight?'Preflight on Run':status.replaceAll('_',' ');
-      const reason=readiness?.reason||(needsPreflight?'This human-edited case will be re-checked against discovery and Cypress capabilities before any code is generated.':'');
-      const checked=isReady||needsPreflight?'checked':'';
-      const disabled=!isReady&&!needsPreflight?'disabled':'';
-      return '<div class="case '+typeClass+'"><input class="case-check" type="checkbox" value="'+escapeHtml(tc.id)+'" '+checked+' '+disabled+'><div><div class="case-title">'+escapeHtml(tc.id)+' — '+escapeHtml(tc.title)+'</div><div class="case-meta"><span class="tag '+typeClass+'">'+escapeHtml(type)+'</span><span class="tag">'+escapeHtml(tc.priority||'medium')+'</span><span class="tag '+(source==='human'?'human':'')+'">'+(source==='human'?'Human':'AI / Reviewed')+'</span><span class="tag '+readinessClass+'">'+escapeHtml(readinessLabel)+'</span><span>'+((tc.steps||[]).length)+' steps</span></div>'+(expected?'<div class="expected">Expected: '+escapeHtml(expected)+'</div>':'')+'<div class="readiness '+readinessClass+'"><b>'+escapeHtml(readinessLabel)+'</b>'+(reason?' — '+escapeHtml(reason):'')+'</div></div><div class="case-actions"><button class="btn ghost" onclick="openEditor('+i+')">Edit</button><button class="btn ghost danger" onclick="deleteCase('+i+')">Delete</button></div></div>';
+      const readiness=tc.automationReadiness||null,status=readiness?.status||'NEEDS_PREFLIGHT';
+      if(!readiness)needsRefresh=true;
+      const isReady=status==='READY',isPreflight=status==='NEEDS_PREFLIGHT';
+      if(isReady)ready++;else if(isPreflight)preflight++;else blocked++;
+      const cls=readinessClass(status),label=readinessLabel(status),reason=readiness?.reason||(isPreflight?'The automation system is checking this test against discovered application evidence and supported capabilities.':'');
+      const reasonCode=readiness?.reasonCode||'',resolution=readiness?.resolutionType||'',checked=isReady||isPreflight?'checked':'',disabled=!isReady&&!isPreflight?'disabled':'';
+      let actions='';
+      if(resolution==='AI_REPAIRABLE')actions='<button class="btn ghost" type="button" onclick="repairCaseWithAI('+i+')">Fix with AI</button>';
+      else if(resolution==='USER_INPUT_REQUIRED')actions='<button class="btn ghost" type="button" onclick="focusRequiredInput('+i+')">Provide required input</button>';
+      const sourceLabel=source==='human'?'Human':source==='ai-on-demand'?'AI · On-demand':source==='ai-repaired'?'AI · Repaired':'AI / Reviewed';
+      return '<div class="case '+typeClass+'"><input class="case-check" type="checkbox" value="'+escapeHtml(tc.id)+'" '+checked+' '+disabled+'><div><div class="case-title">'+escapeHtml(tc.id)+' — '+escapeHtml(tc.title)+'</div><div class="case-meta"><span class="tag '+typeClass+'">'+escapeHtml(type)+'</span><span class="tag">'+escapeHtml(tc.priority||'medium')+'</span><span class="tag '+(source==='human'?'human':'')+'">'+escapeHtml(sourceLabel)+'</span><span class="tag '+cls+'">'+escapeHtml(label)+'</span><span>'+((tc.steps||[]).length)+' steps</span></div>'+(expected?'<div class="expected">Expected: '+escapeHtml(expected)+'</div>':'')+'<div class="readiness '+cls+'"><b>'+escapeHtml(label)+'</b> — '+escapeHtml(reason)+(reasonCode?'<span class="readiness-code">Reason: '+escapeHtml(reasonCode)+' · Resolution: '+escapeHtml(resolution||'NONE')+'</span>':'')+(actions?'<div class="readiness-actions">'+actions+'</div>':'')+'</div></div><div class="case-actions"><button class="btn ghost" onclick="openEditor('+i+')">Edit</button><button class="btn ghost danger" onclick="deleteCase('+i+')">Delete</button></div></div>';
     }).join('');
-    $('runHint').textContent=ready+' Automation Ready · '+preflight+' needs preflight · '+blocked+' manual/unsupported';
+    $('runHint').textContent=ready+' Automation Ready · '+preflight+' checking · '+blocked+' action/manual';
     $('runBtn').disabled=!(ready+preflight);
+    if(needsRefresh)scheduleReadiness();
   };
+
+  window.focusRequiredInput=function(index){
+    const readiness=testCases[index]?.automationReadiness;
+    const required=readiness?.requiredInputs||[];
+    if(required.includes('username'))$('username').focus();else if(required.includes('password'))$('password').focus();
+    showError(readiness?.reason||'Provide the required execution input and the test will be revalidated automatically.');
+  };
+
+  window.repairCaseWithAI=async function(index){
+    const tc=testCases[index];if(!tc)return;
+    clearError();
+    try{
+      const r=await fetch('/api/test-cases/repair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,testCase:tc,credentials:credentialsPayload()})});
+      const data=await r.json();
+      if(!r.ok)throw new Error(data.reply||'The test case could not be repaired safely.');
+      if(data.testCase){testCases[index]=data.testCase;renderCases();}
+    }catch(err){showError(err.message);}
+  };
+
+  ['username','password'].forEach(id=>$(id).addEventListener('input',()=>{if(sessionId&&testCases.length)scheduleReadiness();}));
+
+  const modalCard=$('editorModal')?.querySelector('.modal-card');
+  if(modalCard&&!$('editorReadiness')){
+    const box=document.createElement('div');box.id='editorReadiness';box.className='editor-readiness';box.innerHTML='<strong>Automation readiness</strong><div>Save or validate this test case to see its deterministic readiness result.</div>';
+    const head=modalCard.querySelector('.section-head');if(head)head.insertAdjacentElement('afterend',box);
+  }
+  function showEditorReadiness(index){
+    const box=$('editorReadiness');if(!box)return;
+    const tc=index>=0?testCases[index]:null,r=tc?.automationReadiness,h=tc?.repairHistory||[];
+    if(!r){box.innerHTML='<strong>Automation readiness</strong><div>This new or edited test will be revalidated when it is saved.</div>';return;}
+    const history=h.length?'<div class="history"><b>Repair history</b><br>'+h.map(x=>'Attempt '+escapeHtml(x.attempt)+': '+escapeHtml(x.reasonCode||x.originalStatus)+' → '+escapeHtml(x.result||'review')).join('<br>')+'</div>':'';
+    box.innerHTML='<strong>'+escapeHtml(readinessLabel(r.status))+'</strong><div><b>Reason code:</b> '+escapeHtml(r.reasonCode||'—')+'</div><div><b>Reason:</b> '+escapeHtml(r.reason||'—')+'</div><div><b>Resolution:</b> '+escapeHtml(r.resolutionType||'NONE')+'</div><div><b>Validation:</b> Deterministic automation-system check</div>'+history;
+  }
+  const originalOpenEditor=window.openEditor;
+  window.openEditor=function(index){originalOpenEditor(index);showEditorReadiness(index);};
+  openEditor=window.openEditor;
+
+  $('saveEditorBtn').addEventListener('click',()=>setTimeout(scheduleReadiness,40));
+
+  const actions=$('addCaseBtn')?.parentElement;
+  if(actions&&!$('generateOneCaseBtn')){
+    const btn=document.createElement('button');btn.id='generateOneCaseBtn';btn.className='btn ghost';btn.type='button';btn.textContent='✨ Generate Test Case';actions.insertBefore(btn,$('addCaseBtn'));
+    btn.addEventListener('click',async()=>{
+      const request=window.prompt('Describe the specific test case you want to generate.');
+      if(!request||!request.trim())return;
+      clearError();btn.disabled=true;btn.textContent='Generating…';
+      try{
+        const r=await fetch('/api/test-cases/generate-one',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,requestText:request.trim(),testCases,credentials:credentialsPayload()})});
+        const data=await r.json();
+        if(!r.ok)throw new Error(data.reply||'The requested test case could not be generated.');
+        const candidate=data.testCase;
+        if(candidate&&window.confirm('A grounded candidate test case was generated. Add it to the current review set?')){testCases.unshift(candidate);renderCases();openEditor(0);}
+      }catch(err){showError(err.message);}finally{btn.disabled=false;btn.textContent='✨ Generate Test Case';}
+    });
+  }
 })();
 `;
 
@@ -133,12 +212,12 @@ function serveUi(req, res, next) {
       .replace("if(index<0)testCases.push(tc);else testCases[index]=tc;", "if(index<0)testCases.unshift(tc);else testCases[index]=tc;")
       .replace("User Story → Qwen → Human Review → Automated Execution → Analytics", "User Story → AI → Human Review → Automated Execution → Analytics")
       .replace("They are not sent to Qwen.", "They are not sent to the AI model.")
-      .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation engine runs the reviewed cases; AI then explains failures.")
+      .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation system runs the reviewed cases; AI then explains failures.")
       .replace("$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthDot').className='dot '+(data.aiConnected?'ok':'bad');$('healthText').textContent=data.aiConnected?'Connected':'Not connected'")
       .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages, grounding test cases and checking automation readiness. Please wait.")
       .replace("Discovering pages & asking Qwen…", "Discovering pages & validating tests…")
       .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checked`")
-      .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The browser automation is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
+      .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The automation system is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
       .replace("Qwen failure analysis", "AI failure analysis");
 
     res.type("html").send(adjusted);
