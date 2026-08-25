@@ -134,10 +134,34 @@ function killProcessTree(pid) {
   return Promise.resolve();
 }
 
+function validateRuntimeContext(executionContext = {}) {
+  const credentialsPresent = Boolean(executionContext.credentials?.username && executionContext.credentials?.password);
+  const selectorsPresent = Boolean(
+    executionContext.loginSelectors?.username &&
+    executionContext.loginSelectors?.password &&
+    executionContext.loginSelectors?.submit
+  );
+
+  console.log(
+    `[runtime-preflight] credentials=${credentialsPresent ? "present" : "missing"} ` +
+    `login-controls=${selectorsPresent ? "grounded" : "missing"} ` +
+    `login-path=${executionContext.loginPath || "/"}`
+  );
+
+  if (executionContext.hasCredentials && !credentialsPresent) {
+    throw new Error("Runtime credentials were expected by readiness validation but are missing before automation execution.");
+  }
+  if (executionContext.hasCredentials && !selectorsPresent) {
+    throw new Error("Runtime login controls were expected but are missing before automation execution.");
+  }
+}
+
 async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure }) {
   const cypressBin = path.join(AUTOMATION_DIR, "node_modules", "cypress", "bin", "cypress");
   if (!fs.existsSync(cypressBin)) throw new Error("Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install.");
   if (!fs.existsSync(REPORTER_PATH)) throw new Error(`Automation result reporter is missing: ${REPORTER_PATH}`);
+
+  validateRuntimeContext(executionContext);
 
   const args = [
     cypressBin,
