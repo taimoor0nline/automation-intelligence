@@ -2,10 +2,49 @@
   let readinessRefreshInFlight = false;
   let readinessTimer = null;
   let pendingGeneratedCase = null;
+  let lastGenerationMeta = null;
 
   const credentialsPayload = () => ({ username: $('username').value, password: $('password').value });
   const readinessLabel = (status) => status === 'READY' ? 'Automation Ready' : status === 'NEEDS_PREFLIGHT' ? 'Checking readiness' : String(status || 'NEEDS_PREFLIGHT').replaceAll('_', ' ');
   const readinessClass = (status) => status === 'READY' ? 'ready' : status === 'NEEDS_PREFLIGHT' ? 'preflight' : 'blocked';
+
+  // Add provider-neutral AI quality controls without exposing server-side model IDs.
+  const passwordField = $('password')?.closest('.field');
+  if (passwordField && !$('aiModelTier')) {
+    const controls = document.createElement('div');
+    controls.innerHTML = '<div class="field"><label>AI quality profile</label><select id="aiModelTier"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="strong">Strong</option></select><small>Fast prioritizes response time. Balanced and Strong use progressively more capable server-side models configured in .env.</small></div><div class="field" style="margin-top:9px"><label style="font-weight:600"><input id="bypassDiscoveryCache" type="checkbox" style="width:auto;margin:0 6px 0 0">Fresh page discovery</label><small>Enable this to ignore the in-memory discovery cache for this generation.</small></div>';
+    passwordField.insertAdjacentElement('afterend', controls);
+  }
+
+  // The original page owns the main generation handler. Enrich only its /api/chat
+  // request with the selected profile and cache policy, keeping the UI/provider boundary clean.
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function (input, init) {
+    const url = typeof input === 'string' ? input : input?.url;
+    let nextInit = init;
+    let initialGeneration = false;
+    if (url === '/api/chat' && init?.method === 'POST' && typeof init.body === 'string') {
+      try {
+        const payload = JSON.parse(init.body);
+        initialGeneration = payload.message !== 'approve reviewed cases';
+        if (initialGeneration) {
+          payload.aiModelTier = $('aiModelTier')?.value || 'fast';
+          payload.bypassDiscoveryCache = Boolean($('bypassDiscoveryCache')?.checked);
+        }
+        nextInit = { ...init, body: JSON.stringify(payload) };
+      } catch {}
+    }
+
+    const response = await nativeFetch(input, nextInit);
+    if (initialGeneration) {
+      response.clone().json().then((data) => {
+        if (data?.generationTiming) {
+          lastGenerationMeta = data.generationTiming;
+        }
+      }).catch(() => {});
+    }
+    return response;
+  };
 
   async function refreshReadiness() {
     if (!sessionId || !testCases.length || readinessRefreshInFlight) return;
@@ -19,6 +58,8 @@
       if (r.ok && Array.isArray(data.testCases)) {
         testCases = data.testCases;
         renderCases();
+      } else if (!r.ok) {
+        showError(data.reply || 'Automation readiness validation failed.');
       }
     } catch (err) {
       console.warn('[readiness] refresh failed', err);
@@ -27,9 +68,9 @@
     }
   }
 
-  function scheduleReadiness() {
+  function scheduleReadiness(delayMs = 180) {
     clearTimeout(readinessTimer);
-    readinessTimer = setTimeout(refreshReadiness, 180);
+    readinessTimer = setTimeout(refreshReadiness, delayMs);
   }
 
   window.refreshTestReadiness = refreshReadiness;
@@ -79,8 +120,24 @@
     }).join('');
 
     $('runHint').textContent = ready + ' Automation Ready · ' + preflight + ' checking · ' + blocked + ' action/manual';
-    $('runBtn').disabled = !(ready + preflight);
-    if (needsRefresh) scheduleReadiness();
+    // Do not let a user start while the visible readiness phase is still pending.
+    $('runBtn').disabled = preflight > 0 || ready === 0;
+
+    if (needsRefresh) {
+      // Keep the Checking state visible long enough for the reviewer to actually see
+      // generation and readiness as two separate phases.
+      setTimeout(() => {
+        const cacheText = lastGenerationMeta?.discoveryCacheBypassed ? ' · fresh discovery' : lastGenerationMeta?.discoveryCacheHit ? ' · discovery cache used' : '';
+        $('caseSubtitle').textContent = 'AI test cases generated · checking automation readiness…' + cacheText;
+      }, 0);
+      scheduleReadiness(850);
+    } else {
+      setTimeout(() => {
+        const profile = $('aiModelTier')?.selectedOptions?.[0]?.textContent || 'Fast';
+        const timing = lastGenerationMeta?.totalMs ? ' · generated in ' + (lastGenerationMeta.totalMs / 1000).toFixed(1) + 's' : '';
+        $('caseSubtitle').textContent = profile + ' AI profile · readiness checked' + timing;
+      }, 0);
+    }
   };
 
   window.focusRequiredInput = function (index) {
@@ -95,6 +152,8 @@
     const tc = testCases[index];
     if (!tc) return;
     clearError();
+    const button = document.querySelector('.case:nth-child(' + (index + 1) + ') .readiness-actions button');
+    if (button) { button.disabled = true; button.textContent = 'Repairing…'; }
     try {
       const r = await fetch('/api/test-cases/repair', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -103,7 +162,7 @@
       const data = await r.json();
       if (!r.ok) throw new Error(data.reply || 'The test case could not be repaired safely.');
       if (data.testCase) { testCases[index] = data.testCase; renderCases(); }
-    } catch (err) { showError(err.message); }
+    } catch (err) { showError(err.message); renderCases(); }
   };
 
   ['username', 'password'].forEach((id) => $(id).addEventListener('input', () => { if (sessionId && testCases.length) scheduleReadiness(); }));
@@ -179,7 +238,7 @@
     btn.disabled = true;
     btn.textContent = pendingGeneratedCase ? 'Regenerating…' : 'Generating…';
     $('editorAiStatus').className = 'status';
-    $('editorAiStatus').textContent = 'Grounding against the current story and discovered application…';
+    $('editorAiStatus').textContent = 'Generating a candidate from the current story and discovered application…';
     try {
       const requestedId = $('editId').value || null;
       const r = await fetch('/api/test-cases/generate-one', {
@@ -214,7 +273,7 @@
         }
         pendingGeneratedCase = null;
       }
-      scheduleReadiness();
+      scheduleReadiness(180);
     }, 40);
   });
 })();
