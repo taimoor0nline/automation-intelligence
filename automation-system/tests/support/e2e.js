@@ -1,5 +1,5 @@
 // AI TestPilot — automation support file
-// Global behaviour for AI-generated browser automation specs.
+// Global behaviour for deterministic browser automation specs.
 
 function getDemoStepDelayMs() {
   const value = Number(Cypress.env("DEMO_STEP_DELAY_MS") || 0);
@@ -7,22 +7,26 @@ function getDemoStepDelayMs() {
   return Math.max(0, Math.min(value, 3000));
 }
 
+/**
+ * Delay presentation without enqueueing another cy command from inside an
+ * overwritten command. Cypress rejects patterns such as command.then(() =>
+ * cy.wait(...)) because they mix the command queue with a returned promise.
+ * Cypress.Promise.delay() pauses the yielded chain without creating a nested
+ * browser command, so the original command lifecycle remains valid.
+ */
 function withDemoDelay(chain) {
   const delayMs = getDemoStepDelayMs();
   if (!delayMs) return chain;
 
   return chain.then((subject) =>
-    cy.wait(delayMs, { log: false }).then(() => subject)
+    Cypress.Promise.delay(delayMs).then(() => subject)
   );
 }
 
 // Credentials, login path and login selectors are injected by the deterministic
-// automation runtime. AI-generated specs never read credentials or choose the
+// automation runtime. Generated specs never read credentials or choose the
 // login page/controls. Calling this command is enough to establish a valid login.
 Cypress.Commands.add("loginWithRuntimeCredentials", () => {
-  // Runtime values configured under e2e.env must be read with Cypress.env().
-  // Cypress.config("env") is not the runtime environment API and caused the
-  // framework helper to see empty credentials even though the server injected them.
   const username = Cypress.env("TEST_USERNAME");
   const password = Cypress.env("TEST_PASSWORD");
   const loginPath = Cypress.env("LOGIN_PATH") || "/";
@@ -37,7 +41,7 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
     throw new Error("Runtime login controls were not grounded from page discovery.");
   }
 
-  // Navigation is automation-system-owned too. This prevents generated tests from
+  // Navigation is automation-system-owned too. This prevents tests from
   // attempting login while the browser is still on about:blank or another page.
   cy.visit(loginPath);
   cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
