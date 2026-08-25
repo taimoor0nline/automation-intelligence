@@ -6,7 +6,7 @@
 <title>AI TestPilot</title>
 <style>
 :root{--bg:#f6f8fb;--panel:#fff;--border:#e5e9f1;--text:#10141c;--muted:#6b7385;--blue:#2f5bff;--blue2:#1f46d8;--green:#15803d;--greenbg:#dcfce7;--red:#b91c1c;--redbg:#fee2e2;--amber:#b45309;--amberbg:#fef3c7;--shadow:0 1px 2px rgba(16,20,28,.04),0 8px 24px rgba(16,20,28,.04)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;font-size:14px}button,input,textarea,select{font:inherit}header{height:68px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 26px;position:sticky;top:0;z-index:5}.brand{display:flex;gap:11px;align-items:center}.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--blue),#7794ff);display:grid;place-items:center;color:#fff;font-weight:800}.brand strong{display:block;font-size:16px}.brand span{font-size:11px;color:var(--muted)}.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;padding:7px 11px;border:1px solid var(--border);border-radius:999px}.dot{width:8px;height:8px;border-radius:50%;background:#9ca3af}.dot.ok{background:#16a34a}.dot.bad{background:#dc2626}.wrap{max-width:1500px;margin:0 auto;padding:22px}.grid{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}.panel{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}.pad{padding:18px}.panel h2{font-size:15px;margin:0}.sub{font-size:12px;color:var(--muted);line-height:1.45;margin-top:5px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.section-actions{display:flex;align-items:center;gap:8px}.pill{font-size:11px;padding:4px 8px;border-radius:999px;background:#eef2ff;color:var(--blue);font-weight:700}.field{margin-top:13px}.field label{display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#4b5563;font-size:12px;font-weight:700}.field small{display:block;color:var(--muted);margin-top:5px;font-size:10.5px;line-height:1.45}.field input,.field textarea,.field select{width:100%;border:1px solid var(--border);border-radius:9px;padding:10px 11px;background:#fff}.field textarea{min-height:125px;resize:vertical;line-height:1.5}.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px #eaf0ff}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btn{border:0;border-radius:9px;padding:10px 13px;font-weight:700;cursor:pointer}.btn.primary{width:100%;background:var(--blue);color:#fff;margin-top:16px}.btn.primary:hover{background:var(--blue2)}.btn.secondary{background:#fff;color:var(--blue);border:1px solid var(--blue)}.btn.ghost{background:#f7f8fb;color:#374151;border:1px solid var(--border);padding:7px 9px;font-size:11px}.btn.danger{color:var(--red)}.btn:disabled{opacity:.55;cursor:not-allowed}.workflow{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.cases{max-height:680px;overflow:auto}.case{display:grid;grid-template-columns:24px 1fr auto;gap:9px;padding:13px 0;border-bottom:1px solid #eef1f6}.case:last-child{border-bottom:0}.case-check{margin-top:4px}.case-title{font-weight:700;font-size:13px;line-height:1.4}.case-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:10.5px;color:var(--muted)}.tag{padding:2px 6px;border-radius:5px;background:#f2f4f8}.tag.human{background:#ecfdf5;color:#047857}.expected{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45}.case-actions{display:flex;gap:5px;align-items:start}.empty{padding:50px 16px;text-align:center;color:var(--muted);font-size:12px}.runbar{display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid var(--border)}.runbar .btn:last-child{margin-left:auto}.run-state{font-size:12px;color:var(--muted)}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metric{border:1px solid var(--border);border-radius:11px;padding:14px}.metric .n{font-size:25px;font-weight:800}.metric .l{font-size:11px;color:var(--muted);margin-top:4px}.results{margin-top:14px;max-height:430px;overflow:auto}.result{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #eef1f6}.result-title{font-size:12px;line-height:1.4}.result-evidence{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.result-evidence a{font-size:10.5px;font-weight:700;text-decoration:none;color:var(--blue);border:1px solid #dbe3ff;background:#f5f7ff;border-radius:6px;padding:4px 7px}.badge{font-size:10px;font-weight:800;padding:4px 7px;border-radius:999px;height:max-content}.badge.pass{background:var(--greenbg);color:var(--green)}.badge.fail{background:var(--redbg);color:var(--red)}.analysis{margin-top:14px}.analysis-item{border:1px solid #fde2e2;background:#fffafa;border-radius:10px;padding:10px;margin-top:8px}.analysis-item strong{font-size:11px;color:var(--red)}.analysis-item p{font-size:11.5px;color:var(--muted);line-height:1.45;margin:5px 0 0}.report{display:none;margin-top:14px}.report a{display:block;text-align:center;text-decoration:none;background:#111827;color:#fff;padding:11px;border-radius:9px;font-weight:700}.errorbox{display:none;background:var(--redbg);color:var(--red);border-radius:9px;padding:10px;margin-top:12px;font-size:12px;white-space:pre-wrap}.errorbox.show{display:block}.modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.48);z-index:50;align-items:center;justify-content:center;padding:18px}.modal.show{display:flex}.modal-card{width:min(760px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:14px;border:1px solid var(--border);box-shadow:0 30px 70px rgba(15,23,42,.2);padding:20px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.modal .field textarea{min-height:96px}.human-note{padding:9px 11px;border-radius:9px;background:#eef2ff;color:#334155;font-size:11.5px;margin-bottom:10px}.help-tip{position:relative;display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;background:#eef2ff;color:var(--blue);font-size:10px;font-weight:800;cursor:help}.help-tip:hover::after,.help-tip:focus::after{content:attr(data-tip);position:absolute;left:22px;top:-8px;width:310px;padding:10px 11px;border-radius:8px;background:#111827;color:#fff;font-weight:500;font-size:11px;line-height:1.45;z-index:80;box-shadow:0 8px 24px rgba(15,23,42,.22)}.type-help{padding:8px 10px;margin-top:7px;border-radius:8px;background:#f8fafc;border:1px solid var(--border);color:#475569;font-size:11px;line-height:1.4}.template-box{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}.template-box .field{margin-top:0}.template-note{padding:9px 10px;border-radius:8px;background:#f8fafc;color:#64748b;font-size:11px;line-height:1.45;margin-top:8px}@media(max-width:1100px){.grid,.workflow{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,1fr)}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;font-size:14px}button,input,textarea,select{font:inherit}header{height:68px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 26px;position:sticky;top:0;z-index:5}.brand{display:flex;gap:11px;align-items:center}.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--blue),#7794ff);display:grid;place-items:center;color:#fff;font-weight:800}.brand strong{display:block;font-size:16px}.brand span{font-size:11px;color:var(--muted)}.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;padding:7px 11px;border:1px solid var(--border);border-radius:999px}.dot{width:8px;height:8px;border-radius:50%;background:#9ca3af}.dot.ok{background:#16a34a}.dot.bad{background:#dc2626}.wrap{max-width:1500px;margin:0 auto;padding:22px}.grid{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}.panel{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}.pad{padding:18px}.panel h2{font-size:15px;margin:0}.sub{font-size:12px;color:var(--muted);line-height:1.45;margin-top:5px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.section-actions{display:flex;align-items:center;gap:8px}.pill{font-size:11px;padding:4px 8px;border-radius:999px;background:#eef2ff;color:var(--blue);font-weight:700}.activity-pill{background:var(--redbg)!important;color:var(--red)!important;animation:activityPulse 1s ease-in-out infinite}.activity-alert{margin:14px 18px;padding:14px 16px;border:1px solid #fecaca;border-radius:10px;background:var(--redbg);color:var(--red);font-size:12.5px;font-weight:800;text-align:center;animation:activityPulse 1s ease-in-out infinite}.activity-alert small{display:block;margin-top:5px;font-size:10.5px;font-weight:600;color:#991b1b}@keyframes activityPulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(185,28,28,.14)}50%{opacity:.58;box-shadow:0 0 0 5px rgba(185,28,28,0)}}.field{margin-top:13px}.field label{display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#4b5563;font-size:12px;font-weight:700}.field small{display:block;color:var(--muted);margin-top:5px;font-size:10.5px;line-height:1.45}.field input,.field textarea,.field select{width:100%;border:1px solid var(--border);border-radius:9px;padding:10px 11px;background:#fff}.field textarea{min-height:125px;resize:vertical;line-height:1.5}.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px #eaf0ff}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btn{border:0;border-radius:9px;padding:10px 13px;font-weight:700;cursor:pointer}.btn.primary{width:100%;background:var(--blue);color:#fff;margin-top:16px}.btn.primary:hover{background:var(--blue2)}.btn.secondary{background:#fff;color:var(--blue);border:1px solid var(--blue)}.btn.ghost{background:#f7f8fb;color:#374151;border:1px solid var(--border);padding:7px 9px;font-size:11px}.btn.danger{color:var(--red)}.btn:disabled{opacity:.55;cursor:not-allowed}.workflow{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.cases{max-height:680px;overflow:auto}.case{display:grid;grid-template-columns:24px 1fr auto;gap:9px;padding:13px 0;border-bottom:1px solid #eef1f6}.case:last-child{border-bottom:0}.case-check{margin-top:4px}.case-title{font-weight:700;font-size:13px;line-height:1.4}.case-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:10.5px;color:var(--muted)}.tag{padding:2px 6px;border-radius:5px;background:#f2f4f8}.tag.human{background:#ecfdf5;color:#047857}.expected{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45}.case-actions{display:flex;gap:5px;align-items:start}.empty{padding:50px 16px;text-align:center;color:var(--muted);font-size:12px}.runbar{display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid var(--border)}.runbar .btn:last-child{margin-left:auto}.run-state{font-size:12px;color:var(--muted)}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metric{border:1px solid var(--border);border-radius:11px;padding:14px}.metric .n{font-size:25px;font-weight:800}.metric .l{font-size:11px;color:var(--muted);margin-top:4px}.results{margin-top:14px;max-height:430px;overflow:auto}.result{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #eef1f6}.result-title{font-size:12px;line-height:1.4}.result-evidence{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.result-evidence a{font-size:10.5px;font-weight:700;text-decoration:none;color:var(--blue);border:1px solid #dbe3ff;background:#f5f7ff;border-radius:6px;padding:4px 7px}.badge{font-size:10px;font-weight:800;padding:4px 7px;border-radius:999px;height:max-content}.badge.pass{background:var(--greenbg);color:var(--green)}.badge.fail{background:var(--redbg);color:var(--red)}.analysis{margin-top:14px}.analysis-item{border:1px solid #fde2e2;background:#fffafa;border-radius:10px;padding:10px;margin-top:8px}.analysis-item strong{font-size:11px;color:var(--red)}.analysis-item p{font-size:11.5px;color:var(--muted);line-height:1.45;margin:5px 0 0}.report{display:none;margin-top:14px}.report a{display:block;text-align:center;text-decoration:none;background:#111827;color:#fff;padding:11px;border-radius:9px;font-weight:700}.errorbox{display:none;background:var(--redbg);color:var(--red);border-radius:9px;padding:10px;margin-top:12px;font-size:12px;white-space:pre-wrap}.errorbox.show{display:block}.modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.48);z-index:50;align-items:center;justify-content:center;padding:18px}.modal.show{display:flex}.modal-card{width:min(760px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:14px;border:1px solid var(--border);box-shadow:0 30px 70px rgba(15,23,42,.2);padding:20px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.modal .field textarea{min-height:96px}.human-note{padding:9px 11px;border-radius:9px;background:#eef2ff;color:#334155;font-size:11.5px;margin-bottom:10px}.help-tip{position:relative;display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;background:#eef2ff;color:var(--blue);font-size:10px;font-weight:800;cursor:help}.help-tip:hover::after,.help-tip:focus::after{content:attr(data-tip);position:absolute;left:22px;top:-8px;width:310px;padding:10px 11px;border-radius:8px;background:#111827;color:#fff;font-weight:500;font-size:11px;line-height:1.45;z-index:80;box-shadow:0 8px 24px rgba(15,23,42,.22)}.type-help{padding:8px 10px;margin-top:7px;border-radius:8px;background:#f8fafc;border:1px solid var(--border);color:#475569;font-size:11px;line-height:1.4}.template-box{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}.template-box .field{margin-top:0}.template-note{padding:9px 10px;border-radius:8px;background:#f8fafc;color:#64748b;font-size:11px;line-height:1.45;margin-top:8px}@media(max-width:1100px){.grid,.workflow{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -61,24 +61,16 @@
   <div class="modal-card">
     <div class="section-head"><div><h2 id="editorHeading">Edit Test Case</h2><div class="sub">Modify the AI proposal or define your own test case.</div></div><button id="closeEditorBtn" class="btn ghost">Close</button></div>
     <input id="editIndex" type="hidden" value="-1">
-
     <div id="templateSection" class="template-note">
-      <div class="template-box">
-        <div class="field"><label>Start from a template</label><select id="templateSelect"><option value="functional">Functional / happy path</option><option value="validation">Validation</option><option value="boundary">Boundary</option><option value="negative">Negative</option><option value="blank">Blank / custom</option></select></div>
-        <button id="applyTemplateBtn" class="btn ghost" type="button">Apply Template</button>
-      </div>
+      <div class="template-box"><div class="field"><label>Start from a template</label><select id="templateSelect"><option value="functional">Functional / happy path</option><option value="validation">Validation</option><option value="boundary">Boundary</option><option value="negative">Negative</option><option value="blank">Blank / custom</option></select></div><button id="applyTemplateBtn" class="btn ghost" type="button">Apply Template</button></div>
       Templates provide editable starter preconditions, steps and expected results. They do not bypass human review.
     </div>
-
     <div class="field"><label>Test Case ID</label><input id="editId" readonly></div>
     <div class="field"><label>Title</label><input id="editTitle" placeholder="Example: Reject age below the minimum"></div>
-    <div class="two">
-      <div class="field"><label>Type <span class="help-tip" tabindex="0" data-tip="Functional: verifies a business feature or flow. Positive: valid data / happy path. Negative: invalid data or action must be rejected. Boundary: checks min/max and edge values. Custom: tester-defined classification.">?</span></label><select id="editType"><option value="functional">Functional</option><option value="positive">Positive</option><option value="negative">Negative</option><option value="boundary">Boundary</option><option value="custom">Custom</option></select><div id="typeHelp" class="type-help"></div></div>
-      <div class="field"><label>Priority</label><select id="editPriority"><option>low</option><option selected>medium</option><option>high</option></select><small>Use high for business-critical paths or risks that should block release.</small></div>
-    </div>
-    <div class="field"><label>Preconditions <span class="help-tip" tabindex="0" data-tip="What must already be true before the test starts, such as being logged in, having access to a page, or having required test data.">?</span></label><textarea id="editPreconditions" placeholder="One precondition per line"></textarea></div>
-    <div class="field"><label>Steps <span class="help-tip" tabindex="0" data-tip="The user actions the automation engine should perform. Keep each step clear and observable. Format: action | target | value.">?</span></label><textarea id="editSteps" placeholder="One step per line. Example: Enter invalid age | Age field | 17"></textarea><small>Format: action | target | value. Target and value are optional.</small></div>
-    <div class="field"><label>Expected Results <span class="help-tip" tabindex="0" data-tip="What the application should do if the requirement is satisfied. These become the basis for automated assertions and PASS/FAIL.">?</span></label><textarea id="editExpected" placeholder="One expected result per line"></textarea></div>
+    <div class="two"><div class="field"><label>Type</label><select id="editType"><option value="functional">Functional</option><option value="positive">Positive</option><option value="negative">Negative</option><option value="boundary">Boundary</option><option value="custom">Custom</option></select><div id="typeHelp" class="type-help"></div></div><div class="field"><label>Priority</label><select id="editPriority"><option>low</option><option selected>medium</option><option>high</option></select></div></div>
+    <div class="field"><label>Preconditions</label><textarea id="editPreconditions" placeholder="One precondition per line"></textarea></div>
+    <div class="field"><label>Steps</label><textarea id="editSteps" placeholder="One step per line. Example: Enter invalid age | Age field | 17"></textarea></div>
+    <div class="field"><label>Expected Results</label><textarea id="editExpected" placeholder="One expected result per line"></textarea></div>
     <div class="modal-actions"><button id="cancelEditorBtn" class="btn ghost">Cancel</button><button id="saveEditorBtn" class="btn secondary">Save Test Case</button></div>
   </div>
 </div>
@@ -88,197 +80,19 @@ const $ = (id) => document.getElementById(id);
 let sessionId = null;
 let testCases = [];
 let humanCounter = 1;
-
-const TYPE_HELP = {
-  functional:'Functional — verifies that a business feature or end-to-end flow behaves according to the requirement.',
-  positive:'Positive — uses valid input and confirms the expected successful or happy-path behaviour.',
-  negative:'Negative — uses invalid data or an invalid action and confirms the application rejects it safely.',
-  boundary:'Boundary — verifies behaviour at minimum, maximum, just-below or just-above allowed limits.',
-  custom:'Custom — use when the scenario does not fit the standard categories or follows a tester-specific classification.'
-};
-
-const TEST_TEMPLATES = {
-  functional:{
-    type:'functional',
-    preconditions:['Target application is available','User can access the relevant page for this scenario'],
-    steps:[
-      {action:'Navigate to the relevant page',target:'page',value:null},
-      {action:'Perform the business action',target:'relevant control',value:null},
-      {action:'Submit or complete the action',target:'relevant action',value:null}
-    ],
-    expectedResults:['Requested business action completes successfully','Expected confirmation or resulting state is visible']
-  },
-  validation:{
-    type:'negative',
-    preconditions:['Target application is available','User is on the form or page containing the field under test'],
-    steps:[
-      {action:'Enter invalid or missing data',target:'field under test',value:null},
-      {action:'Complete other required fields with valid data',target:'required fields',value:null},
-      {action:'Submit the form',target:'submit action',value:null}
-    ],
-    expectedResults:['Submission is blocked when the input violates the requirement','Relevant validation feedback is displayed']
-  },
-  boundary:{
-    type:'boundary',
-    preconditions:['Target application is available','User is on the form or page containing the field under test'],
-    steps:[
-      {action:'Enter a value at or just outside the business boundary',target:'field under test',value:null},
-      {action:'Complete other required fields with valid data',target:'required fields',value:null},
-      {action:'Submit the form',target:'submit action',value:null}
-    ],
-    expectedResults:['The configured minimum or maximum rule is enforced','Resulting validation or success state matches the business requirement']
-  },
-  negative:{
-    type:'negative',
-    preconditions:['Target application is available','User is on the relevant page for the scenario'],
-    steps:[
-      {action:'Perform an invalid or disallowed action',target:'relevant control',value:null},
-      {action:'Submit or continue',target:'relevant action',value:null}
-    ],
-    expectedResults:['Invalid action is rejected','Application remains in a safe and valid state']
-  },
-  blank:{type:'custom',preconditions:[],steps:[],expectedResults:[]}
-};
-
-function escapeHtml(value){ const d=document.createElement('div'); d.textContent=String(value??''); return d.innerHTML; }
-function showError(message){ $('errorBox').textContent=message; $('errorBox').classList.add('show'); }
-function clearError(){ $('errorBox').classList.remove('show'); $('errorBox').textContent=''; }
-function setBusy(button,busy,text){ button.disabled=busy; button.dataset.oldText ||= button.textContent; button.textContent=busy?text:button.dataset.oldText; }
-function lines(value){ return String(value||'').split(/\r?\n/).map(v=>v.trim()).filter(Boolean); }
-function stepToLine(step){ return [step?.action||'',step?.target||'',step?.value??''].join(' | ').replace(/\s+\|\s+\|\s*$/,'').replace(/\s+\|\s*$/,''); }
-function parseStep(line){ const parts=String(line).split('|').map(v=>v.trim()); return {action:parts[0]||'',target:parts[1]||'',value:parts.length>2&&parts[2]!==''?parts.slice(2).join(' | '):null}; }
-function updateTypeHelp(){ $('typeHelp').textContent=TYPE_HELP[$('editType').value]||''; }
-$('editType').addEventListener('change',updateTypeHelp);
-
-function applyTemplate(name){
-  const t=TEST_TEMPLATES[name]||TEST_TEMPLATES.functional;
-  $('editType').value=t.type;
-  $('editPreconditions').value=t.preconditions.join('\n');
-  $('editSteps').value=t.steps.map(stepToLine).join('\n');
-  $('editExpected').value=t.expectedResults.join('\n');
-  updateTypeHelp();
-}
-$('applyTemplateBtn').addEventListener('click',()=>applyTemplate($('templateSelect').value));
-
-async function checkHealth(){
-  try{
-    const r=await fetch('/health'); const data=await r.json(); if(!r.ok) throw new Error();
-    $('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');
-    $('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured';
-  }catch{ $('healthDot').className='dot bad'; $('healthText').textContent='Backend unavailable'; }
-}
-checkHealth();
-
-function renderCases(){
-  $('caseCount').textContent=testCases.length;
-  $('addCaseBtn').disabled=!sessionId;
-  if(!testCases.length){ $('cases').innerHTML='<div class="empty">No test cases returned.</div>'; return; }
-  $('cases').innerHTML=testCases.map((tc,i)=>{
-    const expected=(tc.expectedResults||[]).slice(0,2).join(' · ');
-    const source=(tc.source||'ai').toLowerCase();
-    return `<div class="case"><input class="case-check" type="checkbox" value="${escapeHtml(tc.id)}" checked><div><div class="case-title">${escapeHtml(tc.id)} — ${escapeHtml(tc.title)}</div><div class="case-meta"><span class="tag">${escapeHtml(tc.type||'functional')}</span><span class="tag">${escapeHtml(tc.priority||'medium')}</span><span class="tag ${source==='human'?'human':''}">${source==='human'?'Human':'AI / Reviewed'}</span><span>${(tc.steps||[]).length} steps</span></div>${expected?`<div class="expected">Expected: ${escapeHtml(expected)}</div>`:''}</div><div class="case-actions"><button class="btn ghost" onclick="openEditor(${i})">Edit</button><button class="btn ghost danger" onclick="deleteCase(${i})">Delete</button></div></div>`;
-  }).join('');
-}
-
-function nextHumanId(){
-  let id;
-  do{ id=`TC-H${String(humanCounter++).padStart(3,'0')}`; }while(testCases.some(tc=>tc.id===id));
-  return id;
-}
-
-function openEditor(index){
-  const isNew=index<0;
-  const starter=TEST_TEMPLATES.functional;
-  const tc=isNew?{id:nextHumanId(),title:'',type:starter.type,priority:'medium',preconditions:[...starter.preconditions],steps:starter.steps.map(s=>({...s})),expectedResults:[...starter.expectedResults],source:'human'}:testCases[index];
-  $('editIndex').value=String(index);
-  $('editorHeading').textContent=isNew?'Add Human Test Case':'Edit Test Case';
-  $('templateSection').style.display=isNew?'block':'none';
-  $('templateSelect').value='functional';
-  $('editId').value=tc.id;
-  $('editTitle').value=tc.title||'';
-  $('editType').value=tc.type||'functional';
-  $('editPriority').value=tc.priority||'medium';
-  $('editPreconditions').value=(tc.preconditions||[]).join('\n');
-  $('editSteps').value=(tc.steps||[]).map(stepToLine).join('\n');
-  $('editExpected').value=(tc.expectedResults||[]).join('\n');
-  updateTypeHelp();
-  $('editorModal').classList.add('show');
-  setTimeout(()=>$('editTitle').focus(),20);
-}
-window.openEditor=openEditor;
-
-function closeEditor(){ $('editorModal').classList.remove('show'); }
-$('closeEditorBtn').onclick=closeEditor; $('cancelEditorBtn').onclick=closeEditor;
-$('editorModal').addEventListener('click',(e)=>{ if(e.target===$('editorModal')) closeEditor(); });
-
-$('saveEditorBtn').addEventListener('click',()=>{
-  const index=Number($('editIndex').value);
-  const title=$('editTitle').value.trim(); if(!title){ alert('Title is required.'); return; }
-  const existing=index>=0?testCases[index]:null;
-  const tc={
-    id:$('editId').value,
-    title,
-    type:$('editType').value,
-    priority:$('editPriority').value,
-    preconditions:lines($('editPreconditions').value),
-    testData:existing?.testData||{},
-    steps:lines($('editSteps').value).map(parseStep),
-    expectedResults:lines($('editExpected').value),
-    source:index<0?'human':(existing?.source==='human'?'human':'ai-reviewed')
-  };
-  if(index<0) testCases.push(tc); else testCases[index]=tc;
-  renderCases(); closeEditor();
-});
-
-function deleteCase(index){ if(confirm(`Remove ${testCases[index].id} from this run?`)){ testCases.splice(index,1); renderCases(); } }
-window.deleteCase=deleteCase;
-$('addCaseBtn').addEventListener('click',()=>openEditor(-1));
-
-$('generateBtn').addEventListener('click', async()=>{
-  clearError();
-  const targetUrl=$('targetUrl').value.trim(); const story=$('story').value.trim();
-  if(!targetUrl || !story){ showError('Target URL and business story are required.'); return; }
-  sessionId='run-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
-  humanCounter=1; testCases=[]; renderCases(); $('runBtn').disabled=true; $('runStatus').textContent='Generating'; $('reportBox').style.display='none'; $('analysis').innerHTML=''; $('results').innerHTML='<div class="empty">Waiting for execution.</div>';
-  setBusy($('generateBtn'),true,'Discovering pages & asking Qwen…');
-  try{
-    const paths=$('additionalPaths').value.split(',').map(v=>v.trim()).filter(Boolean);
-    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,message:story,targetUrl,additionalPaths:paths,environment:$('environment').value,credentials:{username:$('username').value,password:$('password').value}})});
-    const data=await r.json(); if(!r.ok) throw new Error(data.reply||'Generation failed.');
-    testCases=(data.testCases||[]).map(tc=>({...tc,source:tc.source||'ai'})); renderCases();
-    $('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`;
-    $('runBtn').disabled=!testCases.length; $('runStatus').textContent='Ready';
-  }catch(err){ showError(err.message); $('runStatus').textContent='Error'; }
-  finally{ setBusy($('generateBtn'),false,''); }
-});
-
-$('runBtn').addEventListener('click', async()=>{
-  clearError();
-  const approved=[...document.querySelectorAll('.case-check:checked')].map(el=>el.value);
-  if(!approved.length){ showError('Select at least one test case.'); return; }
-  setBusy($('runBtn'),true,'Running in Chrome…'); $('runStatus').textContent='Running'; $('results').innerHTML='<div class="empty">Automation is running. Watch the Chrome window that opens automatically.</div>'; $('analysis').innerHTML=''; $('reportBox').style.display='none';
-  try{
-    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,message:'approve reviewed cases',approvedIds:approved,reviewedTestCases:testCases})});
-    const data=await r.json(); if(!r.ok) throw new Error(data.reply||'Execution failed.');
-    renderResults(data.summary,data.failureAnalyses||[]);
-    if(data.reportUrl){ $('reportLink').href=data.reportUrl; $('reportBox').style.display='block'; }
-    $('runStatus').textContent='Completed';
-  }catch(err){ showError(err.message); $('runStatus').textContent='Error'; }
-  finally{ setBusy($('runBtn'),false,''); }
-});
-
-function renderResults(summary,analyses){
-  const total=summary?.total||0, passed=summary?.passed||0, failed=summary?.failed||0;
-  $('mTotal').textContent=total; $('mPassed').textContent=passed; $('mFailed').textContent=failed; $('mRate').textContent=total?Math.round(passed/total*100)+'%':'0%';
-  const tests=summary?.tests||[];
-  $('results').innerHTML=tests.length?tests.map(t=>{
-    const duration=t.durationMs==null?'':`<div class="expected">Duration: ${escapeHtml(t.durationMs)} ms</div>`;
-    const error=t.err?.message?`<div class="expected">${escapeHtml(t.err.message).slice(0,260)}</div>`:'';
-    const evidence=t.fail?`<div class="result-evidence">${t.evidence?.videoUrl?`<a href="${escapeHtml(t.evidence.videoUrl)}" target="_blank" rel="noopener">▶ Video</a>`:''}${t.evidence?.screenshotUrl?`<a href="${escapeHtml(t.evidence.screenshotUrl)}" target="_blank" rel="noopener">▣ Screenshot</a>`:''}</div>`:'';
-    return `<div class="result"><div class="result-title">${escapeHtml(t.title)}${duration}${error}${evidence}</div><span class="badge ${t.pass?'pass':'fail'}">${t.pass?'PASS':'FAIL'}</span></div>`;
-  }).join(''):'<div class="empty">No automation results returned.</div>';
-  $('analysis').innerHTML=analyses.length?`<div class="sub"><b>Qwen failure analysis</b></div>`+analyses.map(a=>`<div class="analysis-item"><strong>${escapeHtml(a.testCase)} · ${escapeHtml(a.classification)} · ${Math.round((a.confidence||0)*100)}%</strong><p>${escapeHtml(a.summary)}</p></div>`).join(''):'';
-}
+const TYPE_HELP={functional:'Functional — verifies that a business feature or end-to-end flow behaves according to the requirement.',positive:'Positive — uses valid input and confirms the expected successful or happy-path behaviour.',negative:'Negative — uses invalid data or an invalid action and confirms the application rejects it safely.',boundary:'Boundary — verifies behaviour at minimum, maximum, just-below or just-above allowed limits.',custom:'Custom — use when the scenario does not fit the standard categories or follows a tester-specific classification.'};
+const TEST_TEMPLATES={functional:{type:'functional',preconditions:['Target application is available','User can access the relevant page for this scenario'],steps:[{action:'Navigate to the relevant page',target:'page',value:null},{action:'Perform the business action',target:'relevant control',value:null},{action:'Submit or complete the action',target:'relevant action',value:null}],expectedResults:['Requested business action completes successfully','Expected confirmation or resulting state is visible']},validation:{type:'negative',preconditions:['Target application is available','User is on the form or page containing the field under test'],steps:[{action:'Enter invalid or missing data',target:'field under test',value:null},{action:'Complete other required fields with valid data',target:'required fields',value:null},{action:'Submit the form',target:'submit action',value:null}],expectedResults:['Submission is blocked when the input violates the requirement','Relevant validation feedback is displayed']},boundary:{type:'boundary',preconditions:['Target application is available','User is on the form or page containing the field under test'],steps:[{action:'Enter a value at or just outside the business boundary',target:'field under test',value:null},{action:'Complete other required fields with valid data',target:'required fields',value:null},{action:'Submit the form',target:'submit action',value:null}],expectedResults:['The configured minimum or maximum rule is enforced','Resulting validation or success state matches the business requirement']},negative:{type:'negative',preconditions:['Target application is available','User is on the relevant page for the scenario'],steps:[{action:'Perform an invalid or disallowed action',target:'relevant control',value:null},{action:'Submit or continue',target:'relevant action',value:null}],expectedResults:['Invalid action is rejected','Application remains in a safe and valid state']},blank:{type:'custom',preconditions:[],steps:[],expectedResults:[]}};
+function escapeHtml(value){const d=document.createElement('div');d.textContent=String(value??'');return d.innerHTML}function showError(message){$('errorBox').textContent=message;$('errorBox').classList.add('show')}function clearError(){$('errorBox').classList.remove('show');$('errorBox').textContent=''}function setBusy(button,busy,text){button.disabled=busy;button.dataset.oldText ||= button.textContent;button.textContent=busy?text:button.dataset.oldText}function lines(value){return String(value||'').split(/\r?\n/).map(v=>v.trim()).filter(Boolean)}function stepToLine(step){return [step?.action||'',step?.target||'',step?.value??''].join(' | ').replace(/\s+\|\s+\|\s*$/,'').replace(/\s+\|\s*$/,'')}function parseStep(line){const parts=String(line).split('|').map(v=>v.trim());return{action:parts[0]||'',target:parts[1]||'',value:parts.length>2&&parts[2]!==''?parts.slice(2).join(' | '):null}}function updateTypeHelp(){$('typeHelp').textContent=TYPE_HELP[$('editType').value]||''}$('editType').addEventListener('change',updateTypeHelp);
+function setActivityStatus(text,on){$('runStatus').textContent=text;$('runStatus').classList.toggle('activity-pill',Boolean(on))}
+function applyTemplate(name){const t=TEST_TEMPLATES[name]||TEST_TEMPLATES.functional;$('editType').value=t.type;$('editPreconditions').value=t.preconditions.join('\n');$('editSteps').value=t.steps.map(stepToLine).join('\n');$('editExpected').value=t.expectedResults.join('\n');updateTypeHelp()}$('applyTemplateBtn').addEventListener('click',()=>applyTemplate($('templateSelect').value));
+async function checkHealth(){try{const r=await fetch('/health');const data=await r.json();if(!r.ok)throw new Error();$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'}catch{$('healthDot').className='dot bad';$('healthText').textContent='Backend unavailable'}}checkHealth();
+function renderCases(){$('caseCount').textContent=testCases.length;$('addCaseBtn').disabled=!sessionId;if(!testCases.length){$('cases').innerHTML='<div class="empty">No test cases returned.</div>';return}$('cases').innerHTML=testCases.map((tc,i)=>{const expected=(tc.expectedResults||[]).slice(0,2).join(' · '),source=(tc.source||'ai').toLowerCase();return `<div class="case"><input class="case-check" type="checkbox" value="${escapeHtml(tc.id)}" checked><div><div class="case-title">${escapeHtml(tc.id)} — ${escapeHtml(tc.title)}</div><div class="case-meta"><span class="tag">${escapeHtml(tc.type||'functional')}</span><span class="tag">${escapeHtml(tc.priority||'medium')}</span><span class="tag ${source==='human'?'human':''}">${source==='human'?'Human':'AI / Reviewed'}</span><span>${(tc.steps||[]).length} steps</span></div>${expected?`<div class="expected">Expected: ${escapeHtml(expected)}</div>`:''}</div><div class="case-actions"><button class="btn ghost" onclick="openEditor(${i})">Edit</button><button class="btn ghost danger" onclick="deleteCase(${i})">Delete</button></div></div>`}).join('')}
+function nextHumanId(){let id;do{id=`TC-H${String(humanCounter++).padStart(3,'0')}`}while(testCases.some(tc=>tc.id===id));return id}
+function openEditor(index){const isNew=index<0,starter=TEST_TEMPLATES.functional,tc=isNew?{id:nextHumanId(),title:'',type:starter.type,priority:'medium',preconditions:[...starter.preconditions],steps:starter.steps.map(s=>({...s})),expectedResults:[...starter.expectedResults],source:'human'}:testCases[index];$('editIndex').value=String(index);$('editorHeading').textContent=isNew?'Add Human Test Case':'Edit Test Case';$('templateSection').style.display=isNew?'block':'none';$('templateSelect').value='functional';$('editId').value=tc.id;$('editTitle').value=tc.title||'';$('editType').value=tc.type||'functional';$('editPriority').value=tc.priority||'medium';$('editPreconditions').value=(tc.preconditions||[]).join('\n');$('editSteps').value=(tc.steps||[]).map(stepToLine).join('\n');$('editExpected').value=(tc.expectedResults||[]).join('\n');updateTypeHelp();$('editorModal').classList.add('show');setTimeout(()=>$('editTitle').focus(),20)}window.openEditor=openEditor;function closeEditor(){$('editorModal').classList.remove('show')}$('closeEditorBtn').onclick=closeEditor;$('cancelEditorBtn').onclick=closeEditor;$('editorModal').addEventListener('click',e=>{if(e.target===$('editorModal'))closeEditor()});
+$('saveEditorBtn').addEventListener('click',()=>{const index=Number($('editIndex').value),title=$('editTitle').value.trim();if(!title){alert('Title is required.');return}const existing=index>=0?testCases[index]:null,tc={id:$('editId').value,title,type:$('editType').value,priority:$('editPriority').value,preconditions:lines($('editPreconditions').value),testData:existing?.testData||{},steps:lines($('editSteps').value).map(parseStep),expectedResults:lines($('editExpected').value),source:index<0?'human':(existing?.source==='human'?'human':'ai-reviewed')};if(index<0)testCases.push(tc);else testCases[index]=tc;renderCases();closeEditor()});function deleteCase(index){if(confirm(`Remove ${testCases[index].id} from this run?`)){testCases.splice(index,1);renderCases()}}window.deleteCase=deleteCase;$('addCaseBtn').addEventListener('click',()=>openEditor(-1));
+$('generateBtn').addEventListener('click',async()=>{clearError();const targetUrl=$('targetUrl').value.trim(),story=$('story').value.trim();if(!targetUrl||!story){showError('Target URL and business story are required.');return}sessionId='run-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);humanCounter=1;testCases=[];renderCases();$('runBtn').disabled=true;setActivityStatus('Generating',true);$('reportBox').style.display='none';$('analysis').innerHTML='';$('cases').innerHTML='<div class="activity-alert">Generating AI test cases…<small>Discovering relevant pages and asking Qwen. Please wait.</small></div>';$('results').innerHTML='<div class="empty">Waiting for execution.</div>';setBusy($('generateBtn'),true,'Discovering pages & asking Qwen…');try{const paths=$('additionalPaths').value.split(',').map(v=>v.trim()).filter(Boolean),r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,message:story,targetUrl,additionalPaths:paths,environment:$('environment').value,credentials:{username:$('username').value,password:$('password').value}})}),data=await r.json();if(!r.ok)throw new Error(data.reply||'Generation failed.');testCases=(data.testCases||[]).map(tc=>({...tc,source:tc.source||'ai'}));renderCases();$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`;$('runBtn').disabled=!testCases.length;setActivityStatus('Ready',false)}catch(err){showError(err.message);setActivityStatus('Error',false);renderCases()}finally{setBusy($('generateBtn'),false,'')}});
+$('runBtn').addEventListener('click',async()=>{clearError();const approved=[...document.querySelectorAll('.case-check:checked')].map(el=>el.value);if(!approved.length){showError('Select at least one test case.');return}setBusy($('runBtn'),true,'Running in Chrome…');setActivityStatus('Running',true);$('results').innerHTML='<div class="activity-alert">Automation is running.<small>Watch the Chrome window that opens automatically.</small></div>';$('analysis').innerHTML='';$('reportBox').style.display='none';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,message:'approve reviewed cases',approvedIds:approved,reviewedTestCases:testCases})}),data=await r.json();if(!r.ok)throw new Error(data.reply||'Execution failed.');renderResults(data.summary,data.failureAnalyses||[]);if(data.reportUrl){$('reportLink').href=data.reportUrl;$('reportBox').style.display='block'}setActivityStatus('Completed',false)}catch(err){showError(err.message);setActivityStatus('Error',false)}finally{setBusy($('runBtn'),false,'')}});
+function renderResults(summary,analyses){const total=summary?.total||0,passed=summary?.passed||0,failed=summary?.failed||0;$('mTotal').textContent=total;$('mPassed').textContent=passed;$('mFailed').textContent=failed;$('mRate').textContent=total?Math.round(passed/total*100)+'%':'0%';const tests=summary?.tests||[];$('results').innerHTML=tests.length?tests.map(t=>{const duration=t.durationMs==null?'':`<div class="expected">Duration: ${escapeHtml(t.durationMs)} ms</div>`,error=t.err?.message?`<div class="expected">${escapeHtml(t.err.message).slice(0,260)}</div>`:'',evidence=t.fail?`<div class="result-evidence">${t.evidence?.videoUrl?`<a href="${escapeHtml(t.evidence.videoUrl)}" target="_blank" rel="noopener">▶ Video</a>`:''}${t.evidence?.screenshotUrl?`<a href="${escapeHtml(t.evidence.screenshotUrl)}" target="_blank" rel="noopener">▣ Screenshot</a>`:''}</div>`:'';return `<div class="result"><div class="result-title">${escapeHtml(t.title)}${duration}${error}${evidence}</div><span class="badge ${t.pass?'pass':'fail'}">${t.pass?'PASS':'FAIL'}</span></div>`}).join(''):'<div class="empty">No automation results returned.</div>';$('analysis').innerHTML=analyses.length?`<div class="sub"><b>Qwen failure analysis</b></div>`+analyses.map(a=>`<div class="analysis-item"><strong>${escapeHtml(a.testCase)} · ${escapeHtml(a.classification)} · ${Math.round((a.confidence||0)*100)}%</strong><p>${escapeHtml(a.summary)}</p></div>`).join(''):''}
 </script>
 </body>
 </html>
