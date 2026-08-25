@@ -10,10 +10,10 @@ const qwen = require("./services/qwenClient");
 const { normalizeGeneratedScript } = require("./services/automationScriptNormalizer");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
 
-// Keep Qwen as the source of the automation, but normalize brittle exact-text
-// assertions before execution. Generated containers can include dynamic values
-// and whitespace that should not turn a successful business flow into a false
-// automation failure.
+// Keep the configured AI provider as the source of the automation, but normalize
+// brittle exact-text assertions before execution. Generated containers can
+// include dynamic values and whitespace that should not turn a successful
+// business flow into a false automation failure.
 const generateAutomationCode = qwen.generateAutomationCode.bind(qwen);
 qwen.generateAutomationCode = async (args) => {
   const generated = await generateAutomationCode(args);
@@ -23,12 +23,13 @@ qwen.generateAutomationCode = async (args) => {
   };
 };
 
-// Qwen still performs failure analysis, but this PoC has two known seeded
-// validation defects. When the expected behaviour is rejection/validation and
-// the browser reports that the error element became invisible because the form
-// itself was hidden after submit, that is consistent with the invalid input
-// being accepted and the application entering its success state. Preserve this
-// evidence as APPLICATION_DEFECT rather than mislabeling it AUTOMATION_DEFECT.
+// The configured AI provider still performs failure analysis, but this PoC has
+// two known seeded validation defects. When the expected behaviour is
+// rejection/validation and the browser reports that the error element became
+// invisible because the form itself was hidden after submit, that is consistent
+// with the invalid input being accepted and the application entering its
+// success state. Preserve this evidence as APPLICATION_DEFECT rather than
+// mislabeling it AUTOMATION_DEFECT.
 const analyzeFailure = qwen.analyzeFailure.bind(qwen);
 qwen.analyzeFailure = async (args) => {
   const analysis = await analyzeFailure(args);
@@ -77,22 +78,22 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
 app.use(runRoutes);
 app.use(chatRoutes);
 
+// Keep infrastructure/provider details private from the browser-facing health
+// endpoint. The UI only needs to know whether the AI capability is available.
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
-    qwenConfigured: qwen.isConfigured(),
-    qwenModel: qwen.QWEN_MODEL,
+    aiConnected: qwen.isConfigured(),
   });
 });
 
 // Keep the checked-in demo UI generic at runtime:
 // - Known pages starts empty so discovery is not biased toward /feedback.
 // - Newly added human test cases are inserted at the top for immediate review.
-// - Public-facing branding stays provider-neutral while the backend continues
-//   to use the configured AI service internally.
+// - Public-facing branding and status text remain AI-provider-neutral.
 // These replacements are intentionally narrow and fail harmlessly if the UI is
 // later refactored; static assets continue to be served normally below.
-app.get("/", (req, res, next) => {
+function serveUi(req, res, next) {
   const uiFile = path.join(__dirname, "..", "testpilot-ui", "index.html");
   fs.readFile(uiFile, "utf8", (err, html) => {
     if (err) return next(err);
@@ -100,21 +101,29 @@ app.get("/", (req, res, next) => {
     const adjusted = html
       .replace('id="additionalPaths" value="/feedback"', 'id="additionalPaths" value=""')
       .replace("if(index<0)testCases.push(tc);else testCases[index]=tc;", "if(index<0)testCases.unshift(tc);else testCases[index]=tc;")
-      .replace("User Story → Qwen → Human Review → Automated Execution → Analytics", "User Story → IA → Human Review → Automated Execution → Analytics")
-      .replace("$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthText').textContent=data.qwenConfigured?'Connected':'Not connected'");
+      .replace("User Story → Qwen → Human Review → Automated Execution → Analytics", "User Story → AI → Human Review → Automated Execution → Analytics")
+      .replace("They are not sent to Qwen.", "They are not sent to the AI model.")
+      .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation engine runs the reviewed cases; AI then explains failures.")
+      .replace("$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthDot').className='dot '+(data.aiConnected?'ok':'bad');$('healthText').textContent=data.aiConnected?'Connected':'Not connected'")
+      .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages and generating AI test cases. Please wait.")
+      .replace("Discovering pages & asking Qwen…", "Discovering pages & generating tests…")
+      .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated`")
+      .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The browser automation is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
+      .replace("Qwen failure analysis", "AI failure analysis");
 
     res.type("html").send(adjusted);
   });
-});
+}
 
+app.get(["/", "/index.html"], serveUi);
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
 app.listen(PORT, HOST, () => {
   console.log(`[ai-testpilot] Backend listening on ${HOST}:${PORT}`);
   console.log(`[ai-testpilot] UI available locally at http://localhost:${PORT}/`);
   if (qwen.isConfigured()) {
-    console.log(`[ai-testpilot] ✅ Real Qwen enabled (${qwen.QWEN_MODEL})`);
+    console.log(`[ai-testpilot] ✅ AI provider connected (${qwen.QWEN_MODEL})`);
   } else {
-    console.log("[ai-testpilot] ❌ Qwen is not configured. Set QWEN_API_KEY and QWEN_BASE_URL in .env.");
+    console.log("[ai-testpilot] ❌ AI provider is not configured. Check the server-side AI configuration in .env.");
   }
 });
