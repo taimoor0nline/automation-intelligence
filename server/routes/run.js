@@ -3,7 +3,7 @@ const router = express.Router();
 
 const { getSession } = require("../data/sessionStore");
 const qwen = require("../services/qwenClient");
-const { validateScript } = require("../services/scriptValidator");
+const { validateGroundedScript } = require("../services/scriptValidator");
 const { executeSingleGeneratedSpec } = require("../services/singleSpecRunner");
 const { buildAnalyticsReport } = require("../services/reportGenerator");
 
@@ -12,6 +12,7 @@ const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
 const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional", "custom"]);
 const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
 const LOGIN_SCOPE_FORBIDDEN_ANALYSIS = /\b(feedback|website|url|age|rating|consent|product|category|checkout|payment|cart|profile)\b/i;
+const MAX_AUTOMATION_GENERATION_ATTEMPTS = 2;
 
 function cleanString(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
@@ -206,19 +207,39 @@ router.post("/api/chat", async (req, res, next) => {
       credentials: session.credentials,
     };
 
-    console.log(`[single-spec] Generating one automation file for ${approvedTestCases.length} approved case(s)`);
+    console.log(`[single-spec] Generating one grounded automation file for ${approvedTestCases.length} approved case(s)`);
 
-    const generated = await qwen.generateAutomationCode({
-      approvedTestCases,
-      pageDiscoveries: session.pageDiscoveries,
-      fileName: "ai-generated.cy.js",
-      executionContext,
-    });
+    let generated = null;
+    let validation = { valid: false, errors: ["Automation has not been generated yet."] };
+    let validationFeedback = [];
 
-    const validation = validateScript(generated.script);
-    if (!validation.valid) {
+    for (let attempt = 1; attempt <= MAX_AUTOMATION_GENERATION_ATTEMPTS; attempt += 1) {
+      generated = await qwen.generateAutomationCode({
+        approvedTestCases,
+        pageDiscoveries: session.pageDiscoveries,
+        fileName: "ai-generated.cy.js",
+        executionContext,
+        validationFeedback,
+      });
+
+      validation = validateGroundedScript(generated.script, {
+        approvedTestCases,
+        pageDiscoveries: session.pageDiscoveries,
+        hasCredentials: executionContext.hasCredentials,
+      });
+
+      if (validation.valid) {
+        if (attempt > 1) console.log(`[single-spec] Grounded automation accepted on generation attempt ${attempt}.`);
+        break;
+      }
+
+      validationFeedback = validation.errors;
+      console.warn(`[single-spec] Generation attempt ${attempt} rejected by deterministic grounding: ${validation.errors.join(" | ")}`);
+    }
+
+    if (!generated || !validation.valid) {
       return res.status(422).json({
-        reply: `Generated automation code failed validation: ${validation.errors.join(" | ")}`,
+        reply: "AI automation could not be grounded safely to the discovered application after automatic correction. Review the approved test cases or page discovery and try again.",
         validationErrors: validation.errors,
       });
     }
@@ -254,9 +275,6 @@ router.post("/api/chat", async (req, res, next) => {
           expectedResults: [],
         };
 
-        // A 0ms/near-zero failure (or an explicit command-generation error) did
-        // not meaningfully exercise the application. Never let the model label
-        // that as an application defect.
         if (isPreExecutionAutomationFailure(test)) {
           return automationFailureAnalysis(tc, test);
         }
@@ -268,9 +286,6 @@ router.post("/api/chat", async (req, res, next) => {
           actual: test.err?.message || "Automation assertion failed",
         });
 
-        // The story owns scope. If a login-only analysis hallucinates a field
-        // from another discovered page, discard the unrelated explanation while
-        // preserving the useful classification when execution actually happened.
         if (loginOnly) return constrainLoginAnalysis(analysis, tc, test);
         return { testCase: tc.id, ...analysis };
       })
