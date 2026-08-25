@@ -74,6 +74,7 @@ router.post("/api/test-cases/revalidate", async (req, res) => {
 
   try {
     if (session.state === "IDLE" || !session.story) throw new Error("Generate the initial story-driven test cases before readiness validation.");
+    session.readinessValidated = false;
     updateCredentials(session, credentials);
 
     const sourceCases = Array.isArray(testCases) ? testCases : session.testCases;
@@ -81,10 +82,12 @@ router.post("/api/test-cases/revalidate", async (req, res) => {
     const assessed = assessTestCases(normalized, context(session));
     session.testCases = assessed;
     session.automationReadiness = readinessSummary(assessed);
+    session.readinessValidated = true;
 
-    return res.json({ ok: true, testCases: assessed, automationReadiness: session.automationReadiness });
+    return res.json({ ok: true, testCases: assessed, automationReadiness: session.automationReadiness, readinessPending: false });
   } catch (err) {
-    return res.status(422).json({ ok: false, reply: err.message });
+    session.readinessValidated = false;
+    return res.status(422).json({ ok: false, reply: err.message, readinessPending: true });
   }
 });
 
@@ -107,7 +110,7 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
       requestText: request,
       story: session.story,
       pageDiscoveries: session.pageDiscoveries,
-      modelTier: session.aiModelTier || "fast",
+      modelTier: session.aiModelTier || "strong",
     });
     candidate.createdBy = "human-request";
     candidate.source = "ai-on-demand";
@@ -120,7 +123,7 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
       testCase: candidate,
       automationReadiness: candidate.automationReadiness,
       readinessSummary: readinessSummary([candidate]),
-      aiModelTier: session.aiModelTier || "fast",
+      aiModelTier: session.aiModelTier || "strong",
     });
   } catch (err) {
     return res.status(422).json({ ok: false, reply: err.message });
@@ -154,7 +157,7 @@ router.post("/api/test-cases/repair", async (req, res) => {
       readiness,
       story: session.story,
       pageDiscoveries: session.pageDiscoveries,
-      modelTier: session.aiModelTier || "fast",
+      modelTier: session.aiModelTier || "strong",
     });
     if (!repair.repaired) return res.status(422).json({ ok: false, repaired: false, reply: repair.explanation, automationReadiness: readiness });
 
@@ -175,8 +178,9 @@ router.post("/api/test-cases/repair", async (req, res) => {
 
     upsertSessionCase(session, repaired);
     session.automationReadiness = readinessSummary(session.testCases);
+    session.readinessValidated = true;
 
-    return res.json({ ok: true, repaired: true, testCase: repaired, automationReadiness: repaired.automationReadiness, aiModelTier: session.aiModelTier || "fast" });
+    return res.json({ ok: true, repaired: true, testCase: repaired, automationReadiness: repaired.automationReadiness, aiModelTier: session.aiModelTier || "strong" });
   } catch (err) {
     return res.status(422).json({ ok: false, repaired: false, reply: err.message });
   }
