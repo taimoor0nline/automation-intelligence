@@ -82,11 +82,7 @@ router.post("/api/test-cases/revalidate", async (req, res) => {
     session.testCases = assessed;
     session.automationReadiness = readinessSummary(assessed);
 
-    return res.json({
-      ok: true,
-      testCases: assessed,
-      automationReadiness: session.automationReadiness,
-    });
+    return res.json({ ok: true, testCases: assessed, automationReadiness: session.automationReadiness });
   } catch (err) {
     return res.status(422).json({ ok: false, reply: err.message });
   }
@@ -97,9 +93,7 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
   const session = getSession(sessionId);
 
   try {
-    if (session.state === "IDLE" || !session.story || !(session.pageDiscoveries || []).length) {
-      throw new Error("Generate the initial story and page discovery before creating an on-demand test case.");
-    }
+    if (session.state === "IDLE" || !session.story || !(session.pageDiscoveries || []).length) throw new Error("Generate the initial story and page discovery before creating an on-demand test case.");
     updateCredentials(session, credentials);
     const request = cleanString(requestText, 1500);
     if (!request) throw new Error("Describe the specific test case you want the AI to generate.");
@@ -113,14 +107,11 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
       requestText: request,
       story: session.story,
       pageDiscoveries: session.pageDiscoveries,
+      modelTier: session.aiModelTier || "fast",
     });
     candidate.createdBy = "human-request";
     candidate.source = "ai-on-demand";
     candidate.repairHistory = [];
-
-    // Do not chain a second AI request here. Show the candidate immediately,
-    // classify it deterministically, and let the reviewer choose Fix with AI
-    // only when the reason is legitimately AI-repairable.
     candidate.automationReadiness = classifyTestCase(candidate, context(session));
 
     return res.json({
@@ -129,6 +120,7 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
       testCase: candidate,
       automationReadiness: candidate.automationReadiness,
       readinessSummary: readinessSummary([candidate]),
+      aiModelTier: session.aiModelTier || "fast",
     });
   } catch (err) {
     return res.status(422).json({ ok: false, reply: err.message });
@@ -162,10 +154,9 @@ router.post("/api/test-cases/repair", async (req, res) => {
       readiness,
       story: session.story,
       pageDiscoveries: session.pageDiscoveries,
+      modelTier: session.aiModelTier || "fast",
     });
-    if (!repair.repaired) {
-      return res.status(422).json({ ok: false, repaired: false, reply: repair.explanation, automationReadiness: readiness });
-    }
+    if (!repair.repaired) return res.status(422).json({ ok: false, repaired: false, reply: repair.explanation, automationReadiness: readiness });
 
     const repaired = normalizeTestCase({ ...repair.testCase, id: original.id }, original.id);
     repaired.automationReadiness = classifyTestCase(repaired, context(session));
@@ -185,7 +176,7 @@ router.post("/api/test-cases/repair", async (req, res) => {
     upsertSessionCase(session, repaired);
     session.automationReadiness = readinessSummary(session.testCases);
 
-    return res.json({ ok: true, repaired: true, testCase: repaired, automationReadiness: repaired.automationReadiness });
+    return res.json({ ok: true, repaired: true, testCase: repaired, automationReadiness: repaired.automationReadiness, aiModelTier: session.aiModelTier || "fast" });
   } catch (err) {
     return res.status(422).json({ ok: false, repaired: false, reply: err.message });
   }
