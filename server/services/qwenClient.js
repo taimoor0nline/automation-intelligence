@@ -1,9 +1,11 @@
+const { modelForProfile } = require("./aiModelProfiles");
+
 function numberEnv(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-const QWEN_MODEL = process.env.QWEN_MODEL || "qwen3.7-flash";
+const QWEN_MODEL = process.env.QWEN_MODEL || "qwen3.5-flash";
 const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_TIMEOUT_MS, 180000), 600000));
 const MAX_RETRIES = Math.max(0, Math.min(Math.trunc(numberEnv(process.env.QWEN_MAX_RETRIES, 1)), 3));
 const TEST_CASE_COUNT = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 5) || 5, 20));
@@ -14,7 +16,7 @@ function isConfigured() {
 
 function ensureConfigured() {
   if (!isConfigured()) {
-    throw new Error("Qwen is not configured. Set QWEN_API_KEY and QWEN_BASE_URL in your local .env file.");
+    throw new Error("AI provider is not configured. Set the server-side API key and base URL in .env.");
   }
 }
 
@@ -28,12 +30,13 @@ function parseJsonContent(raw) {
   try {
     return JSON.parse(cleaned);
   } catch {
-    throw new Error("Qwen returned invalid JSON. Retry the generation.");
+    throw new Error("AI provider returned invalid JSON. Retry the generation.");
   }
 }
 
-async function callQwen(systemPrompt, userPayload, attempt = 0) {
+async function callQwen(systemPrompt, userPayload, { attempt = 0, modelTier = "fast" } = {}) {
   ensureConfigured();
+  const { profile, model } = modelForProfile(modelTier);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -46,7 +49,7 @@ async function callQwen(systemPrompt, userPayload, attempt = 0) {
         Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
       },
       body: JSON.stringify({
-        model: QWEN_MODEL,
+        model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: JSON.stringify(userPayload) },
@@ -59,21 +62,25 @@ async function callQwen(systemPrompt, userPayload, attempt = 0) {
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      if (res.status >= 500 && attempt < MAX_RETRIES) return callQwen(systemPrompt, userPayload, attempt + 1);
-      if (res.status === 401 || res.status === 403) {
-        throw new Error(`Qwen authentication failed (${res.status}). Check the key and Model Studio region/base URL.`);
+      if (res.status >= 500 && attempt < MAX_RETRIES) {
+        return callQwen(systemPrompt, userPayload, { attempt: attempt + 1, modelTier: profile });
       }
-      throw new Error(`Qwen API error (${res.status}): ${body.slice(0, 400)}`);
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(`AI authentication failed (${res.status}). Check the key and provider region/base URL.`);
+      }
+      throw new Error(`AI API error (${res.status}): ${body.slice(0, 400)}`);
     }
 
     const data = await res.json();
     const raw = data.choices?.[0]?.message?.content;
-    if (!raw) throw new Error("Qwen returned an empty response.");
+    if (!raw) throw new Error("AI provider returned an empty response.");
     return parseJsonContent(raw);
   } catch (err) {
     if (err.name === "AbortError") {
-      if (attempt < MAX_RETRIES) return callQwen(systemPrompt, userPayload, attempt + 1);
-      throw new Error(`Qwen request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s. Increase QWEN_TIMEOUT_MS if Model Studio is responding slowly.`);
+      if (attempt < MAX_RETRIES) {
+        return callQwen(systemPrompt, userPayload, { attempt: attempt + 1, modelTier: profile });
+      }
+      throw new Error(`AI request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s.`);
     }
     throw err;
   } finally {
@@ -90,7 +97,7 @@ Rules:
 - Never invent a page, field, selector, validation rule, message, option, boundary, workflow step or business rule that is absent from the story/discovery evidence.
 - If a fact is not available in the supplied evidence, do not assume it.
 - A discovered page is evidence that a page/control exists; discovery is NOT permission to test unrelated features.
-- If the story is limited to login/authentication, every generated test case must remain on login/authentication. Do not create feedback, profile, dashboard, registration, checkout, or other downstream feature tests merely because those pages were discovered.
+- If the story is limited to login/authentication, every generated test case must remain on login/authentication.
 - If the story explicitly asks for negative testing, prioritize negative, validation, required-field and invalid-input scenarios within that same feature.
 - Generate EXACTLY requestedTestCaseCount test cases. Do not generate more or fewer.
 - Cover only behaviour that appears in BOTH the business-story scope and usable discovered evidence.
@@ -127,18 +134,17 @@ STRICT RULES:
 3. If a selector/path/message is not present in discovery or the approved case, do not guess or derive a new one.
 4. Prefer the exact selector supplied in an approved step; otherwise use an exact discovered selector. Do not construct dynamic selectors.
 5. Use only discovered relative paths with cy.visit().
-6. VALID LOGIN CREDENTIALS ARE FRAMEWORK-OWNED. Never use cy.env(), Cypress.env(), TEST_USERNAME, TEST_PASSWORD, this.TEST_USERNAME, this.TEST_PASSWORD, variables, hooks or assignments for credentials.
-7. When an approved case requires a VALID login and executionContext.hasCredentials is true, use ONLY:
-   cy.loginWithRuntimeCredentials({ usernameSelector: "<exact discovered selector>", passwordSelector: "<exact discovered selector>", submitSelector: "<exact discovered selector>" });
+6. VALID LOGIN CREDENTIALS AND LOGIN CONTROLS ARE AUTOMATION-SYSTEM-OWNED. Never read environment credentials directly or assign them to generated variables.
+7. When an approved case requires a VALID login and executionContext.hasCredentials is true, use ONLY: cy.loginWithRuntimeCredentials();
 8. Invalid-login tests must use only the explicit invalid username/password supplied by the approved test case and must not call the runtime credential helper.
 9. Do not define beforeEach, afterEach, before or after hooks. Every it() block must be self-contained so one setup failure cannot skip other approved cases.
 10. Do not send credential values to logs, assertions, screenshots, titles or comments.
 11. Execute approved steps in order. Do not add interactions merely because a control was discovered.
 12. For form validation, populate only the other fields required by the approved case using exact discovered controls/options.
 13. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
-14. Assertions must prove the expected result using discovered evidence. For rejection/validation, assert the discovered error state and that the disallowed transition does not occur.
+14. Assertions must prove the expected result using discovered evidence.
 15. For dynamic containers, avoid exact whole-element text equality; use visibility plus known static discovered text.
-16. Do not use unsupported Chai/Cypress hybrids such as .and('have.text').to.not.be.empty. Use .invoke('text').should('not.be.empty').
+16. Do not use unsupported assertion hybrids such as .and('have.text').to.not.be.empty. Use .invoke('text').should('not.be.empty').
 17. Do not use .type('') for an intentionally blank field; leave it untouched or use .clear() only when required.
 18. validationFeedback, when supplied, contains deterministic validator errors from a previous attempt. Correct every listed error and do not repeat the rejected pattern.
 
@@ -161,19 +167,11 @@ Return JSON only:
 }`;
 
 function validateTestCases(result, requestedCount = TEST_CASE_COUNT) {
-  if (!result || !Array.isArray(result.testCases) || result.testCases.length === 0) {
-    throw new Error("Qwen response did not contain testCases.");
-  }
-  if (result.testCases.length !== requestedCount) {
-    throw new Error(`Qwen returned ${result.testCases.length} test cases; this demo requires exactly ${requestedCount}. Retry generation.`);
-  }
+  if (!result || !Array.isArray(result.testCases) || result.testCases.length === 0) throw new Error("AI response did not contain testCases.");
+  if (result.testCases.length !== requestedCount) throw new Error(`AI returned ${result.testCases.length} test cases; this run requires exactly ${requestedCount}. Retry generation.`);
   result.testCases.forEach((tc, i) => {
-    if (!tc.id || !tc.title || !Array.isArray(tc.steps) || !Array.isArray(tc.expectedResults)) {
-      throw new Error(`Qwen test case ${i + 1} is missing required fields.`);
-    }
-    if (!/^TC\d{3}$/i.test(tc.id)) {
-      throw new Error(`Qwen test case ${i + 1} has invalid id '${tc.id}'. Expected TC001 style ids.`);
-    }
+    if (!tc.id || !tc.title || !Array.isArray(tc.steps) || !Array.isArray(tc.expectedResults)) throw new Error(`AI test case ${i + 1} is missing required fields.`);
+    if (!/^TC\d{3}$/i.test(tc.id)) throw new Error(`AI test case ${i + 1} has invalid id '${tc.id}'. Expected TC001 style ids.`);
   });
   return result;
 }
@@ -186,7 +184,6 @@ function discoveryGrounding(pageDiscoveries = []) {
       const url = new URL(page?.finalUrl || page?.url || "http://local/");
       paths.add(`${url.pathname}${url.search}` || "/");
     } catch {}
-
     for (const item of page?.elements || []) {
       if (item.selector) selectors.add(String(item.selector));
       if (item.testId) selectors.add(`[data-testid="${item.testId}"]`);
@@ -213,53 +210,29 @@ function validateTestCaseGrounding(result, pageDiscoveries, story) {
   const forbiddenLoginScope = /\b(feedback|profile|dashboard|registration|register|checkout|payment|order|search|cart)\b/i;
 
   for (const tc of result.testCases || []) {
-    if (loginOnly && forbiddenLoginScope.test(JSON.stringify(tc))) {
-      errors.push(`${tc.id} contains behaviour outside the login/authentication story scope.`);
-    }
-
+    if (loginOnly && forbiddenLoginScope.test(JSON.stringify(tc))) errors.push(`${tc.id} contains behaviour outside the login/authentication story scope.`);
     for (const step of tc.steps || []) {
       const target = String(step?.target || "").trim();
-      if (target && (target.startsWith("[") || target.startsWith("#")) && !selectors.has(target)) {
-        errors.push(`${tc.id} uses an undiscovered selector: ${target}`);
-      }
-
+      if (target && (target.startsWith("[") || target.startsWith("#")) && !selectors.has(target)) errors.push(`${tc.id} uses an undiscovered selector: ${target}`);
       const action = String(step?.action || "").toLowerCase();
       const value = String(step?.value ?? "").trim();
-      if (/navigate|open|visit|continue to/.test(action) && value.startsWith("/") && !paths.has(value)) {
-        errors.push(`${tc.id} uses an undiscovered navigation path: ${value}`);
-      }
+      if (/navigate|open|visit|continue to/.test(action) && value.startsWith("/") && !paths.has(value)) errors.push(`${tc.id} uses an undiscovered navigation path: ${value}`);
     }
   }
 
-  if (errors.length) {
-    throw new Error(`AI test cases failed grounding validation: ${[...new Set(errors)].join(" | ")}`);
-  }
+  if (errors.length) throw new Error(`AI test cases failed grounding validation: ${[...new Set(errors)].join(" | ")}`);
   return result;
 }
 
 function validateAutomation(result) {
-  if (!result || typeof result.script !== "string" || !result.script.includes("describe(") || !result.script.includes("it(")) {
-    throw new Error("Qwen did not return a valid automation spec.");
-  }
+  if (!result || typeof result.script !== "string" || !result.script.includes("describe(") || !result.script.includes("it(")) throw new Error("AI did not return a valid automation spec.");
   if (result.script.length > 200000) throw new Error("Generated automation spec is unexpectedly large.");
-  return {
-    fileName: result.fileName || "ai-generated.cy.js",
-    framework: "browser-automation",
-    language: "javascript",
-    script: result.script,
-  };
+  return { fileName: result.fileName || "ai-generated.cy.js", framework: "browser-automation", language: "javascript", script: result.script };
 }
 
 function validateFailure(result) {
-  const allowed = new Set([
-    "APPLICATION_DEFECT",
-    "AUTOMATION_DEFECT",
-    "TEST_DATA_PROBLEM",
-    "ENVIRONMENT_PROBLEM",
-    "REQUIREMENT_AMBIGUITY",
-    "UNKNOWN",
-  ]);
-  if (!result || typeof result.summary !== "string") throw new Error("Qwen failure analysis was invalid.");
+  const allowed = new Set(["APPLICATION_DEFECT", "AUTOMATION_DEFECT", "TEST_DATA_PROBLEM", "ENVIRONMENT_PROBLEM", "REQUIREMENT_AMBIGUITY", "UNKNOWN"]);
+  if (!result || typeof result.summary !== "string") throw new Error("AI failure analysis was invalid.");
   if (!allowed.has(result.classification)) result.classification = "UNKNOWN";
   if (typeof result.confidence !== "number" || result.confidence < 0 || result.confidence > 1) result.confidence = 0.5;
   return result;
@@ -281,10 +254,7 @@ function findMessageByTestId(pageDiscoveries, testId) {
   return null;
 }
 
-function elementTarget(found) {
-  return found?.element?.selector || found?.element?.label || found?.element?.testId || "";
-}
-
+function elementTarget(found) { return found?.element?.selector || found?.element?.label || found?.element?.testId || ""; }
 function errorTarget(found) {
   const error = found?.element?.errorElement;
   if (!error) return "";
@@ -292,43 +262,34 @@ function errorTarget(found) {
   if (error.id) return `#${error.id}`;
   return error.text || "";
 }
-
 function pagePath(page) {
   try {
     const url = new URL(page?.finalUrl || page?.url || "/");
     return `${url.pathname}${url.search}` || "/";
-  } catch {
-    return "/";
-  }
+  } catch { return "/"; }
 }
-
 function firstNonEmptyOption(found, fallback) {
   const option = (found?.element?.options || []).find((item) => item.value !== "");
   return option?.value || fallback;
 }
-
 function isLoginScopedStory(story) {
   const text = String(story || "").toLowerCase();
   const mentionsLogin = /\b(login|log in|sign in|signin|authentication|authenticate)\b/.test(text);
   const mentionsOtherFeature = /\b(feedback|profile|dashboard|registration|register|checkout|payment|order|search|cart)\b/.test(text);
   return mentionsLogin && !mentionsOtherFeature;
 }
-
 function scopeDiscoveriesForStory(pageDiscoveries, story) {
   if (!isLoginScopedStory(story)) return pageDiscoveries;
-
   const loginPages = (pageDiscoveries || []).filter((page) => {
     const ids = new Set((page.elements || []).flatMap((item) => [item.testId, item.id, item.name].filter(Boolean)));
     return ids.has("username") || ids.has("password") || ids.has("login-button") || ids.has("login-error");
   });
-
   const scoped = loginPages.length ? loginPages : (pageDiscoveries || []).slice(0, 1);
   return scoped.map((page) => ({ ...page, routeHints: [] }));
 }
 
 function buildDemoCalibration(result, pageDiscoveries, story) {
   if (TEST_CASE_COUNT !== 5 || !/feedback/i.test(String(story || ""))) return result;
-
   const username = findByTestId(pageDiscoveries, "username");
   const password = findByTestId(pageDiscoveries, "password");
   const loginButton = findByTestId(pageDiscoveries, "login-button");
@@ -355,7 +316,6 @@ function buildDemoCalibration(result, pageDiscoveries, story) {
   const feedbackPath = pagePath(fullName.page);
   const loginErrorTarget = loginError?.message?.testId ? `[data-testid="${loginError.message.testId}"]` : loginError?.message?.id ? `#${loginError.message.id}` : "";
   const successTarget = success?.message?.testId ? `[data-testid="${success.message.testId}"]` : success?.message?.id ? `#${success.message.id}` : "";
-
   const loginSteps = () => [
     { action: "Navigate to the login page", target: "page", value: loginPath },
     { action: "Enter the configured test username", target: elementTarget(username), value: null },
@@ -363,7 +323,6 @@ function buildDemoCalibration(result, pageDiscoveries, story) {
     { action: "Click Sign in", target: elementTarget(loginButton), value: null },
     { action: "Continue to the feedback form after successful login", target: "page", value: feedbackPath },
   ];
-
   const feedbackSteps = ({ emailValue = "demo.user@example.com", ageValue = "30", websiteValue = "https://example.com" } = {}) => [
     { action: "Enter full name", target: elementTarget(fullName), value: "Demo User" },
     emailValue === null ? { action: "Leave email blank", target: elementTarget(email), value: null } : { action: "Enter email", target: elementTarget(email), value: emailValue },
@@ -383,64 +342,30 @@ function buildDemoCalibration(result, pageDiscoveries, story) {
     ...result,
     demoCalibrated: true,
     testCases: [
-      {
-        id: "TC001", title: "Login and submit valid customer feedback", type: "positive", priority: "high",
-        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
-        testData: { category: firstNonEmptyOption(category, "service"), age: "30", website: "https://example.com" },
-        steps: [...loginSteps(), ...feedbackSteps()],
-        expectedResults: [`The feedback form at ${feedbackPath} is opened after login`, "The valid feedback submission is accepted", `The success element ${successTarget} is visible after submission`],
-      },
-      {
-        id: "TC002", title: "Reject invalid login credentials", type: "negative", priority: "high",
-        preconditions: ["Target application is available"],
-        testData: { username: "invalid-user", password: "invalid-password" },
-        steps: [
-          { action: "Navigate to the login page", target: "page", value: loginPath },
-          { action: "Enter invalid username", target: elementTarget(username), value: "invalid-user" },
-          { action: "Enter invalid password", target: elementTarget(password), value: "invalid-password" },
-          { action: "Click Sign in", target: elementTarget(loginButton), value: null },
-        ],
-        expectedResults: ["Login is rejected", loginErrorTarget ? `The login error element ${loginErrorTarget} is visible and non-empty` : "A discovered login error is shown", `The user is not taken to ${feedbackPath}`],
-      },
-      {
-        id: "TC003", title: "Reject feedback submission when email is missing", type: "negative", priority: "medium",
-        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
-        testData: { email: null }, steps: [...loginSteps(), ...feedbackSteps({ emailValue: null })],
-        expectedResults: ["Feedback submission is rejected because email is required", `The email validation element ${errorTarget(email)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
-      },
-      {
-        id: "TC004", title: "Reject age below the minimum of 18", type: "boundary", priority: "high",
-        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
-        testData: { age: "17", minimumAge: "18" }, steps: [...loginSteps(), ...feedbackSteps({ ageValue: "17" })],
-        expectedResults: ["Age 17 is rejected because the discovered minimum age is 18", `The age validation element ${errorTarget(age)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
-      },
-      {
-        id: "TC005", title: "Reject malformed website URL", type: "negative", priority: "high",
-        preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"],
-        testData: { website: "abc" }, steps: [...loginSteps(), ...feedbackSteps({ websiteValue: "abc" })],
-        expectedResults: ["Website value abc is rejected because the discovered field requires a URL", `The website validation element ${errorTarget(website)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`],
-      },
+      { id: "TC001", title: "Login and submit valid customer feedback", type: "positive", priority: "high", preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"], testData: { category: firstNonEmptyOption(category, "service"), age: "30", website: "https://example.com" }, steps: [...loginSteps(), ...feedbackSteps()], expectedResults: [`The feedback form at ${feedbackPath} is opened after login`, "The valid feedback submission is accepted", `The success element ${successTarget} is visible after submission`] },
+      { id: "TC002", title: "Reject invalid login credentials", type: "negative", priority: "high", preconditions: ["Target application is available"], testData: { username: "invalid-user", password: "invalid-password" }, steps: [{ action: "Navigate to the login page", target: "page", value: loginPath }, { action: "Enter invalid username", target: elementTarget(username), value: "invalid-user" }, { action: "Enter invalid password", target: elementTarget(password), value: "invalid-password" }, { action: "Click Sign in", target: elementTarget(loginButton), value: null }], expectedResults: ["Login is rejected", loginErrorTarget ? `The login error element ${loginErrorTarget} is visible and non-empty` : "A discovered login error is shown", `The user is not taken to ${feedbackPath}`] },
+      { id: "TC003", title: "Reject feedback submission when email is missing", type: "negative", priority: "medium", preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"], testData: { email: null }, steps: [...loginSteps(), ...feedbackSteps({ emailValue: null })], expectedResults: ["Feedback submission is rejected because email is required", `The email validation element ${errorTarget(email)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`] },
+      { id: "TC004", title: "Reject age below the minimum of 18", type: "boundary", priority: "high", preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"], testData: { age: "17", minimumAge: "18" }, steps: [...loginSteps(), ...feedbackSteps({ ageValue: "17" })], expectedResults: ["Age 17 is rejected because the discovered minimum age is 18", `The age validation element ${errorTarget(age)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`] },
+      { id: "TC005", title: "Reject malformed website URL", type: "negative", priority: "high", preconditions: ["Target application is available", "Valid test credentials are configured in the automation runtime"], testData: { website: "abc" }, steps: [...loginSteps(), ...feedbackSteps({ websiteValue: "abc" })], expectedResults: ["Website value abc is rejected because the discovered field requires a URL", `The website validation element ${errorTarget(website)} is visible and non-empty`, `The success element ${successTarget} remains absent or hidden`] },
     ],
   };
 }
 
-async function generateTestCases({ story, pageDiscoveries, environment }) {
+async function generateTestCases({ story, pageDiscoveries, environment, modelTier = "fast" }) {
   const scopedDiscoveries = scopeDiscoveriesForStory(pageDiscoveries, story);
   const result = await callQwen(TEST_ANALYST_PROMPT, {
     story,
     pageDiscoveries: scopedDiscoveries,
     environment,
     requestedTestCaseCount: TEST_CASE_COUNT,
-    scopeInstruction: isLoginScopedStory(story)
-      ? "LOGIN/AUTHENTICATION ONLY. Do not create tests for downstream pages or features."
-      : "Follow the business story exactly; discovered pages do not broaden scope.",
-  });
+    scopeInstruction: isLoginScopedStory(story) ? "LOGIN/AUTHENTICATION ONLY. Do not create tests for downstream pages or features." : "Follow the business story exactly; discovered pages do not broaden scope.",
+  }, { modelTier });
   const validated = validateTestCases(result, TEST_CASE_COUNT);
   const calibrated = buildDemoCalibration(validated, pageDiscoveries, story);
   return validateTestCaseGrounding(calibrated, pageDiscoveries, story);
 }
 
-async function generateAutomationCode({ approvedTestCases, pageDiscoveries, fileName, executionContext, validationFeedback = [] }) {
+async function generateAutomationCode({ approvedTestCases, pageDiscoveries, fileName, executionContext, validationFeedback = [], modelTier = "fast" }) {
   const result = await callQwen(AUTOMATION_GENERATOR_PROMPT, {
     approvedTestCases,
     pageDiscoveries,
@@ -448,17 +373,15 @@ async function generateAutomationCode({ approvedTestCases, pageDiscoveries, file
     executionContext: {
       baseUrl: executionContext.baseUrl,
       hasCredentials: Boolean(executionContext.hasCredentials),
-      credentialHelper: executionContext.hasCredentials
-        ? "cy.loginWithRuntimeCredentials({ usernameSelector, passwordSelector, submitSelector })"
-        : null,
+      credentialHelper: executionContext.hasCredentials ? "cy.loginWithRuntimeCredentials()" : null,
     },
     validationFeedback: Array.isArray(validationFeedback) ? validationFeedback.slice(0, 20) : [],
-  });
+  }, { modelTier });
   return validateAutomation(result);
 }
 
-async function analyzeFailure({ story, testCase, expected, actual }) {
-  const result = await callQwen(FAILURE_ANALYST_PROMPT, { story, testCase, expected, actual });
+async function analyzeFailure({ story, testCase, expected, actual, modelTier = "fast" }) {
+  const result = await callQwen(FAILURE_ANALYST_PROMPT, { story, testCase, expected, actual }, { modelTier });
   return validateFailure(result);
 }
 
