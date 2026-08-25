@@ -59,6 +59,7 @@ qwen.analyzeFailure = async (args) => {
 
 const app = express();
 const PORT = process.env.SERVER_PORT || 5000;
+const HOST = process.env.SERVER_HOST || "0.0.0.0";
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -104,9 +105,9 @@ app.get("/", (req, res, next) => {
 
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
-app.listen(PORT, () => {
-  console.log(`[ai-testpilot] Backend running at http://localhost:${PORT}`);
-  console.log(`[ai-testpilot] UI available at http://localhost:${PORT}/`);
+app.listen(PORT, HOST, () => {
+  console.log(`[ai-testpilot] Backend listening on ${HOST}:${PORT}`);
+  console.log(`[ai-testpilot] UI available locally at http://localhost:${PORT}/`);
   if (qwen.isConfigured()) {
     console.log(`[ai-testpilot] ✅ Real Qwen enabled (${qwen.QWEN_MODEL})`);
   } else {
