@@ -10,26 +10,12 @@ const qwen = require("./services/qwenClient");
 const { normalizeGeneratedScript } = require("./services/automationScriptNormalizer");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
 
-// Keep the configured AI provider as the source of the automation, but normalize
-// brittle exact-text assertions before execution. Generated containers can
-// include dynamic values and whitespace that should not turn a successful
-// business flow into a false automation failure.
 const generateAutomationCode = qwen.generateAutomationCode.bind(qwen);
 qwen.generateAutomationCode = async (args) => {
   const generated = await generateAutomationCode(args);
-  return {
-    ...generated,
-    script: normalizeGeneratedScript(generated.script),
-  };
+  return { ...generated, script: normalizeGeneratedScript(generated.script) };
 };
 
-// The configured AI provider still performs failure analysis, but this PoC has
-// two known seeded validation defects. When the expected behaviour is
-// rejection/validation and the browser reports that the error element became
-// invisible because the form itself was hidden after submit, that is consistent
-// with the invalid input being accepted and the application entering its
-// success state. Preserve this evidence as APPLICATION_DEFECT rather than
-// mislabeling it AUTOMATION_DEFECT.
 const analyzeFailure = qwen.analyzeFailure.bind(qwen);
 qwen.analyzeFailure = async (args) => {
   const analysis = await analyzeFailure(args);
@@ -54,7 +40,6 @@ qwen.analyzeFailure = async (args) => {
       confidence: Math.max(Number(analysis.confidence) || 0, 0.98),
     };
   }
-
   return analysis;
 };
 
@@ -65,8 +50,6 @@ const HOST = process.env.SERVER_HOST || "0.0.0.0";
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
-// Prevent browser-facing JSON responses from exposing which AI provider/model
-// is configured on the server. Internal implementation names stay server-side.
 function sanitizePublicPayload(value) {
   if (Array.isArray(value)) return value.map(sanitizePublicPayload);
   if (value && typeof value === "object") {
@@ -78,9 +61,7 @@ function sanitizePublicPayload(value) {
     return out;
   }
   if (typeof value === "string") {
-    return value
-      .replace(/Qwen/gi, "AI")
-      .replace(/qwen\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?/gi, "AI");
+    return value.replace(/Qwen/gi, "AI").replace(/qwen\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?/gi, "AI");
   }
   return value;
 }
@@ -91,49 +72,72 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve persisted HTML reports first. This keeps old report URLs working even
-// after the Node process restarts and the in-memory session has been cleared.
 app.get("/api/reports/:sessionId", (req, res, next) => {
   const filePath = path.join(REPORT_DIR, reportFileName(req.params.sessionId));
   if (!fs.existsSync(filePath)) return next();
   return res.sendFile(filePath);
 });
 
-// The optimized run router intercepts only approved execution requests and
-// calls next() for normal story/test-case generation requests.
 app.use(runRoutes);
 app.use(chatRoutes);
 
-// Keep infrastructure/provider details private from the browser-facing health
-// endpoint. The UI only needs to know whether the AI capability is available.
 app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    aiConnected: qwen.isConfigured(),
-  });
+  res.json({ ok: true, aiConnected: qwen.isConfigured() });
 });
 
-// Keep the checked-in demo UI generic at runtime:
-// - Known pages starts empty so discovery is not biased toward /feedback.
-// - Newly added human test cases are inserted at the top for immediate review.
-// - Public-facing branding and status text remain AI-provider-neutral.
-// These replacements are intentionally narrow and fail harmlessly if the UI is
-// later refactored; static assets continue to be served normally below.
+const READINESS_CSS = `
+.readiness{margin-top:8px;padding:8px 9px;border-radius:8px;font-size:10.5px;line-height:1.4;border:1px solid var(--border)}
+.readiness.ready{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+.readiness.blocked{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
+.readiness.preflight{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.tag.ready{background:#dcfce7;color:#15803d;font-weight:800}.tag.blocked{background:#ffedd5;color:#c2410c;font-weight:800}.tag.preflight{background:#dbeafe;color:#1d4ed8;font-weight:800}
+`;
+
+const READINESS_JS = `
+(function(){
+  const originalRenderCases = renderCases;
+  renderCases = function(){
+    $('caseCount').textContent=testCases.length;
+    $('addCaseBtn').disabled=!sessionId;
+    if(!testCases.length){$('cases').innerHTML='<div class="empty">No test cases returned.</div>';return;}
+    let ready=0,blocked=0,preflight=0;
+    $('cases').innerHTML=testCases.map((tc,i)=>{
+      const expected=(tc.expectedResults||[]).slice(0,2).join(' · '),source=(tc.source||'ai').toLowerCase(),type=(tc.type||'functional').toLowerCase(),allowedTypes=new Set(['negative','positive','functional','boundary','custom']),typeClass=allowedTypes.has(type)?'type-'+type:'type-functional';
+      const readiness=tc.automationReadiness||null;
+      const status=readiness?.status||'NEEDS_PREFLIGHT';
+      const isReady=status==='READY';
+      const needsPreflight=status==='NEEDS_PREFLIGHT';
+      if(isReady)ready++; else if(needsPreflight)preflight++; else blocked++;
+      const readinessClass=isReady?'ready':needsPreflight?'preflight':'blocked';
+      const readinessLabel=isReady?'Automation Ready':needsPreflight?'Preflight on Run':status.replaceAll('_',' ');
+      const reason=readiness?.reason||(needsPreflight?'This human-edited case will be re-checked against discovery and Cypress capabilities before any code is generated.':'');
+      const checked=isReady||needsPreflight?'checked':'';
+      const disabled=!isReady&&!needsPreflight?'disabled':'';
+      return '<div class="case '+typeClass+'"><input class="case-check" type="checkbox" value="'+escapeHtml(tc.id)+'" '+checked+' '+disabled+'><div><div class="case-title">'+escapeHtml(tc.id)+' — '+escapeHtml(tc.title)+'</div><div class="case-meta"><span class="tag '+typeClass+'">'+escapeHtml(type)+'</span><span class="tag">'+escapeHtml(tc.priority||'medium')+'</span><span class="tag '+(source==='human'?'human':'')+'">'+(source==='human'?'Human':'AI / Reviewed')+'</span><span class="tag '+readinessClass+'">'+escapeHtml(readinessLabel)+'</span><span>'+((tc.steps||[]).length)+' steps</span></div>'+(expected?'<div class="expected">Expected: '+escapeHtml(expected)+'</div>':'')+'<div class="readiness '+readinessClass+'"><b>'+escapeHtml(readinessLabel)+'</b>'+(reason?' — '+escapeHtml(reason):'')+'</div></div><div class="case-actions"><button class="btn ghost" onclick="openEditor('+i+')">Edit</button><button class="btn ghost danger" onclick="deleteCase('+i+')">Delete</button></div></div>';
+    }).join('');
+    $('runHint').textContent=ready+' Automation Ready · '+preflight+' needs preflight · '+blocked+' manual/unsupported';
+    $('runBtn').disabled=!(ready+preflight);
+  };
+})();
+`;
+
 function serveUi(req, res, next) {
   const uiFile = path.join(__dirname, "..", "testpilot-ui", "index.html");
   fs.readFile(uiFile, "utf8", (err, html) => {
     if (err) return next(err);
 
     const adjusted = html
+      .replace("</style>", `${READINESS_CSS}</style>`)
+      .replace("</script>", `${READINESS_JS}</script>`)
       .replace('id="additionalPaths" value="/feedback"', 'id="additionalPaths" value=""')
       .replace("if(index<0)testCases.push(tc);else testCases[index]=tc;", "if(index<0)testCases.unshift(tc);else testCases[index]=tc;")
       .replace("User Story → Qwen → Human Review → Automated Execution → Analytics", "User Story → AI → Human Review → Automated Execution → Analytics")
       .replace("They are not sent to Qwen.", "They are not sent to the AI model.")
       .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation engine runs the reviewed cases; AI then explains failures.")
       .replace("$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthDot').className='dot '+(data.aiConnected?'ok':'bad');$('healthText').textContent=data.aiConnected?'Connected':'Not connected'")
-      .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages and generating AI test cases. Please wait.")
-      .replace("Discovering pages & asking Qwen…", "Discovering pages & generating tests…")
-      .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated`")
+      .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages, grounding test cases and checking automation readiness. Please wait.")
+      .replace("Discovering pages & asking Qwen…", "Discovering pages & validating tests…")
+      .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checked`")
       .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The browser automation is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
       .replace("Qwen failure analysis", "AI failure analysis");
 
@@ -147,9 +151,6 @@ app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 app.listen(PORT, HOST, () => {
   console.log(`[ai-testpilot] Backend listening on ${HOST}:${PORT}`);
   console.log(`[ai-testpilot] UI available locally at http://localhost:${PORT}/`);
-  if (qwen.isConfigured()) {
-    console.log(`[ai-testpilot] ✅ AI provider connected (${qwen.QWEN_MODEL})`);
-  } else {
-    console.log("[ai-testpilot] ❌ AI provider is not configured. Check the server-side AI configuration in .env.");
-  }
+  if (qwen.isConfigured()) console.log(`[ai-testpilot] ✅ AI provider connected (${qwen.QWEN_MODEL})`);
+  else console.log("[ai-testpilot] ❌ AI provider is not configured. Check the server-side AI configuration in .env.");
 });
