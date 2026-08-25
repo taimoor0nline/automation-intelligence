@@ -1,77 +1,40 @@
 function normalizeGeneratedScript(script) {
   let normalized = String(script || "");
 
-  // Exact whole-element text assertions are brittle in this demo because
-  // success/error containers can include dynamic references and whitespace.
+  // Exact whole-element text assertions are brittle when containers include
+  // dynamic references or whitespace.
   normalized = normalized
     .replace(/\.should\(\s*(['"])have\.text\1\s*,/g, ".should('contain.text',")
     .replace(/\.and\(\s*(['"])have\.text\1\s*,/g, ".and('contain.text',");
 
-  // Generated specs sometimes use the invalid Cypress pattern:
-  //   cy.env(['TEST_USERNAME','TEST_PASSWORD']).then(({ TEST_USERNAME, TEST_PASSWORD }) => { ... })
-  // Cypress.env(...) is synchronous; cy.env(...) is not a chainable command.
+  // Login selectors and credentials are framework-owned. Older prompts/models may
+  // still emit selector arguments; collapse any simple object-form invocation to
+  // the parameterless deterministic helper before validation.
   normalized = normalized.replace(
-    /cy\.env\(\s*\[\s*(['"])TEST_USERNAME\1\s*,\s*(['"])TEST_PASSWORD\2\s*\]\s*(?:,\s*\{[^)]*\})?\s*\)\.then\(\s*\(\s*\{\s*TEST_USERNAME\s*,\s*TEST_PASSWORD\s*\}\s*\)\s*=>\s*\{/g,
-    "cy.then(() => {"
+    /cy\.loginWithRuntimeCredentials\(\s*\{[\s\S]*?\}\s*\)/g,
+    "cy.loginWithRuntimeCredentials()"
   );
-
-  // Another generated variant creates a beforeEach hook containing bare,
-  // undefined TEST_USERNAME / TEST_PASSWORD identifiers. Resolve object-shorthand
-  // usage from Cypress.env so the hook cannot abort the entire suite.
-  normalized = normalized.replace(
-    /cy\.wrap\(\s*\{\s*TEST_USERNAME\s*,\s*TEST_PASSWORD\s*\}\s*\)/g,
-    "cy.wrap({ TEST_USERNAME: Cypress.env('TEST_USERNAME'), TEST_PASSWORD: Cypress.env('TEST_PASSWORD') })"
-  );
-
-  // A further variant assigns bare credential identifiers to `this` inside a
-  // beforeEach hook and later types `this.TEST_USERNAME` / `this.TEST_PASSWORD`.
-  // The bare identifiers do not exist in the generated spec, so remove those
-  // assignments and resolve every `this.*` credential read directly from
-  // Cypress.env. This also avoids relying on Mocha `this` semantics in arrow
-  // functions.
-  normalized = normalized
-    .replace(/this\.TEST_USERNAME\s*=\s*TEST_USERNAME\s*;?/g, "void Cypress.env('TEST_USERNAME');")
-    .replace(/this\.TEST_PASSWORD\s*=\s*TEST_PASSWORD\s*;?/g, "void Cypress.env('TEST_PASSWORD');")
-    .replace(/\.type\(\s*this\.TEST_USERNAME\s*(,\s*\{[^)]*\})?\s*\)/g,
-      (_match, options = "") => `.type(Cypress.env('TEST_USERNAME')${options || ""})`)
-    .replace(/\.type\(\s*this\.TEST_PASSWORD\s*(,\s*\{[^)]*\})?\s*\)/g,
-      (_match, options = "") => `.type(Cypress.env('TEST_PASSWORD')${options || ""})`);
-
-  // Resolve quoted credential placeholders everywhere they are supplied to
-  // .type(). Keep options such as { log: false } intact.
-  normalized = normalized
-    .replace(/\.type\(\s*(['"])TEST_USERNAME\1\s*(,\s*\{[^)]*\})?\s*\)/g,
-      (_match, _quote, options = "") => `.type(Cypress.env('TEST_USERNAME')${options || ""})`)
-    .replace(/\.type\(\s*(['"])TEST_PASSWORD\1\s*(,\s*\{[^)]*\})?\s*\)/g,
-      (_match, _quote, options = "") => `.type(Cypress.env('TEST_PASSWORD')${options || ""})`);
 
   // Guard against generated shorthand assertions such as:
   //   .and('have.text').to.not.be.empty
-  // which is not a valid Cypress chain. Convert it to an explicit text check.
   normalized = normalized.replace(
     /\.and\(\s*(['"])have\.text\1\s*\)\.to\.not\.be\.empty/g,
     ".invoke('text').should('not.be.empty')"
   );
 
   // Cypress rejects .type('') / .type("") before browser interaction starts.
-  // For required-field negative tests, an empty value means the field should
-  // remain empty. .clear() is valid whether a previous value exists or not.
   normalized = normalized
     .replace(/\.type\(\s*''\s*(?:,\s*\{[^)]*\})?\s*\)/g, ".clear()")
     .replace(/\.type\(\s*""\s*(?:,\s*\{[^)]*\})?\s*\)/g, ".clear()");
 
-  // Generated boundary values occasionally arrive as bare numeric arguments
-  // (for example .type(17)). Keep browser input deterministic by converting
-  // literal numbers to strings. This does not alter variables or expressions.
+  // Convert literal numeric input to strings.
   normalized = normalized.replace(
     /\.type\(\s*(-?\d+(?:\.\d+)?)\s*(,\s*\{[^)]*\})?\s*\)/g,
     (_match, value, options = "") => `.type('${value}'${options || ""})`
   );
 
-  // A malformed URL test value such as abc must be typed as data, not executed
-  // as a JavaScript identifier. Quote simple bare-word .type() arguments while
-  // leaving explicit environment expressions, function calls, property access,
-  // template/string literals and other expressions untouched.
+  // Quote simple bare-word .type() data while leaving function calls and other
+  // expressions untouched. This covers malformed URL values such as abc.
   normalized = normalized.replace(
     /\.type\(\s*([A-Za-z_$][\w$-]*)\s*(,\s*\{[^)]*\})?\s*\)/g,
     (_match, value, options = "") => `.type('${value}'${options || ""})`
