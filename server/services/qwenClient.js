@@ -85,14 +85,16 @@ const TEST_ANALYST_PROMPT = `You are a senior QA test analyst.
 Convert the supplied business user story and discovered web-page inventory into a concise set of executable test cases.
 
 Rules:
+- The BUSINESS USER STORY is the authoritative scope. Generate tests ONLY for the behaviour requested by the story.
+- A discovered page is evidence that a page/control exists; discovery is NOT permission to test unrelated features.
+- If the story is limited to login/authentication, every generated test case must remain on login/authentication. Do not create feedback, profile, dashboard, registration, checkout, or other downstream feature tests merely because those pages were discovered.
+- If the story explicitly asks for negative testing, prioritize negative, validation, required-field and invalid-input scenarios within that same feature. Do not add a positive end-to-end journey unless it is necessary to establish the negative scenario.
 - Generate EXACTLY requestedTestCaseCount test cases. Do not generate more or fewer.
-- Cover only behaviour that appears in the business story and discovered page inventory.
-- Include a useful mix of positive, negative, validation and boundary coverage.
+- Cover only behaviour that appears in BOTH the business-story scope and the usable discovered controls.
 - Tests must describe the EXPECTED behaviour. Never manufacture an assertion just to make a test fail. A failed run should mean the real application did not meet the expected behaviour.
-- For a five-case demo, prefer one positive end-to-end journey, one authentication/required-field negative case, one later-form required-field case, and two meaningful defect-detection validation/boundary cases.
-- When the story and discovered controls contain explicit boundaries, formats or validation constraints, prioritize them because they are good defect-detection scenarios.
-- Treat the supplied page inventory as the source of truth. Never invent fields, pages, buttons, selectors, messages or dropdown values.
-- Multi-page journeys are allowed. If the story describes login followed by another page, create end-to-end cases that reflect that flow.
+- When the story and discovered controls contain explicit required fields, boundaries, formats or validation constraints, prioritize them.
+- Treat selectors, fields, messages and option values in the supplied page inventory as the source of truth. Never invent fields, pages, buttons, selectors, messages or dropdown values.
+- Multi-page journeys are allowed ONLY when the story itself requires a multi-page journey.
 - Do not include actual passwords or secrets in test data.
 - Each case must be independently understandable and have concrete expected results.
 
@@ -117,22 +119,22 @@ const AUTOMATION_GENERATOR_PROMPT = `You are a senior browser automation enginee
 Generate a complete JavaScript end-to-end spec for ONLY the approved test cases using the current runtime's cy.* API.
 
 STRICT RULES:
-1. Use only selectors, data-testid values, ids, names, messages, option values and URLs that appear in pageDiscoveries or the approved test case itself.
-2. Never invent a selector or assertion text.
-3. Prefer an explicit selector supplied in a test step; otherwise prefer data-testid, then id, then name from discovery.
-4. Use relative paths with cy.visit() when pages share the supplied base URL.
-5. If login credentials are available, NEVER hardcode them. Read them securely with:
+1. APPROVED TEST CASES define the execution scope. Do not navigate to or interact with a discovered page/control unless an approved test case requires it.
+2. Use only selectors, data-testid values, ids, names, messages, option values and URLs that appear in pageDiscoveries or the approved test case itself.
+3. Never invent a selector or assertion text.
+4. Prefer an explicit selector supplied in a test step; otherwise prefer data-testid, then id, then name from discovery.
+5. Use relative paths with cy.visit() when pages share the supplied base URL.
+6. If login credentials are available, NEVER hardcode them. Read them securely with:
    cy.env(['TEST_USERNAME','TEST_PASSWORD'], { log: false }).then(({ TEST_USERNAME, TEST_PASSWORD }) => { ... })
    and type them with { log: false }.
-6. Do not send credential values to logs, assertions, screenshots, titles or comments.
-7. For a login journey, use the discovered username/password fields and discovered login button, then continue to the discovered destination page.
-8. Execute the approved test case steps in order. Do not silently skip later-form actions just because login succeeded.
-9. For a form validation case, populate every other field listed in the approved steps before submitting. Check/select radio buttons, checkboxes and dropdowns exactly as requested.
-10. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
-11. Assertions must prove the expected result. For a rejection/validation case, assert the discovered field-specific error element becomes visible and non-empty and that the discovered success state does not appear. Do not use a weak assertion that can pass when invalid data is accepted.
-12. Every approved test case must map to one it() block whose title begins with its TC id.
-13. If TC001 contains feedback-form steps, visibly complete and submit the feedback form; do not stop after login.
-14. If a case enters age 17 against a discovered min=18 rule, prove that 17 is rejected. If a case enters website value "abc" against a discovered URL field, prove that "abc" is rejected.
+7. Do not send credential values to logs, assertions, screenshots, titles or comments.
+8. For login-only test cases, remain on the login/authentication flow. Do not continue to feedback or another downstream page unless that approved case explicitly requires it.
+9. Execute the approved test case steps in order.
+10. For a form validation case, populate every other field listed in that approved case before submitting. Check/select radio buttons, checkboxes and dropdowns exactly as requested.
+11. No numeric cy.wait(). No child_process, fs, eval, Function, network modules or arbitrary Node code.
+12. Assertions must prove the expected result. For a rejection/validation case, assert the discovered field-specific or form-level error state and that the disallowed transition does not occur.
+13. Every approved test case must map to one it() block whose title begins with its TC id.
+14. For containers containing dynamic values such as generated reference IDs or timestamps, do not use exact whole-element text equality; assert visibility and known static text separately.
 
 Return JSON only:
 {"fileName": string, "framework": "browser-automation", "language": "javascript", "script": string}`;
@@ -237,6 +239,30 @@ function pagePath(page) {
 function firstNonEmptyOption(found, fallback) {
   const option = (found?.element?.options || []).find((item) => item.value !== "");
   return option?.value || fallback;
+}
+
+function isLoginScopedStory(story) {
+  const text = String(story || "").toLowerCase();
+  const mentionsLogin = /\b(login|log in|sign in|signin|authentication|authenticate)\b/.test(text);
+  const mentionsOtherFeature = /\b(feedback|profile|dashboard|registration|register|checkout|payment|order|search|cart)\b/.test(text);
+  return mentionsLogin && !mentionsOtherFeature;
+}
+
+function scopeDiscoveriesForStory(pageDiscoveries, story) {
+  if (!isLoginScopedStory(story)) return pageDiscoveries;
+
+  const loginPages = (pageDiscoveries || []).filter((page) => {
+    const ids = new Set((page.elements || []).flatMap((item) => [item.testId, item.id, item.name].filter(Boolean)));
+    return ids.has("username") || ids.has("password") || ids.has("login-button") || ids.has("login-error");
+  });
+
+  const scoped = loginPages.length ? loginPages : (pageDiscoveries || []).slice(0, 1);
+  return scoped.map((page) => ({
+    ...page,
+    // A redirect hint tells discovery that another route exists, but for a
+    // login-only story it must not broaden the test scope into that feature.
+    routeHints: [],
+  }));
 }
 
 function buildDemoCalibration(result, pageDiscoveries, story) {
@@ -356,7 +382,16 @@ function buildDemoCalibration(result, pageDiscoveries, story) {
 }
 
 async function generateTestCases({ story, pageDiscoveries, environment }) {
-  const result = await callQwen(TEST_ANALYST_PROMPT, { story, pageDiscoveries, environment, requestedTestCaseCount: TEST_CASE_COUNT });
+  const scopedDiscoveries = scopeDiscoveriesForStory(pageDiscoveries, story);
+  const result = await callQwen(TEST_ANALYST_PROMPT, {
+    story,
+    pageDiscoveries: scopedDiscoveries,
+    environment,
+    requestedTestCaseCount: TEST_CASE_COUNT,
+    scopeInstruction: isLoginScopedStory(story)
+      ? "LOGIN/AUTHENTICATION ONLY. Do not create tests for downstream pages or features."
+      : "Follow the business story exactly; discovered pages do not broaden scope.",
+  });
   const validated = validateTestCases(result, TEST_CASE_COUNT);
   return buildDemoCalibration(validated, pageDiscoveries, story);
 }
