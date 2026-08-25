@@ -159,6 +159,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     AUTOMATION_SCREENSHOT_ON_FAILURE: String(screenshotOnRunFailure),
     TEST_USERNAME: executionContext.credentials?.username || "",
     TEST_PASSWORD: executionContext.credentials?.password || "",
+    LOGIN_PATH: executionContext.loginPath || "/",
     LOGIN_USERNAME_SELECTOR: executionContext.loginSelectors?.username || "",
     LOGIN_PASSWORD_SELECTOR: executionContext.loginSelectors?.password || "",
     LOGIN_SUBMIT_SELECTOR: executionContext.loginSelectors?.submit || "",
