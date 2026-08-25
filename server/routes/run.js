@@ -113,6 +113,15 @@ router.post("/api/chat", async (req, res, next) => {
   const session = getSession(sessionId);
   try {
     if (session.state !== "AWAITING_APPROVAL") throw new Error("Generate and review test cases before starting execution.");
+    if (!session.readinessValidated) {
+      return res.status(409).json({
+        reply: "Automation readiness is still being checked. Run Approved Tests is locked until readiness validation completes.",
+        readinessPending: true,
+        automationReadiness: session.automationReadiness,
+        testCases: session.testCases,
+      });
+    }
+
     const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
     session.testCases = assessTestCases(normalizeReviewedTestCases(reviewedTestCases, session.testCases), { pageDiscoveries: session.pageDiscoveries, hasCredentials });
     session.automationReadiness = readinessSummary(session.testCases);
@@ -140,9 +149,6 @@ router.post("/api/chat", async (req, res, next) => {
       pageDiscoveries: session.pageDiscoveries,
       hasCredentials: executionContext.hasCredentials,
       loginSelectors: executionContext.loginSelectors,
-      // The deterministic hidden/absent assertion intentionally queries the document
-      // body before looking for the grounded target. "body" is framework-owned and is
-      // not an application selector discovered from the target page.
       frameworkOwnedSelectors: ["body"],
     });
     if (!validation.valid) {
