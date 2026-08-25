@@ -15,6 +15,8 @@ function createSession() {
     credentials: null,
     pageDiscoveries: [],
     testCases: [],
+    automationReadiness: null,
+    readinessValidated: false,
     approvedIds: [],
     generatedScript: null,
     lastResults: null,
