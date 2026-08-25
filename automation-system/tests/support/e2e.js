@@ -17,13 +17,14 @@ function withDemoDelay(chain) {
   );
 }
 
-// Credentials and login selectors are injected by the deterministic runner.
-// AI-generated specs never read credential environment variables and never
-// choose login selectors. They can only request the framework-owned login.
+// Credentials, login path and login selectors are injected by the deterministic
+// automation runtime. AI-generated specs never read credentials or choose the
+// login page/controls. Calling this command is enough to establish a valid login.
 Cypress.Commands.add("loginWithRuntimeCredentials", () => {
   const env = Cypress.config("env") || {};
   const username = env.TEST_USERNAME;
   const password = env.TEST_PASSWORD;
+  const loginPath = env.LOGIN_PATH || "/";
   const usernameSelector = env.LOGIN_USERNAME_SELECTOR;
   const passwordSelector = env.LOGIN_PASSWORD_SELECTOR;
   const submitSelector = env.LOGIN_SUBMIT_SELECTOR;
@@ -32,9 +33,12 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
     throw new Error("Runtime login credentials are not configured for this test run.");
   }
   if (!usernameSelector || !passwordSelector || !submitSelector) {
-    throw new Error("Runtime login selectors were not grounded from page discovery.");
+    throw new Error("Runtime login controls were not grounded from page discovery.");
   }
 
+  // Navigation is framework-owned too. This prevents generated tests from
+  // attempting login while the browser is still on about:blank or another page.
+  cy.visit(loginPath);
   cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
   cy.get(passwordSelector).clear({ log: false }).type(String(password), { log: false });
   cy.get(submitSelector).click();
