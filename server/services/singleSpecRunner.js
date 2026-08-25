@@ -38,9 +38,7 @@ function prepareSpec(generated) {
   const specPath = path.join(SPEC_DIR, fileName);
   fs.writeFileSync(specPath, generated.script, "utf8");
 
-  if (!fs.existsSync(specPath)) {
-    throw new Error(`Generated automation spec was not written: ${specPath}`);
-  }
+  if (!fs.existsSync(specPath)) throw new Error(`Generated automation spec was not written: ${specPath}`);
 
   return {
     fileName,
@@ -77,20 +75,10 @@ function collectArtifacts(tests, forcedTeardown) {
     const id = tcIdFromText(filePath);
     if (id) screenshotsByTestCase[id] = path.resolve(filePath);
   }
-
-  // A video is considered usable only when the engine exits cleanly. If the
-  // Windows teardown watchdog has to terminate the process tree, the video may
-  // not have been finalized, so do not expose a potentially corrupt file.
   const videoFiles = forcedTeardown ? [] : findFiles(VIDEO_DIR, ".mp4");
   const sharedVideo = videoFiles.length ? path.resolve(videoFiles[0]) : null;
   const videosByTestCase = {};
-
-  for (const test of tests) {
-    if (test.fail && test.testCaseId && sharedVideo) {
-      videosByTestCase[test.testCaseId] = sharedVideo;
-    }
-  }
-
+  for (const test of tests) if (test.fail && test.testCaseId && sharedVideo) videosByTestCase[test.testCaseId] = sharedVideo;
   return { sharedVideo, videosByTestCase, screenshotsByTestCase };
 }
 
@@ -137,29 +125,19 @@ function summarizeReporterResult(raw, browser, forcedTeardown) {
 
 function killProcessTree(pid) {
   if (!pid) return Promise.resolve();
-
   if (process.platform === "win32") {
     return new Promise((resolve) => {
       execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, () => resolve());
     });
   }
-
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // Process may already have exited.
-  }
+  try { process.kill(pid, "SIGTERM"); } catch {}
   return Promise.resolve();
 }
 
 async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure }) {
   const cypressBin = path.join(AUTOMATION_DIR, "node_modules", "cypress", "bin", "cypress");
-  if (!fs.existsSync(cypressBin)) {
-    throw new Error("Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install.");
-  }
-  if (!fs.existsSync(REPORTER_PATH)) {
-    throw new Error(`Automation result reporter is missing: ${REPORTER_PATH}`);
-  }
+  if (!fs.existsSync(cypressBin)) throw new Error("Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install.");
+  if (!fs.existsSync(REPORTER_PATH)) throw new Error(`Automation result reporter is missing: ${REPORTER_PATH}`);
 
   const args = [
     cypressBin,
@@ -170,7 +148,6 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     "--browser", browser,
     "--reporter", REPORTER_PATH,
   ];
-
   if (headed) args.push("--headed", "--no-runner-ui");
   else args.push("--headless");
 
@@ -182,6 +159,9 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     AUTOMATION_SCREENSHOT_ON_FAILURE: String(screenshotOnRunFailure),
     TEST_USERNAME: executionContext.credentials?.username || "",
     TEST_PASSWORD: executionContext.credentials?.password || "",
+    LOGIN_USERNAME_SELECTOR: executionContext.loginSelectors?.username || "",
+    LOGIN_PASSWORD_SELECTOR: executionContext.loginSelectors?.password || "",
+    LOGIN_SUBMIT_SELECTOR: executionContext.loginSelectors?.submit || "",
     DEMO_STEP_DELAY_MS: String(demoStepDelayMs),
   };
 
@@ -191,16 +171,12 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     windowsHide: false,
     stdio: ["ignore", "pipe", "pipe"],
   });
-
   child.stdout.on("data", (chunk) => process.stdout.write(chunk));
   child.stderr.on("data", (chunk) => process.stderr.write(chunk));
 
   let closed = false;
   let exitCode = null;
-  child.on("close", (code) => {
-    closed = true;
-    exitCode = code;
-  });
+  child.on("close", (code) => { closed = true; exitCode = code; });
 
   const overallTimeoutMs = Math.max(30000, Math.min(numberEnv(process.env.AUTOMATION_ENGINE_TIMEOUT_MS, 120000), 600000));
   const exitGraceMs = Math.max(1000, Math.min(numberEnv(process.env.AUTOMATION_ENGINE_EXIT_GRACE_MS, 5000), 30000));
@@ -209,33 +185,22 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
 
   while (Date.now() - startedAt < overallTimeoutMs) {
     if (fs.existsSync(RESULT_FILE)) {
-      try {
-        reporterResult = JSON.parse(fs.readFileSync(RESULT_FILE, "utf8"));
-        break;
-      } catch {
-        // Reporter writes atomically, but retry if antivirus/file locking races.
-      }
+      try { reporterResult = JSON.parse(fs.readFileSync(RESULT_FILE, "utf8")); break; } catch {}
     }
-
     if (closed) break;
     await delay(200);
   }
 
   if (!reporterResult) {
     await killProcessTree(child.pid);
-    throw new Error(
-      closed
-        ? `Automation engine exited before producing test results (exit code ${exitCode}).`
-        : `Automation engine did not produce test results within ${Math.round(overallTimeoutMs / 1000)}s.`
-    );
+    throw new Error(closed
+      ? `Automation engine exited before producing test results (exit code ${exitCode}).`
+      : `Automation engine did not produce test results within ${Math.round(overallTimeoutMs / 1000)}s.`);
   }
 
   console.log(`[single-spec-runner] Test results captured before teardown: ${reporterResult.passed} passed, ${reporterResult.failed} failed.`);
-
   const graceStartedAt = Date.now();
-  while (!closed && Date.now() - graceStartedAt < exitGraceMs) {
-    await delay(200);
-  }
+  while (!closed && Date.now() - graceStartedAt < exitGraceMs) await delay(200);
 
   let forcedTeardown = false;
   if (!closed) {
@@ -252,7 +217,6 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
 
 async function executeSingleGeneratedSpec(generated, executionContext = {}) {
   let prepared = null;
-
   try {
     prepared = prepareSpec(generated);
     const headed = boolEnv(process.env.AUTOMATION_HEADED, true);
@@ -262,41 +226,16 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}) {
     const screenshotOnRunFailure = boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true);
 
     removeOldArtifacts();
-
-    console.log(
-      `[single-spec-runner] Running one spec containing all approved cases in ${browser} (${headed ? "headed" : "headless"})` +
-      (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : "")
-    );
+    console.log(`[single-spec-runner] Running one spec containing all approved cases in ${browser} (${headed ? "headed" : "headless"})` + (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : ""));
     console.log(`[single-spec-runner] Spec: ${prepared.automationRelativeSpecPath}`);
     console.log("[single-spec-runner] Results are captured as soon as the tests finish; browser teardown cannot block analytics/report generation.");
 
-    const run = await runAutomationCli({
-      prepared,
-      executionContext,
-      browser,
-      headed,
-      demoStepDelayMs,
-      video,
-      screenshotOnRunFailure,
-    });
-
+    const run = await runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure });
     const summarized = summarizeReporterResult(run.reporterResult, browser, run.forcedTeardown);
-    return {
-      ok: true,
-      specPath: prepared.specPath,
-      summary: summarized.summary,
-      artifacts: summarized.artifacts,
-      error: null,
-    };
+    return { ok: true, specPath: prepared.specPath, summary: summarized.summary, artifacts: summarized.artifacts, error: null };
   } catch (err) {
     console.error("[single-spec-runner] Automation execution failed:", err);
-    return {
-      ok: false,
-      specPath: prepared?.specPath || null,
-      summary: null,
-      artifacts: null,
-      error: err.message || String(err),
-    };
+    return { ok: false, specPath: prepared?.specPath || null, summary: null, artifacts: null, error: err.message || String(err) };
   }
 }
 
