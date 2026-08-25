@@ -1,9 +1,10 @@
+const { modelForProfile } = require("./aiModelProfiles");
+
 function numberEnv(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-const MODEL = process.env.QWEN_MODEL || "qwen3.7-flash";
 const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_TIMEOUT_MS, 180000), 600000));
 
 function ensureConfigured() {
@@ -17,8 +18,9 @@ function parseJson(raw) {
   return JSON.parse(cleaned);
 }
 
-async function callModel(systemPrompt, payload) {
+async function callModel(systemPrompt, payload, modelTier = "fast") {
   ensureConfigured();
+  const { model } = modelForProfile(modelTier);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -29,7 +31,7 @@ async function callModel(systemPrompt, payload) {
         Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: JSON.stringify(payload) },
@@ -87,7 +89,7 @@ Hard rules:
 - Preserve the original business intent and expected behaviour.
 - Never delete, weaken or replace an essential business requirement merely to make the case automatable.
 - Use only supplied page-discovery evidence.
-- Never invent a selector, page, route, control, validation rule, message, option or framework capability.
+- Never invent a selector, page, route, control, validation rule, message, option or automation capability.
 - If the supplied reason cannot be repaired without changing business intent or inventing evidence, return repaired=false and explain why.
 - Do not modify the test-case id.
 - Do not include secrets or runtime credential values.
@@ -128,22 +130,22 @@ function normalizeCandidate(raw, id, source) {
   };
 }
 
-async function generateSingleTestCase({ id, requestText, story, pageDiscoveries }) {
+async function generateSingleTestCase({ id, requestText, story, pageDiscoveries, modelTier = "fast" }) {
   const result = await callModel(SINGLE_CASE_PROMPT, {
     requestText,
     businessStory: story,
     pageDiscoveries,
-  });
+  }, modelTier);
   return normalizeCandidate(result?.testCase, id, "ai-on-demand");
 }
 
-async function repairTestCase({ testCase, readiness, story, pageDiscoveries }) {
+async function repairTestCase({ testCase, readiness, story, pageDiscoveries, modelTier = "fast" }) {
   const result = await callModel(REPAIR_CASE_PROMPT, {
     businessStory: story,
     originalTestCase: testCase,
     deterministicReadiness: readiness,
     pageDiscoveries,
-  });
+  }, modelTier);
 
   if (!result?.repaired) {
     return { repaired: false, explanation: String(result?.explanation || "The issue could not be repaired without changing test intent or inventing evidence."), testCase };
