@@ -84,6 +84,24 @@ app.get("/health", (req, res) => {
   });
 });
 
+// Keep the checked-in demo UI generic at runtime:
+// - Known pages starts empty so discovery is not biased toward /feedback.
+// - Newly added human test cases are inserted at the top for immediate review.
+// These replacements are intentionally narrow and fail harmlessly if the UI is
+// later refactored; static assets continue to be served normally below.
+app.get("/", (req, res, next) => {
+  const uiFile = path.join(__dirname, "..", "testpilot-ui", "index.html");
+  fs.readFile(uiFile, "utf8", (err, html) => {
+    if (err) return next(err);
+
+    const adjusted = html
+      .replace('id="additionalPaths" value="/feedback"', 'id="additionalPaths" value=""')
+      .replace("if(index<0)testCases.push(tc);else testCases[index]=tc;", "if(index<0)testCases.unshift(tc);else testCases[index]=tc;");
+
+    res.type("html").send(adjusted);
+  });
+});
+
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
 app.listen(PORT, () => {
