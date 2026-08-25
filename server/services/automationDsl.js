@@ -48,7 +48,19 @@ function buildDiscoveryIndex(pageDiscoveries = []) {
 }
 
 function findSelector(text) {
-  return String(text || "").match(/\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\[name=(?:"[^"]+"|'[^']+')\]/)?.[0] || "";
+  const source = String(text || "");
+  const literal = source.match(/\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\[name=(?:"[^"]+"|'[^']+')\]/)?.[0];
+  if (literal) return literal.replace(/\[data-testid='([^']+)'\]/, '[data-testid="$1"]').replace(/\[name='([^']+)'\]/, '[name="$1"]');
+
+  const testId = source.match(/(?:data-testid|data testid|test id)\s*(?:=|is|of|named|called|:)?\s*["']([^"']+)["']/i)?.[1];
+  if (testId) return `[data-testid="${testId}"]`;
+
+  const name = source.match(/(?:name attribute|name)\s*(?:=|is|of|named|called|:)?\s*["']([^"']+)["']/i)?.[1];
+  if (name) return `[name="${name}"]`;
+
+  const id = source.match(/(?:element\s+)?id\s*(?:=|is|of|named|called|:)?\s*["']([A-Za-z0-9_-]+)["']/i)?.[1];
+  if (id) return `#${id}`;
+  return "";
 }
 
 function looksLikeSelector(value) {
@@ -82,7 +94,6 @@ function compileStep(step, discovery, state) {
   const target = String(step?.target || "").trim();
   const value = step?.value === null || step?.value === undefined ? null : String(step.value);
 
-  // Framework-owned valid login replaces the generated username/password/click sequence.
   if (isConfiguredCredentialStep(action) || (/click|submit/.test(action) && /sign\s*in|log\s*in|login/i.test(actionRaw) && state.validLoginRequired)) {
     if (!state.loginInserted) {
       state.loginInserted = true;
@@ -98,38 +109,24 @@ function compileStep(step, discovery, state) {
     return { operation: "NAVIGATE", path };
   }
 
-  if (!target || !looksLikeSelector(target)) {
-    return { error: `Step is not expressed with a grounded executable target: ${actionRaw}` };
-  }
+  if (!target || !looksLikeSelector(target)) return { error: `Step is not expressed with a grounded executable target: ${actionRaw}` };
   const element = discovery.selectors.get(target);
   if (!element) return { error: `Selector is not grounded by discovery: ${target}` };
   const type = String(element?.type || "").toLowerCase();
   const tag = String(element?.tag || "").toLowerCase();
 
   if (/leave .*blank|clear|empty/.test(action)) return { operation: "CLEAR", selector: target };
-
   if (/enter|type|fill|input/.test(action)) {
     if (value === null || value === "") return { error: `Typing step is missing a value for ${target}` };
     return { operation: "TYPE", selector: target, value };
   }
-
-  if (/uncheck|deselect/.test(action) && (type === "checkbox" || type === "radio")) {
-    return { operation: "UNCHECK", selector: target };
-  }
-
-  if (/check|consent|select at least one|choose/.test(action) && type === "checkbox") {
-    return { operation: "CHECK", selector: target };
-  }
-
+  if (/uncheck|deselect/.test(action) && (type === "checkbox" || type === "radio")) return { operation: "UNCHECK", selector: target };
+  if (/check|consent|select at least one|choose/.test(action) && type === "checkbox") return { operation: "CHECK", selector: target };
   if (/select/.test(action) && tag === "select") {
     if (value === null || value === "") return { error: `Select step is missing an option value for ${target}` };
     return { operation: "SELECT", selector: target, value };
   }
-
-  if (/select|click|choose|submit|press|sign\s*in|log\s*in|login/.test(action)) {
-    return { operation: "CLICK", selector: target };
-  }
-
+  if (/select|click|choose|submit|press|sign\s*in|log\s*in|login/.test(action)) return { operation: "CLICK", selector: target };
   return { error: `Unsupported or ambiguous automation action: ${actionRaw}` };
 }
 
@@ -140,7 +137,9 @@ function compileExpected(expected, discovery) {
 
   if (selector) {
     if (!discovery.selectors.has(selector)) return { error: `Expected-result selector is not grounded by discovery: ${selector}` };
-    if (/non-empty|not empty/.test(lower)) return { operation: "ASSERT_TEXT_NOT_EMPTY", selector };
+    if (/non-empty|not empty|contains?\s+(?:non-empty|text|message)|message\s+['"].+['"]\s+is\s+(?:displayed|shown|visible)/i.test(text)) {
+      return { operation: "ASSERT_TEXT_NOT_EMPTY", selector };
+    }
     if (/absent|hidden|not visible|remains absent/.test(lower)) return { operation: "ASSERT_HIDDEN_OR_ABSENT", selector };
     if (/visible|shown|displayed|appears/.test(lower)) return { operation: "ASSERT_VISIBLE", selector };
   }
@@ -152,7 +151,6 @@ function compileExpected(expected, discovery) {
     if (/opened|navigate|taken|url|page/.test(lower)) return { operation: "ASSERT_URL_INCLUDES", path };
   }
 
-  // Narrative expected results are allowed only when another concrete assertion proves them.
   return { narrative: text };
 }
 
@@ -189,25 +187,12 @@ function compileTestCase(testCase, { pageDiscoveries = [], hasCredentials = fals
 
   const unsupported = [...new Set(errors)];
   if (unsupported.length) {
-    return {
-      ok: false,
-      reasonCode: "AUTOMATION_CONTRACT_INCOMPLETE",
-      reason: unsupported[0],
-      errors: unsupported,
-      supportedOperations: [...SUPPORTED_OPERATIONS],
-    };
+    return { ok: false, reasonCode: "AUTOMATION_CONTRACT_INCOMPLETE", reason: unsupported[0], errors: unsupported, supportedOperations: [...SUPPORTED_OPERATIONS] };
   }
 
   return {
     ok: true,
-    plan: {
-      version: 1,
-      testCaseId: testCase.id,
-      title: testCase.title,
-      actions,
-      assertions,
-      narrativeExpectations: narratives,
-    },
+    plan: { version: 1, testCaseId: testCase.id, title: testCase.title, actions, assertions, narrativeExpectations: narratives },
   };
 }
 
