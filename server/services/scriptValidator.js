@@ -66,9 +66,7 @@ function discoveredGrounding(pageDiscoveries = []) {
     try {
       const url = new URL(page?.finalUrl || page?.url || "http://local/");
       paths.add(`${url.pathname}${url.search}` || "/");
-    } catch {
-      // Ignore malformed discovery URLs; they cannot become execution evidence.
-    }
+    } catch {}
 
     for (const item of page?.elements || []) {
       addSelector(selectors, item.selector);
@@ -77,7 +75,7 @@ function discoveredGrounding(pageDiscoveries = []) {
       if (item.name) addSelector(selectors, `[name="${item.name}"]`);
 
       const error = item.errorElement;
-      if (error?.selector) addSelector(selectors, error.selector);
+      addSelector(selectors, error?.selector);
       if (error?.testId) addSelector(selectors, `[data-testid="${error.testId}"]`);
       if (error?.id) addSelector(selectors, `#${error.id}`);
     }
@@ -99,7 +97,6 @@ function extractLiteralArgs(script, command) {
   };
   const pattern = patterns[command];
   if (!pattern) return [];
-
   const values = [];
   let match;
   while ((match = pattern.exec(script))) values.push(match[2]);
@@ -114,7 +111,7 @@ function extractTestTitles(script) {
   return titles;
 }
 
-function validateGroundedScript(script, { approvedTestCases = [], pageDiscoveries = [], hasCredentials = false } = {}) {
+function validateGroundedScript(script, { approvedTestCases = [], pageDiscoveries = [], hasCredentials = false, loginSelectors = null } = {}) {
   const base = validateScript(script);
   const errors = [...base.errors];
 
@@ -123,13 +120,31 @@ function validateGroundedScript(script, { approvedTestCases = [], pageDiscoverie
   }
 
   if (/\b(?:cy|Cypress)\.env\s*\(/.test(script)) {
-    errors.push("Generated specs may not access Cypress environment credentials directly; use cy.loginWithRuntimeCredentials(...).");
+    errors.push("Generated specs may not access Cypress environment credentials directly; use cy.loginWithRuntimeCredentials().");
   }
   if (/\bTEST_(?:USERNAME|PASSWORD)\b|this\.TEST_(?:USERNAME|PASSWORD)/.test(script)) {
     errors.push("Generated specs may not reference TEST_USERNAME/TEST_PASSWORD identifiers directly.");
   }
-  if (!hasCredentials && /\bcy\.loginWithRuntimeCredentials\s*\(/.test(script)) {
+
+  const helperCalls = script.match(/\bcy\.loginWithRuntimeCredentials\s*\([^)]*\)/g) || [];
+  for (const call of helperCalls) {
+    if (!/^cy\.loginWithRuntimeCredentials\s*\(\s*\)$/.test(call)) {
+      errors.push("loginWithRuntimeCredentials must be called without arguments; selectors and credentials are framework-owned.");
+    }
+  }
+  if (helperCalls.length && !hasCredentials) {
     errors.push("Generated spec requested runtime credential login but no credentials were supplied.");
+  }
+
+  const grounding = discoveredGrounding(pageDiscoveries);
+  if (helperCalls.length) {
+    const selectors = [loginSelectors?.username, loginSelectors?.password, loginSelectors?.submit].map((value) => String(value || "").trim());
+    if (selectors.some((value) => !value)) {
+      errors.push("Runtime login helper is unavailable because username, password and submit selectors were not grounded by the framework.");
+    }
+    for (const selector of selectors.filter(Boolean)) {
+      if (!grounding.selectors.has(selector)) errors.push(`Framework login selector is not grounded in page discovery: ${selector}`);
+    }
   }
 
   const approvedIds = approvedTestCases.map((tc) => String(tc?.id || "").toUpperCase()).filter(Boolean);
@@ -143,28 +158,8 @@ function validateGroundedScript(script, { approvedTestCases = [], pageDiscoverie
     if (!approvedIds.includes(id)) errors.push(`Generated script contains unapproved test id ${id}.`);
   }
 
-  const grounding = discoveredGrounding(pageDiscoveries);
-
   for (const selector of extractLiteralArgs(script, "cy.get")) {
-    if (!grounding.selectors.has(selector)) {
-      errors.push(`Selector is not grounded in page discovery: ${selector}`);
-    }
-  }
-
-  const helperPattern = /\bcy\.loginWithRuntimeCredentials\s*\(\s*\{([\s\S]*?)\}\s*\)/g;
-  let helperMatch;
-  while ((helperMatch = helperPattern.exec(script))) {
-    const body = helperMatch[1];
-    const selectorPattern = /(?:usernameSelector|passwordSelector|submitSelector)\s*:\s*(['"`])([^'"`]+)\1/g;
-    let selectorMatch;
-    const found = [];
-    while ((selectorMatch = selectorPattern.exec(body))) {
-      found.push(selectorMatch[2]);
-      if (!grounding.selectors.has(selectorMatch[2])) {
-        errors.push(`Login helper selector is not grounded in page discovery: ${selectorMatch[2]}`);
-      }
-    }
-    if (found.length !== 3) errors.push("loginWithRuntimeCredentials must provide exactly the discovered username, password and submit selectors.");
+    if (!grounding.selectors.has(selector)) errors.push(`Selector is not grounded in page discovery: ${selector}`);
   }
 
   for (const target of extractLiteralArgs(script, "cy.visit")) {
@@ -184,4 +179,4 @@ function validateGroundedScript(script, { approvedTestCases = [], pageDiscoverie
   return { valid: errors.length === 0, errors: [...new Set(errors)] };
 }
 
-module.exports = { validateScript, validateGroundedScript };
+module.exports = { validateScript, validateGroundedScript, discoveredGrounding };
