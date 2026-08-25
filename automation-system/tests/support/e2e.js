@@ -17,18 +17,22 @@ function withDemoDelay(chain) {
   );
 }
 
-// Credentials are owned by the deterministic automation framework, not by the
-// generated test code. AI-generated specs call this helper with selectors that
-// came from page discovery; they never read, copy, assign or log credentials.
-Cypress.Commands.add("loginWithRuntimeCredentials", ({ usernameSelector, passwordSelector, submitSelector }) => {
-  const username = Cypress.env("TEST_USERNAME");
-  const password = Cypress.env("TEST_PASSWORD");
+// Credentials and login selectors are injected by the deterministic runner.
+// AI-generated specs never read credential environment variables and never
+// choose login selectors. They can only request the framework-owned login.
+Cypress.Commands.add("loginWithRuntimeCredentials", () => {
+  const env = Cypress.config("env") || {};
+  const username = env.TEST_USERNAME;
+  const password = env.TEST_PASSWORD;
+  const usernameSelector = env.LOGIN_USERNAME_SELECTOR;
+  const passwordSelector = env.LOGIN_PASSWORD_SELECTOR;
+  const submitSelector = env.LOGIN_SUBMIT_SELECTOR;
 
   if (!username || !password) {
-    throw new Error("Valid runtime test credentials were not supplied to the automation engine.");
+    throw new Error("Runtime login credentials are not configured for this test run.");
   }
   if (!usernameSelector || !passwordSelector || !submitSelector) {
-    throw new Error("Login helper requires discovered username, password and submit selectors.");
+    throw new Error("Runtime login selectors were not grounded from page discovery.");
   }
 
   cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
