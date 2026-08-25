@@ -108,7 +108,7 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
     const requested = /^TC-H\d{3}$/i.test(String(requestedId || "")) ? String(requestedId).toUpperCase() : null;
     const id = requested || nextOnDemandId(session, supplied);
 
-    let candidate = await generateSingleTestCase({
+    const candidate = await generateSingleTestCase({
       id,
       requestText: request,
       story: session.story,
@@ -117,35 +117,12 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
     candidate.createdBy = "human-request";
     candidate.source = "ai-on-demand";
     candidate.repairHistory = [];
+
+    // Do not chain a second AI request here. Show the candidate immediately,
+    // classify it deterministically, and let the reviewer choose Fix with AI
+    // only when the reason is legitimately AI-repairable.
     candidate.automationReadiness = classifyTestCase(candidate, context(session));
 
-    // Only legitimate deterministic AI-repairable issues get one automatic repair attempt.
-    if (candidate.automationReadiness.resolutionType === RESOLUTION_AI_REPAIRABLE) {
-      const before = candidate.automationReadiness;
-      const repair = await repairTestCase({
-        testCase: candidate,
-        readiness: before,
-        story: session.story,
-        pageDiscoveries: session.pageDiscoveries,
-      });
-      if (repair.repaired) {
-        const repaired = normalizeTestCase({ ...repair.testCase, id, source: "ai-on-demand", createdBy: "human-request" }, id);
-        repaired.automationReadiness = classifyTestCase(repaired, context(session));
-        repaired.repairHistory = [{
-          attempt: 1,
-          action: "AI_REPAIR",
-          originalStatus: before.status,
-          reasonCode: before.reasonCode,
-          reason: before.reason,
-          explanation: repair.explanation,
-          result: repaired.automationReadiness.status,
-        }];
-        candidate = repaired;
-      }
-    }
-
-    // Preview only. The candidate is not persisted into the suite until the user
-    // reviews/modifies it and clicks Save Test Case in the editor.
     return res.json({
       ok: true,
       preview: true,
