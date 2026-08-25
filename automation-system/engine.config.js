@@ -25,6 +25,9 @@ module.exports = defineConfig({
     env: {
       TEST_USERNAME: process.env.TEST_USERNAME || "",
       TEST_PASSWORD: process.env.TEST_PASSWORD || "",
+      LOGIN_USERNAME_SELECTOR: process.env.LOGIN_USERNAME_SELECTOR || "",
+      LOGIN_PASSWORD_SELECTOR: process.env.LOGIN_PASSWORD_SELECTOR || "",
+      LOGIN_SUBMIT_SELECTOR: process.env.LOGIN_SUBMIT_SELECTOR || "",
       DEMO_STEP_DELAY_MS: Math.max(0, Math.min(numberEnv(process.env.DEMO_STEP_DELAY_MS, 0), 3000)),
     },
     setupNodeEvents(on, config) {
