@@ -2,8 +2,7 @@
 // Global behaviour for AI-generated browser automation specs.
 
 function getDemoStepDelayMs() {
-  const env = Cypress.config("env") || {};
-  const value = Number(env.DEMO_STEP_DELAY_MS || 0);
+  const value = Number(Cypress.env("DEMO_STEP_DELAY_MS") || 0);
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(value, 3000));
 }
@@ -21,13 +20,15 @@ function withDemoDelay(chain) {
 // automation runtime. AI-generated specs never read credentials or choose the
 // login page/controls. Calling this command is enough to establish a valid login.
 Cypress.Commands.add("loginWithRuntimeCredentials", () => {
-  const env = Cypress.config("env") || {};
-  const username = env.TEST_USERNAME;
-  const password = env.TEST_PASSWORD;
-  const loginPath = env.LOGIN_PATH || "/";
-  const usernameSelector = env.LOGIN_USERNAME_SELECTOR;
-  const passwordSelector = env.LOGIN_PASSWORD_SELECTOR;
-  const submitSelector = env.LOGIN_SUBMIT_SELECTOR;
+  // Runtime values configured under e2e.env must be read with Cypress.env().
+  // Cypress.config("env") is not the runtime environment API and caused the
+  // framework helper to see empty credentials even though the server injected them.
+  const username = Cypress.env("TEST_USERNAME");
+  const password = Cypress.env("TEST_PASSWORD");
+  const loginPath = Cypress.env("LOGIN_PATH") || "/";
+  const usernameSelector = Cypress.env("LOGIN_USERNAME_SELECTOR");
+  const passwordSelector = Cypress.env("LOGIN_PASSWORD_SELECTOR");
+  const submitSelector = Cypress.env("LOGIN_SUBMIT_SELECTOR");
 
   if (!username || !password) {
     throw new Error("Runtime login credentials are not configured for this test run.");
@@ -36,7 +37,7 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
     throw new Error("Runtime login controls were not grounded from page discovery.");
   }
 
-  // Navigation is framework-owned too. This prevents generated tests from
+  // Navigation is automation-system-owned too. This prevents generated tests from
   // attempting login while the browser is still on about:blank or another page.
   cy.visit(loginPath);
   cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
