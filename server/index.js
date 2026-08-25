@@ -8,14 +8,7 @@ const chatRoutes = require("./routes/chat");
 const runRoutes = require("./routes/run");
 const testCaseLifecycleRoutes = require("./routes/testCaseLifecycle");
 const qwen = require("./services/qwenClient");
-const { normalizeGeneratedScript } = require("./services/automationScriptNormalizer");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
-
-const generateAutomationCode = qwen.generateAutomationCode.bind(qwen);
-qwen.generateAutomationCode = async (args) => {
-  const generated = await generateAutomationCode(args);
-  return { ...generated, script: normalizeGeneratedScript(generated.script) };
-};
 
 const analyzeFailure = qwen.analyzeFailure.bind(qwen);
 qwen.analyzeFailure = async (args) => {
@@ -62,9 +55,7 @@ function sanitizePublicPayload(value) {
     return out;
   }
   if (typeof value === "string") {
-    return value
-      .replace(/Qwen/gi, "AI")
-      .replace(/qwen\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?/gi, "AI");
+    return value.replace(/Qwen/gi, "AI").replace(/qwen\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?/gi, "AI");
   }
   return value;
 }
@@ -86,7 +77,7 @@ app.use(runRoutes);
 app.use(chatRoutes);
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, aiConnected: qwen.isConfigured() });
+  res.json({ ok: true, aiConnected: qwen.isConfigured(), defaultAiProfile: process.env.AI_MODEL_DEFAULT || "strong" });
 });
 
 const READINESS_CSS = `
@@ -126,12 +117,12 @@ function serveUi(req, res, next) {
       .replace("They are not sent to Qwen.", "They are not sent to the AI model.")
       .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation system runs the reviewed cases; AI then explains failures.")
       .replace("$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthDot').className='dot '+(data.aiConnected?'ok':'bad');$('healthText').textContent=data.aiConnected?'Connected':'Not connected'")
-      .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages, grounding test cases and checking automation readiness. Please wait.")
-      .replace("Discovering pages & asking Qwen…", "Discovering pages & validating tests…")
-      .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checked`")
+      .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages and generating AI test cases. Readiness will be checked after the cases appear.")
+      .replace("Discovering pages & asking Qwen…", "Discovering pages & generating tests…")
+      .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checking`")
       .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The automation system is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
       .replace("Qwen failure analysis", "AI failure analysis")
-      .replace("</body>", '<script src="/readiness.js"></script></body>');
+      .replace("</body>", '<script src="/readiness.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=("${process.env.AI_MODEL_DEFAULT || "strong"}").toLowerCase();}</script></body>');
 
     res.type("html").send(adjusted);
   });
@@ -143,6 +134,6 @@ app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 app.listen(PORT, HOST, () => {
   console.log(`[ai-testpilot] Backend listening on ${HOST}:${PORT}`);
   console.log(`[ai-testpilot] UI available locally at http://localhost:${PORT}/`);
-  if (qwen.isConfigured()) console.log(`[ai-testpilot] ✅ AI provider connected (${qwen.QWEN_MODEL})`);
+  if (qwen.isConfigured()) console.log(`[ai-testpilot] ✅ AI provider connected · default profile ${(process.env.AI_MODEL_DEFAULT || "strong").toLowerCase()}`);
   else console.log("[ai-testpilot] ❌ AI provider is not configured. Check the server-side AI configuration in .env.");
 });
