@@ -41,42 +41,25 @@ function resolveDiscoveryUrls(targetUrl, additionalPaths = []) {
 }
 
 function pendingReadinessSummary(testCases = []) {
-  return {
-    total: testCases.length,
-    ready: 0,
-    checking: testCases.length,
-    manual: 0,
-    insufficientEvidence: 0,
-    invalid: 0,
-    userInputRequired: 0,
-    aiRepairable: 0,
-    frameworkChangeRequired: 0,
-  };
+  return { total: testCases.length, ready: 0, checking: testCases.length, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0 };
 }
 
 function formatTestCaseList(testCases) {
   return testCases.map((tc) => `• ${tc.id} [${tc.type}/${tc.priority}] [CHECKING] — ${tc.title}`).join("\n");
 }
 
-function discoveryCacheKey(urls) {
-  return [...urls].sort().join("\n");
-}
-
+function discoveryCacheKey(urls) { return [...urls].sort().join("\n"); }
 function trimDiscoveryCache() {
   const now = Date.now();
-  for (const [key, entry] of discoveryCache.entries()) {
-    if (!entry || entry.expiresAt <= now) discoveryCache.delete(key);
-  }
+  for (const [key, entry] of discoveryCache.entries()) if (!entry || entry.expiresAt <= now) discoveryCache.delete(key);
   while (discoveryCache.size > DISCOVERY_CACHE_MAX) discoveryCache.delete(discoveryCache.keys().next().value);
 }
-
 async function discoverPagesCached(urls, bypassCache = false) {
   if (bypassCache || !DISCOVERY_CACHE_TTL_MS) return { pages: await discoverPages(urls), cacheHit: false, bypassed: Boolean(bypassCache) };
   trimDiscoveryCache();
   const key = discoveryCacheKey(urls);
   const cached = discoveryCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return { pages: cached.pages, cacheHit: true, bypassed: false };
-
   const pages = await discoverPages(urls);
   discoveryCache.set(key, { pages, expiresAt: Date.now() + DISCOVERY_CACHE_TTL_MS });
   trimDiscoveryCache();
@@ -90,7 +73,7 @@ router.post("/api/chat", async (req, res) => {
     targetUrl: explicitTargetUrl,
     additionalPaths = [],
     credentials = null,
-    aiModelTier = "fast",
+    aiModelTier = process.env.AI_MODEL_DEFAULT || "strong",
     bypassDiscoveryCache = false,
   } = req.body || {};
 
@@ -127,12 +110,7 @@ router.post("/api/chat", async (req, res) => {
       stage = "AI test generation";
       const modelDiscoveries = compactDiscoveriesForModel(session.pageDiscoveries);
       const aiStartedAt = Date.now();
-      const generated = await qwen.generateTestCases({
-        story,
-        pageDiscoveries: modelDiscoveries,
-        environment: FIXED_ENVIRONMENT,
-        modelTier: session.aiModelTier,
-      });
+      const generated = await qwen.generateTestCases({ story, pageDiscoveries: modelDiscoveries, environment: FIXED_ENVIRONMENT, modelTier: session.aiModelTier });
       const aiGenerationMs = Date.now() - aiStartedAt;
 
       stage = "prepare human review";
@@ -152,30 +130,15 @@ router.post("/api/chat", async (req, res) => {
         automationReadiness: session.automationReadiness,
         readinessPending: true,
         aiModelTier: session.aiModelTier,
-        generationTiming: {
-          discoveryMs,
-          discoveryCacheHit: discoveryResult.cacheHit,
-          discoveryCacheBypassed: discoveryResult.bypassed,
-          aiGenerationMs,
-          totalMs,
-        },
+        generationTiming: { discoveryMs, discoveryCacheHit: discoveryResult.cacheHit, discoveryCacheBypassed: discoveryResult.bypassed, aiGenerationMs, totalMs },
       });
     }
 
     if (session.state === "AWAITING_APPROVAL") {
-      return res.status(409).json({
-        reply: "Test cases are awaiting human review. Readiness is validated independently before execution.",
-        testCases: session.testCases,
-        automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []),
-      });
+      return res.status(409).json({ reply: "Test cases are awaiting human review. Readiness is validated independently before execution.", testCases: session.testCases, automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []) });
     }
 
-    return res.json({
-      reply: "This run is complete. Start a new story to create another run.",
-      summary: session.lastResults?.summary || null,
-      failureAnalyses: session.failureAnalyses || [],
-      reportUrl: session.reportHtml ? `/api/reports/${encodeURIComponent(sessionId)}` : null,
-    });
+    return res.json({ reply: "This run is complete. Start a new story to create another run.", summary: session.lastResults?.summary || null, failureAnalyses: session.failureAnalyses || [], reportUrl: session.reportHtml ? `/api/reports/${encodeURIComponent(sessionId)}` : null });
   } catch (err) {
     console.error(`[api/chat] failed during ${stage}:`, err);
     return res.status(500).json({ reply: `Generation failed during ${stage}: ${err.message}` });
