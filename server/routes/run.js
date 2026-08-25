@@ -4,10 +4,10 @@ const router = express.Router();
 const { getSession } = require("../data/sessionStore");
 const qwen = require("../services/qwenClient");
 const { validateGroundedScript } = require("../services/scriptValidator");
-const { generateDeterministicAutomation } = require("../services/deterministicAutomationGenerator");
 const { executeSingleGeneratedSpec } = require("../services/singleSpecRunner");
 const { buildAnalyticsReport } = require("../services/reportGenerator");
 const { assessTestCases, readinessSummary, READY } = require("../services/testCaseFeasibility");
+const { generateDeterministicAutomation } = require("../services/deterministicAutomationGenerator");
 
 const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
 const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
@@ -50,13 +50,13 @@ function isPreExecutionAutomationFailure(test) {
   const duration = Number(test?.durationMs);
   const message = String(test?.err?.message || "");
   if (Number.isFinite(duration) && duration <= 50) return true;
-  return /\.type\(\).*empty|empty string|cannot type|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution|runtime login credentials are not configured/i.test(message);
+  return /\.type\(\).*empty|empty string|cannot type|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution/i.test(message);
 }
 
 function automationFailureAnalysis(tc, test) {
   const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
-  const actual = test.err?.message || "The deterministic runtime failed before meaningful application validation completed.";
-  return { testCase: tc.id, summary: "The test case compiled successfully, but the runtime failed before meaningful application validation completed.", classification: "AUTOMATION_DEFECT", expected, actual, probableCause: "A runtime/environment defect occurred after deterministic test compilation.", severity: "medium", confidence: 0.99 };
+  const actual = test.err?.message || "The generated automation failed before meaningful application validation completed.";
+  return { testCase: tc.id, summary: "The test case itself was Automation Ready, but the generated runtime implementation failed before meaningful application validation completed.", classification: "AUTOMATION_DEFECT", expected, actual, probableCause: "A runtime implementation defect escaped pre-execution validation. Test-case readiness and generated-runtime validity are intentionally tracked as separate gates.", severity: "medium", confidence: 0.99 };
 }
 
 function analysisContainsOutOfScopeContent(analysis) {
@@ -135,7 +135,16 @@ router.post("/api/chat", async (req, res, next) => {
     console.log(`[automation-contract] Building deterministic runtime from ${approvedTestCases.length} compiled test plan(s).`);
 
     const generated = generateDeterministicAutomation(approvedTestCases);
-    const validation = validateGroundedScript(generated.script, { approvedTestCases, pageDiscoveries: session.pageDiscoveries, hasCredentials: executionContext.hasCredentials, loginSelectors: executionContext.loginSelectors });
+    const validation = validateGroundedScript(generated.script, {
+      approvedTestCases,
+      pageDiscoveries: session.pageDiscoveries,
+      hasCredentials: executionContext.hasCredentials,
+      loginSelectors: executionContext.loginSelectors,
+      // The deterministic hidden/absent assertion intentionally queries the document
+      // body before looking for the grounded target. "body" is framework-owned and is
+      // not an application selector discovered from the target page.
+      frameworkOwnedSelectors: ["body"],
+    });
     if (!validation.valid) {
       console.error(`[automation-contract] Deterministic generator produced an invalid script: ${validation.errors.join(" | ")}`);
       return res.status(500).json({ reply: "The deterministic automation compiler produced an invalid runtime script. Execution was not started.", validationErrors: validation.errors, automationReadiness: session.automationReadiness });
