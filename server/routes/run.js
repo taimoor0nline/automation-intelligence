@@ -11,9 +11,74 @@ const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
 const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
 const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional", "custom"]);
 const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
+const LOGIN_SCOPE_FORBIDDEN_ANALYSIS = /\b(feedback|website|url|age|rating|consent|product|category|checkout|payment|cart|profile)\b/i;
 
 function cleanString(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
+}
+
+function isLoginOnlyStory(story) {
+  const text = String(story || "").toLowerCase();
+  const login = /\b(login|log in|sign in|signin|authentication|authenticate)\b/.test(text);
+  const other = /\b(feedback|profile|dashboard|registration|register|checkout|payment|order|search|cart)\b/.test(text);
+  return login && !other;
+}
+
+function isPreExecutionAutomationFailure(test) {
+  const duration = Number(test?.durationMs);
+  const message = String(test?.err?.message || "");
+  if (Number.isFinite(duration) && duration <= 50) return true;
+
+  return /\.type\(\).*empty|empty string|cannot type|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution/i.test(message);
+}
+
+function automationFailureAnalysis(tc, test) {
+  const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
+  const actual = test.err?.message || "The generated automation failed before meaningful application validation completed.";
+
+  return {
+    testCase: tc.id,
+    summary: "The test could not meaningfully validate the application because the generated automation failed before or at the start of execution.",
+    classification: "AUTOMATION_DEFECT",
+    expected,
+    actual,
+    probableCause: "The generated browser automation contains an invalid or unsupported command/input pattern and should be corrected before judging application behavior.",
+    severity: "medium",
+    confidence: 0.99,
+  };
+}
+
+function analysisContainsOutOfScopeContent(analysis) {
+  return [analysis?.summary, analysis?.expected, analysis?.actual, analysis?.probableCause]
+    .filter(Boolean)
+    .some((value) => LOGIN_SCOPE_FORBIDDEN_ANALYSIS.test(String(value)));
+}
+
+function constrainLoginAnalysis(analysis, tc, test) {
+  if (!analysisContainsOutOfScopeContent(analysis)) {
+    return { testCase: tc.id, ...analysis };
+  }
+
+  const actual = test.err?.message || "The login negative test did not produce the expected authentication rejection behavior.";
+  const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
+  const classification = analysis?.classification === "APPLICATION_DEFECT"
+    ? "APPLICATION_DEFECT"
+    : analysis?.classification || "UNKNOWN";
+
+  return {
+    testCase: tc.id,
+    summary: classification === "APPLICATION_DEFECT"
+      ? "The login negative test reached the application but did not observe the expected login rejection behavior."
+      : "The login negative test failed, and the analysis has been constrained to the authentication scope defined by the business story.",
+    classification,
+    expected,
+    actual,
+    probableCause: classification === "APPLICATION_DEFECT"
+      ? "The login validation or authentication rejection behavior may not match the expected result. Review the login-page behavior and captured evidence."
+      : "The failure requires review within the login/authentication flow; unrelated discovered features are intentionally excluded from this analysis.",
+    severity: analysis?.severity || "medium",
+    confidence: Math.min(Number(analysis?.confidence) || 0.5, 0.85),
+  };
 }
 
 function normalizeReviewedTestCases(input, fallbackCases) {
@@ -143,8 +208,6 @@ router.post("/api/chat", async (req, res, next) => {
 
     console.log(`[single-spec] Generating one automation file for ${approvedTestCases.length} approved case(s)`);
 
-    // One Qwen call generates one file containing all approved it() blocks.
-    // This avoids five model round-trips and five separate browser launches.
     const generated = await qwen.generateAutomationCode({
       approvedTestCases,
       pageDiscoveries: session.pageDiscoveries,
@@ -180,6 +243,7 @@ router.post("/api/chat", async (req, res, next) => {
 
     session.artifacts = execResult.artifacts || null;
     const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
+    const loginOnly = isLoginOnlyStory(session.story);
 
     const analyses = await Promise.all(
       summary.tests.filter((test) => test.fail).map(async (test) => {
@@ -190,6 +254,13 @@ router.post("/api/chat", async (req, res, next) => {
           expectedResults: [],
         };
 
+        // A 0ms/near-zero failure (or an explicit command-generation error) did
+        // not meaningfully exercise the application. Never let the model label
+        // that as an application defect.
+        if (isPreExecutionAutomationFailure(test)) {
+          return automationFailureAnalysis(tc, test);
+        }
+
         const analysis = await qwen.analyzeFailure({
           story: session.story,
           testCase: tc,
@@ -197,6 +268,10 @@ router.post("/api/chat", async (req, res, next) => {
           actual: test.err?.message || "Automation assertion failed",
         });
 
+        // The story owns scope. If a login-only analysis hallucinates a field
+        // from another discovered page, discard the unrelated explanation while
+        // preserving the useful classification when execution actually happened.
+        if (loginOnly) return constrainLoginAnalysis(analysis, tc, test);
         return { testCase: tc.id, ...analysis };
       })
     );
@@ -214,8 +289,6 @@ router.post("/api/chat", async (req, res, next) => {
     });
     session.state = "DONE";
 
-    // Keep the response small: the generated source stays in memory/on disk and
-    // is not sent back to the browser unless a dedicated source endpoint is added.
     return res.json({
       reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`,
       summary,
