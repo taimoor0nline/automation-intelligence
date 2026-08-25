@@ -9,6 +9,27 @@ function normalizeGeneratedScript(script) {
     .replace(/\.should\(\s*(['"])have\.text\1\s*,/g, ".should('contain.text',")
     .replace(/\.and\(\s*(['"])have\.text\1\s*,/g, ".and('contain.text',");
 
+  // Cypress environment values are read through Cypress.env(...), not cy.env(...).
+  // Some generated specs wrapped credentials in:
+  //   cy.env(['TEST_USERNAME','TEST_PASSWORD']).then(({ ... }) => { ... })
+  // which fails before meaningful browser interaction because cy.env is not a
+  // Cypress chainable command. Keep the existing callback shape but convert the
+  // invalid wrapper to a normal cy.then(), then resolve the injected credentials
+  // directly at the .type() call sites.
+  normalized = normalized.replace(
+    /cy\.env\(\s*\[\s*(['"])TEST_USERNAME\1\s*,\s*(['"])TEST_PASSWORD\2\s*\]\s*(?:,\s*\{[^)]*\})?\s*\)\.then\(\s*\(\s*\{\s*TEST_USERNAME\s*,\s*TEST_PASSWORD\s*\}\s*\)\s*=>\s*\{/g,
+    "cy.then(() => {"
+  );
+
+  // The model can also accidentally emit the environment variable *names* as
+  // quoted test data. Resolve those names to the actual credentials injected by
+  // the runner instead of literally typing TEST_USERNAME / TEST_PASSWORD.
+  normalized = normalized
+    .replace(/\.type\(\s*(['"])TEST_USERNAME\1\s*(,\s*\{[^)]*\})?\s*\)/g,
+      (_match, _quote, options = "") => `.type(Cypress.env('TEST_USERNAME')${options || ""})`)
+    .replace(/\.type\(\s*(['"])TEST_PASSWORD\1\s*(,\s*\{[^)]*\})?\s*\)/g,
+      (_match, _quote, options = "") => `.type(Cypress.env('TEST_PASSWORD')${options || ""})`);
+
   // Cypress rejects .type('') / .type(\"\") before browser interaction starts.
   // For required-field negative tests, an empty value means the field should
   // remain empty. .clear() is valid whether a previous value exists or not.
@@ -26,10 +47,8 @@ function normalizeGeneratedScript(script) {
 
   // A malformed URL test value such as abc must be typed as data, not executed
   // as a JavaScript identifier. Quote simple bare-word .type() arguments while
-  // leaving known expressions (Cypress.env, variables with property access,
-  // function calls, template/string literals) untouched. The generated demo
-  // specs use literal test data for these negative cases, so this safely turns
-  // .type(abc) into .type('abc') before Cypress evaluates the test body.
+  // leaving explicit environment expressions, function calls, property access,
+  // template/string literals and other expressions untouched.
   normalized = normalized.replace(
     /\.type\(\s*([A-Za-z_$][\w$-]*)\s*(,\s*\{[^)]*\})?\s*\)/g,
     (_match, value, options = "") => `.type('${value}'${options || ""})`
