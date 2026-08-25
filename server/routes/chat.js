@@ -116,6 +116,7 @@ router.post("/api/chat", async (req, res) => {
       stage = "prepare human review";
       session.testCases = generated.testCases.map((tc) => ({ ...tc, source: "ai", automationReadiness: null }));
       session.automationReadiness = pendingReadinessSummary(session.testCases);
+      session.readinessValidated = false;
       session.state = "AWAITING_APPROVAL";
 
       const totalMs = Date.now() - requestStartedAt;
@@ -135,7 +136,7 @@ router.post("/api/chat", async (req, res) => {
     }
 
     if (session.state === "AWAITING_APPROVAL") {
-      return res.status(409).json({ reply: "Test cases are awaiting human review. Readiness is validated independently before execution.", testCases: session.testCases, automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []) });
+      return res.status(409).json({ reply: session.readinessValidated ? "Test cases are awaiting human review." : "Test cases are awaiting human review while automation readiness is still being checked.", testCases: session.testCases, automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []), readinessPending: !session.readinessValidated });
     }
 
     return res.json({ reply: "This run is complete. Start a new story to create another run.", summary: session.lastResults?.summary || null, failureAnalyses: session.failureAnalyses || [], reportUrl: session.reportHtml ? `/api/reports/${encodeURIComponent(sessionId)}` : null });
