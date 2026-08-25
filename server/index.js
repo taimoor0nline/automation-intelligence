@@ -95,12 +95,14 @@ const READINESS_CSS = `
 .readiness-code{display:block;margin-top:4px;font-weight:800;font-size:9.5px;letter-spacing:.25px}.readiness-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.readiness-actions button{font-size:10px;padding:5px 7px}
 .tag.ready{background:#dcfce7;color:#15803d;font-weight:800}.tag.blocked{background:#ffedd5;color:#c2410c;font-weight:800}.tag.preflight{background:#dbeafe;color:#1d4ed8;font-weight:800}
 .editor-readiness{margin:0 0 14px;padding:12px;border-radius:10px;background:#f8fafc;border:1px solid var(--border);font-size:11px;line-height:1.5}.editor-readiness strong{font-size:11.5px}.editor-readiness .history{margin-top:7px;padding-top:7px;border-top:1px solid var(--border);color:#64748b}
+.editor-ai-generator{margin:0 0 14px;padding:13px;border-radius:10px;background:#f8fbff;border:1px solid #bfdbfe}.editor-ai-generator .title{font-size:11.5px;font-weight:800;color:#1d4ed8}.editor-ai-generator .note{font-size:10.5px;color:#64748b;line-height:1.45;margin-top:4px}.editor-ai-generator textarea{width:100%;min-height:70px;margin-top:9px;border:1px solid var(--border);border-radius:8px;padding:9px;resize:vertical}.editor-ai-generator .actions{display:flex;align-items:center;gap:8px;margin-top:8px}.editor-ai-generator .status{border:0;padding:0;font-size:10.5px}.editor-ai-generator .status.ok{color:#047857}.editor-ai-generator .status.bad{color:#b91c1c}
 `;
 
 const READINESS_JS = `
 (function(){
   let readinessRefreshInFlight=false;
   let readinessTimer=null;
+  let pendingGeneratedCase=null;
   const credentialsPayload=()=>({username:$('username').value,password:$('password').value});
   const readinessLabel=(status)=>status==='READY'?'Automation Ready':status==='NEEDS_PREFLIGHT'?'Checking readiness':String(status||'NEEDS_PREFLIGHT').replaceAll('_',' ');
   const readinessClass=(status)=>status==='READY'?'ready':status==='NEEDS_PREFLIGHT'?'preflight':'blocked';
@@ -115,10 +117,8 @@ const READINESS_JS = `
     }catch(err){console.warn('[readiness] refresh failed',err);}finally{readinessRefreshInFlight=false;}
   }
   window.refreshTestReadiness=refreshReadiness;
-
   function scheduleReadiness(){clearTimeout(readinessTimer);readinessTimer=setTimeout(refreshReadiness,180);}
 
-  const originalRenderCases=renderCases;
   renderCases=function(){
     $('caseCount').textContent=testCases.length;
     $('addCaseBtn').disabled=!sessionId;
@@ -168,35 +168,79 @@ const READINESS_JS = `
     const box=document.createElement('div');box.id='editorReadiness';box.className='editor-readiness';box.innerHTML='<strong>Automation readiness</strong><div>Save or validate this test case to see its deterministic readiness result.</div>';
     const head=modalCard.querySelector('.section-head');if(head)head.insertAdjacentElement('afterend',box);
   }
-  function showEditorReadiness(index){
+  if(modalCard&&!$('editorAiGenerator')){
+    const aiBox=document.createElement('div');aiBox.id='editorAiGenerator';aiBox.className='editor-ai-generator';aiBox.style.display='none';
+    aiBox.innerHTML='<div class="title">Generate this test case with AI</div><div class="note">Describe one specific scenario. AI will propose one grounded test case inside this editor; nothing is added until you review it and click Save Test Case.</div><textarea id="editorAiPrompt" placeholder="Example: Test login with an empty password and verify the required-field validation."></textarea><div class="actions"><button id="editorAiGenerateBtn" class="btn secondary" type="button">Generate</button><span id="editorAiStatus" class="status"></span></div>';
+    const readiness=$('editorReadiness');if(readiness)readiness.insertAdjacentElement('afterend',aiBox);
+  }
+
+  function showEditorReadiness(index,candidate=null){
     const box=$('editorReadiness');if(!box)return;
-    const tc=index>=0?testCases[index]:null,r=tc?.automationReadiness,h=tc?.repairHistory||[];
-    if(!r){box.innerHTML='<strong>Automation readiness</strong><div>This new or edited test will be revalidated when it is saved.</div>';return;}
+    const tc=candidate||(index>=0?testCases[index]:null),r=tc?.automationReadiness,h=tc?.repairHistory||[];
+    if(!r){box.innerHTML='<strong>Automation readiness</strong><div>This new or edited test will be revalidated before execution.</div>';return;}
     const history=h.length?'<div class="history"><b>Repair history</b><br>'+h.map(x=>'Attempt '+escapeHtml(x.attempt)+': '+escapeHtml(x.reasonCode||x.originalStatus)+' → '+escapeHtml(x.result||'review')).join('<br>')+'</div>':'';
     box.innerHTML='<strong>'+escapeHtml(readinessLabel(r.status))+'</strong><div><b>Reason code:</b> '+escapeHtml(r.reasonCode||'—')+'</div><div><b>Reason:</b> '+escapeHtml(r.reason||'—')+'</div><div><b>Resolution:</b> '+escapeHtml(r.resolutionType||'NONE')+'</div><div><b>Validation:</b> Deterministic automation-system check</div>'+history;
   }
+
+  function fillEditorFromCandidate(tc){
+    $('editId').value=tc.id||$('editId').value;
+    $('editTitle').value=tc.title||'';
+    $('editType').value=tc.type||'functional';
+    $('editPriority').value=tc.priority||'medium';
+    $('editPreconditions').value=(tc.preconditions||[]).join('\n');
+    $('editSteps').value=(tc.steps||[]).map(stepToLine).join('\n');
+    $('editExpected').value=(tc.expectedResults||[]).join('\n');
+    updateTypeHelp();
+    showEditorReadiness(-1,tc);
+  }
+
   const originalOpenEditor=window.openEditor;
-  window.openEditor=function(index){originalOpenEditor(index);showEditorReadiness(index);};
+  window.openEditor=function(index){
+    originalOpenEditor(index);
+    pendingGeneratedCase=null;
+    showEditorReadiness(index);
+    const generator=$('editorAiGenerator');
+    if(generator){
+      generator.style.display=index<0?'block':'none';
+      if(index<0){$('editorAiPrompt').value='';$('editorAiStatus').textContent='';$('editorAiGenerateBtn').textContent='Generate';}
+    }
+  };
   openEditor=window.openEditor;
 
-  $('saveEditorBtn').addEventListener('click',()=>setTimeout(scheduleReadiness,40));
+  $('editorAiGenerateBtn')?.addEventListener('click',async()=>{
+    const request=$('editorAiPrompt').value.trim();
+    if(!request){$('editorAiStatus').className='status bad';$('editorAiStatus').textContent='Describe the test case first.';return;}
+    const btn=$('editorAiGenerateBtn');btn.disabled=true;btn.textContent=pendingGeneratedCase?'Regenerating…':'Generating…';$('editorAiStatus').className='status';$('editorAiStatus').textContent='Grounding against the current story and discovered application…';
+    try{
+      const requestedId=$('editId').value||null;
+      const r=await fetch('/api/test-cases/generate-one',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,requestText:request,testCases,credentials:credentialsPayload(),requestedId})});
+      const data=await r.json();
+      if(!r.ok)throw new Error(data.reply||'The requested test case could not be generated.');
+      pendingGeneratedCase=data.testCase;
+      fillEditorFromCandidate(data.testCase);
+      $('editorAiStatus').className='status ok';$('editorAiStatus').textContent='Candidate generated. Review or modify it, then click Save Test Case.';
+      btn.textContent='Regenerate';
+    }catch(err){$('editorAiStatus').className='status bad';$('editorAiStatus').textContent=err.message;btn.textContent=pendingGeneratedCase?'Regenerate':'Generate';}
+    finally{btn.disabled=false;}
+  });
 
-  const actions=$('addCaseBtn')?.parentElement;
-  if(actions&&!$('generateOneCaseBtn')){
-    const btn=document.createElement('button');btn.id='generateOneCaseBtn';btn.className='btn ghost';btn.type='button';btn.textContent='✨ Generate Test Case';actions.insertBefore(btn,$('addCaseBtn'));
-    btn.addEventListener('click',async()=>{
-      const request=window.prompt('Describe the specific test case you want to generate.');
-      if(!request||!request.trim())return;
-      clearError();btn.disabled=true;btn.textContent='Generating…';
-      try{
-        const r=await fetch('/api/test-cases/generate-one',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,requestText:request.trim(),testCases,credentials:credentialsPayload()})});
-        const data=await r.json();
-        if(!r.ok)throw new Error(data.reply||'The requested test case could not be generated.');
-        const candidate=data.testCase;
-        if(candidate&&window.confirm('A grounded candidate test case was generated. Add it to the current review set?')){testCases.unshift(candidate);renderCases();openEditor(0);}
-      }catch(err){showError(err.message);}finally{btn.disabled=false;btn.textContent='✨ Generate Test Case';}
-    });
-  }
+  $('saveEditorBtn').addEventListener('click',()=>{
+    const generated=pendingGeneratedCase;
+    const savedId=$('editId').value;
+    setTimeout(()=>{
+      if(generated){
+        const index=testCases.findIndex(tc=>tc.id===savedId);
+        if(index>=0){
+          testCases[index].source='ai-on-demand';
+          testCases[index].createdBy='human-request';
+          testCases[index].repairHistory=generated.repairHistory||[];
+          testCases[index].automationReadiness=null;
+        }
+        pendingGeneratedCase=null;
+      }
+      scheduleReadiness();
+    },40);
+  });
 })();
 `;
 
