@@ -4,6 +4,7 @@ const router = express.Router();
 const { getSession } = require("../data/sessionStore");
 const qwen = require("../services/qwenClient");
 const { validateGroundedScript } = require("../services/scriptValidator");
+const { generateDeterministicAutomation } = require("../services/deterministicAutomationGenerator");
 const { executeSingleGeneratedSpec } = require("../services/singleSpecRunner");
 const { buildAnalyticsReport } = require("../services/reportGenerator");
 const { assessTestCases, readinessSummary, READY } = require("../services/testCaseFeasibility");
@@ -13,7 +14,6 @@ const TEST_ID_GLOBAL_REGEX = /TC(?:\d{3}|-H\d{3})/g;
 const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional", "custom"]);
 const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
 const LOGIN_SCOPE_FORBIDDEN_ANALYSIS = /\b(feedback|website|url|age|rating|consent|product|category|checkout|payment|cart|profile)\b/i;
-const MAX_AUTOMATION_GENERATION_ATTEMPTS = 2;
 
 function cleanString(value, max = 1000) { return String(value ?? "").trim().slice(0, max); }
 function isLoginOnlyStory(story) {
@@ -50,13 +50,13 @@ function isPreExecutionAutomationFailure(test) {
   const duration = Number(test?.durationMs);
   const message = String(test?.err?.message || "");
   if (Number.isFinite(duration) && duration <= 50) return true;
-  return /\.type\(\).*empty|empty string|cannot type|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution/i.test(message);
+  return /\.type\(\).*empty|empty string|cannot type|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution|runtime login credentials are not configured/i.test(message);
 }
 
 function automationFailureAnalysis(tc, test) {
   const expected = Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "";
-  const actual = test.err?.message || "The generated automation failed before meaningful application validation completed.";
-  return { testCase: tc.id, summary: "The test case itself was Automation Ready, but the generated runtime implementation failed before meaningful application validation completed.", classification: "AUTOMATION_DEFECT", expected, actual, probableCause: "A runtime implementation defect escaped pre-execution validation. Test-case readiness and generated-runtime validity are intentionally tracked as separate gates.", severity: "medium", confidence: 0.99 };
+  const actual = test.err?.message || "The deterministic runtime failed before meaningful application validation completed.";
+  return { testCase: tc.id, summary: "The test case compiled successfully, but the runtime failed before meaningful application validation completed.", classification: "AUTOMATION_DEFECT", expected, actual, probableCause: "A runtime/environment defect occurred after deterministic test compilation.", severity: "medium", confidence: 0.99 };
 }
 
 function analysisContainsOutOfScopeContent(analysis) {
@@ -122,31 +122,27 @@ router.post("/api/chat", async (req, res, next) => {
     const approvedTestCases = session.testCases.filter((tc) => approved.includes(tc.id));
     const blocked = approvedTestCases.filter((tc) => tc.automationReadiness?.status !== READY);
     if (blocked.length) {
-      console.warn(`[readiness] Blocked ${blocked.length} unsupported approved case(s) before AI automation generation.`);
-      return res.status(422).json({ reply: "One or more selected test cases are not Automation Ready. They were blocked before automation generation and were not sent to runtime execution.", unsupportedTestCases: blocked.map((tc) => ({ id: tc.id, title: tc.title, automationReadiness: tc.automationReadiness })), automationReadiness: session.automationReadiness, testCases: session.testCases });
+      console.warn(`[readiness] Blocked ${blocked.length} approved case(s) that did not compile into the deterministic automation contract.`);
+      return res.status(422).json({ reply: "One or more selected test cases are not Automation Ready. Every approved case must compile into the deterministic automation contract before execution.", unsupportedTestCases: blocked.map((tc) => ({ id: tc.id, title: tc.title, automationReadiness: tc.automationReadiness })), automationReadiness: session.automationReadiness, testCases: session.testCases });
     }
 
     const base = new URL(session.targetUrl);
     const loginRuntime = resolveLoginRuntime(session.pageDiscoveries);
     const executionContext = { baseUrl: `${base.protocol}//${base.host}`, hasCredentials, credentials: session.credentials, loginPath: loginRuntime.path, loginSelectors: loginRuntime.selectors };
-    const modelTier = session.aiModelTier || "fast";
-    console.log(`[readiness] ${approvedTestCases.length}/${approvedTestCases.length} approved case(s) are Automation Ready.`);
+    const modelTier = session.aiModelTier || "strong";
+    console.log(`[readiness] ${approvedTestCases.length}/${approvedTestCases.length} approved case(s) compiled and are Automation Ready.`);
     console.log(`[runtime-preflight] Grounded login path: ${executionContext.loginPath}`);
-    console.log(`[single-spec] Generating one grounded automation file for ${approvedTestCases.length} approved case(s) with ${modelTier} AI profile`);
+    console.log(`[automation-contract] Building deterministic runtime from ${approvedTestCases.length} compiled test plan(s).`);
 
-    let generated = null;
-    let validation = { valid: false, errors: ["Automation has not been generated yet."] };
-    let validationFeedback = [];
-    for (let attempt = 1; attempt <= MAX_AUTOMATION_GENERATION_ATTEMPTS; attempt += 1) {
-      generated = await qwen.generateAutomationCode({ approvedTestCases, pageDiscoveries: session.pageDiscoveries, fileName: "ai-generated.cy.js", executionContext, validationFeedback, modelTier });
-      validation = validateGroundedScript(generated.script, { approvedTestCases, pageDiscoveries: session.pageDiscoveries, hasCredentials: executionContext.hasCredentials, loginSelectors: executionContext.loginSelectors });
-      if (validation.valid) { console.log(`[runtime-preflight] Generated automation accepted on attempt ${attempt}.`); break; }
-      validationFeedback = validation.errors;
-      console.warn(`[runtime-preflight] Generation attempt ${attempt} rejected before execution: ${validation.errors.join(" | ")}`);
+    const generated = generateDeterministicAutomation(approvedTestCases);
+    const validation = validateGroundedScript(generated.script, { approvedTestCases, pageDiscoveries: session.pageDiscoveries, hasCredentials: executionContext.hasCredentials, loginSelectors: executionContext.loginSelectors });
+    if (!validation.valid) {
+      console.error(`[automation-contract] Deterministic generator produced an invalid script: ${validation.errors.join(" | ")}`);
+      return res.status(500).json({ reply: "The deterministic automation compiler produced an invalid runtime script. Execution was not started.", validationErrors: validation.errors, automationReadiness: session.automationReadiness });
     }
-    if (!generated || !validation.valid) return res.status(422).json({ reply: "Automation generation was rejected by deterministic runtime validation after automatic correction. No browser test was started, so this is not recorded as an execution defect.", validationErrors: validation.errors, automationReadiness: session.automationReadiness });
+    console.log("[automation-contract] Deterministic runtime script validated successfully; no AI code-generation step was required.");
 
-    session.generatedScript = [{ fileName: "ai-generated.cy.js", framework: generated.framework, language: generated.language, script: generated.script, testCaseIds: approved }];
+    session.generatedScript = [{ fileName: generated.fileName, framework: generated.framework, language: generated.language, generationMode: generated.generationMode, script: generated.script, testCaseIds: approved }];
     session.approvedIds = approved;
     session.state = "RUNNING";
     const execResult = await executeSingleGeneratedSpec(generated, executionContext);
@@ -168,7 +164,7 @@ router.post("/api/chat", async (req, res, next) => {
     session.lastResults = { execResult, summary };
     session.reportHtml = buildAnalyticsReport({ sessionId, story: session.story, targetUrl: session.targetUrl, environment: session.environment, summary, analyses, model: modelTier });
     session.state = "DONE";
-    return res.json({ reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`, summary, failureAnalyses: analyses, automationReadiness: session.automationReadiness, runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath }, aiModelTier: modelTier, reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`, generatedFile: "ai-generated.cy.js" });
+    return res.json({ reply: `Test run complete: ${summary.total} tests, ${summary.passed} passed, ${summary.failed} failed.`, summary, failureAnalyses: analyses, automationReadiness: session.automationReadiness, runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath, generationMode: "deterministic-dsl" }, aiModelTier: modelTier, reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`, generatedFile: generated.fileName });
   } catch (err) {
     console.error("[single-spec]", err);
     session.state = session.state === "RUNNING" ? "AWAITING_APPROVAL" : session.state;
