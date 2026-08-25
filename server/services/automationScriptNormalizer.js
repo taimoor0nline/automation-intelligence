@@ -16,12 +16,26 @@ function normalizeGeneratedScript(script) {
   );
 
   // Another generated variant creates a beforeEach hook containing bare,
-  // undefined TEST_USERNAME / TEST_PASSWORD identifiers. Resolve those values
-  // from Cypress.env so the hook cannot abort the entire suite before TC001.
+  // undefined TEST_USERNAME / TEST_PASSWORD identifiers. Resolve object-shorthand
+  // usage from Cypress.env so the hook cannot abort the entire suite.
   normalized = normalized.replace(
     /cy\.wrap\(\s*\{\s*TEST_USERNAME\s*,\s*TEST_PASSWORD\s*\}\s*\)/g,
     "cy.wrap({ TEST_USERNAME: Cypress.env('TEST_USERNAME'), TEST_PASSWORD: Cypress.env('TEST_PASSWORD') })"
   );
+
+  // A further variant assigns bare credential identifiers to `this` inside a
+  // beforeEach hook and later types `this.TEST_USERNAME` / `this.TEST_PASSWORD`.
+  // The bare identifiers do not exist in the generated spec, so remove those
+  // assignments and resolve every `this.*` credential read directly from
+  // Cypress.env. This also avoids relying on Mocha `this` semantics in arrow
+  // functions.
+  normalized = normalized
+    .replace(/this\.TEST_USERNAME\s*=\s*TEST_USERNAME\s*;?/g, "void Cypress.env('TEST_USERNAME');")
+    .replace(/this\.TEST_PASSWORD\s*=\s*TEST_PASSWORD\s*;?/g, "void Cypress.env('TEST_PASSWORD');")
+    .replace(/\.type\(\s*this\.TEST_USERNAME\s*(,\s*\{[^)]*\})?\s*\)/g,
+      (_match, options = "") => `.type(Cypress.env('TEST_USERNAME')${options || ""})`)
+    .replace(/\.type\(\s*this\.TEST_PASSWORD\s*(,\s*\{[^)]*\})?\s*\)/g,
+      (_match, options = "") => `.type(Cypress.env('TEST_PASSWORD')${options || ""})`);
 
   // Resolve quoted credential placeholders everywhere they are supplied to
   // .type(). Keep options such as { log: false } intact.
