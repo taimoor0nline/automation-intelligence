@@ -20,6 +20,7 @@ function createSession() {
     approvedIds: [],
     generatedScript: null,
     lastResults: null,
+    runHistory: [],
     failureAnalyses: [],
     artifacts: null,
     reportHtml: null,
