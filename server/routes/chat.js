@@ -5,7 +5,7 @@ const router = express.Router();
 const { getSession, resetSession } = require("../data/sessionStore");
 const { discoverPages } = require("../services/pageDiscovery");
 const qwen = require("../services/qwenClient");
-const { assessTestCases, readinessSummary } = require("../services/testCaseFeasibility");
+const { readinessSummary } = require("../services/testCaseFeasibility");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
@@ -33,11 +33,22 @@ function resolveDiscoveryUrls(targetUrl, additionalPaths = []) {
   return [...new Set(urls)];
 }
 
+function pendingReadinessSummary(testCases = []) {
+  return {
+    total: testCases.length,
+    ready: 0,
+    checking: testCases.length,
+    manual: 0,
+    insufficientEvidence: 0,
+    invalid: 0,
+    userInputRequired: 0,
+    aiRepairable: 0,
+    frameworkChangeRequired: 0,
+  };
+}
+
 function formatTestCaseList(testCases) {
-  return testCases.map((tc) => {
-    const readiness = tc.automationReadiness?.status || "UNKNOWN";
-    return `• ${tc.id} [${tc.type}/${tc.priority}] [${readiness}] — ${tc.title}`;
-  }).join("\n");
+  return testCases.map((tc) => `• ${tc.id} [${tc.type}/${tc.priority}] [CHECKING] — ${tc.title}`).join("\n");
 }
 
 router.post("/api/chat", async (req, res) => {
@@ -78,26 +89,30 @@ router.post("/api/chat", async (req, res) => {
         environment: FIXED_ENVIRONMENT,
       });
 
-      const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
-      session.testCases = assessTestCases(
-        generated.testCases.map((tc) => ({ ...tc, source: "ai" })),
-        { pageDiscoveries: session.pageDiscoveries, hasCredentials }
-      );
-      session.automationReadiness = readinessSummary(session.testCases);
+      // Return AI-generated cases to the reviewer immediately. Readiness is a
+      // separate deterministic phase started by the browser after rendering,
+      // so the user can begin reviewing while capability/evidence checks run.
+      session.testCases = generated.testCases.map((tc) => ({
+        ...tc,
+        source: "ai",
+        automationReadiness: null,
+      }));
+      session.automationReadiness = pendingReadinessSummary(session.testCases);
       session.state = "AWAITING_APPROVAL";
 
       return res.json({
-        reply: `AI generated ${session.testCases.length} story-driven test cases from ${session.pageDiscoveries.length} discovered page(s). Each case was checked for Cypress automation readiness before human review.\n\n${formatTestCaseList(session.testCases)}`,
+        reply: `AI generated ${session.testCases.length} story-driven test cases from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately in the background.\n\n${formatTestCaseList(session.testCases)}`,
         feature: generated.feature || null,
         testCases: session.testCases,
         pageDiscoveries: session.pageDiscoveries,
         automationReadiness: session.automationReadiness,
+        readinessPending: true,
       });
     }
 
     if (session.state === "AWAITING_APPROVAL") {
       return res.status(409).json({
-        reply: "Test cases are awaiting human review. Select only Automation Ready cases and use Run Approved Tests.",
+        reply: "Test cases are awaiting human review. Readiness is validated independently before execution.",
         testCases: session.testCases,
         automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []),
       });
