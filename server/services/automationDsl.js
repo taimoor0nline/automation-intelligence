@@ -12,6 +12,10 @@ const SUPPORTED_OPERATIONS = new Set([
   "ASSERT_TEXT_NOT_EMPTY",
   "ASSERT_URL_INCLUDES",
   "ASSERT_URL_NOT_INCLUDES",
+  "ASSERT_URL_CONTAINS",
+  "ASSERT_PATH_EQUALS",
+  "ASSERT_VALUE_LENGTH_EQUALS",
+  "ASSERT_VALUE_LENGTH_AT_MOST",
 ]);
 
 function selectorFor(item) {
@@ -36,25 +40,21 @@ function buildDiscoveryIndex(pageDiscoveries = []) {
   const selectors = new Map();
   const selectorPaths = new Map();
   const paths = new Set();
-
   for (const page of pageDiscoveries || []) {
     const pagePath = pathForPage(page);
     paths.add(pagePath);
-
     const register = (item) => {
       const selector = selectorFor(item);
       if (!selector) return;
       selectors.set(selector, item);
       selectorPaths.set(selector, pagePath);
     };
-
     for (const item of page?.elements || []) {
       register(item);
       if (item?.errorElement) register(item.errorElement);
     }
     for (const message of page?.messages || []) register(message);
   }
-
   return { selectors, selectorPaths, paths };
 }
 
@@ -62,13 +62,10 @@ function findSelector(text) {
   const source = String(text || "");
   const literal = source.match(/\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\[name=(?:"[^"]+"|'[^']+')\]/)?.[0];
   if (literal) return literal.replace(/\[data-testid='([^']+)'\]/, '[data-testid="$1"]').replace(/\[name='([^']+)'\]/, '[name="$1"]');
-
   const testId = source.match(/(?:data-testid|data testid|test id)\s*(?:=|is|of|named|called|:)?\s*["']([^"']+)["']/i)?.[1];
   if (testId) return `[data-testid="${testId}"]`;
-
   const name = source.match(/(?:name attribute|name)\s*(?:=|is|of|named|called|:)?\s*["']([^"']+)["']/i)?.[1];
   if (name) return `[name="${name}"]`;
-
   const id = source.match(/(?:element\s+)?id\s*(?:=|is|of|named|called|:)?\s*["']([A-Za-z0-9_-]+)["']/i)?.[1];
   if (id) return `#${id}`;
   return "";
@@ -127,16 +124,11 @@ function compileStep(step, discovery, state) {
   const tag = String(element?.tag || "").toLowerCase();
 
   if (/leave .*blank|clear|empty/.test(action)) return { operation: "CLEAR", selector: target };
-
   if (/enter|type|fill|input/.test(action)) {
-    // Review/request normalization may trim an all-space value. The action itself is
-    // sufficient evidence for a whitespace-only test, so preserve that intent
-    // deterministically instead of forcing an unnecessary AI repair.
     if ((value === null || value === "") && /white\s*space|spaces?[- ]only|blank spaces?/i.test(actionRaw)) value = " ";
     if (value === null || value === "") return { error: `Typing step is missing a value for ${target}` };
     return { operation: "TYPE", selector: target, value };
   }
-
   if (/uncheck|deselect/.test(action) && (type === "checkbox" || type === "radio")) return { operation: "UNCHECK", selector: target };
   if (/check|consent|select at least one|choose/.test(action) && type === "checkbox") return { operation: "CHECK", selector: target };
   if (/select/.test(action) && tag === "select") {
@@ -154,12 +146,13 @@ function compileExpected(expected, discovery) {
 
   if (selector) {
     if (!discovery.selectors.has(selector)) return { error: `Expected-result selector is not grounded by discovery: ${selector}` };
-    if (/non-empty|not empty|contains?\s+(?:non-empty|text|message)|message\s+['"].+['"]\s+is\s+(?:displayed|shown|visible)/i.test(text)) {
-      return { operation: "ASSERT_TEXT_NOT_EMPTY", selector };
-    }
+    if (/non-empty|not empty|contains?\s+(?:non-empty|text|message)|message\s+['"].+['"]\s+is\s+(?:displayed|shown|visible)/i.test(text)) return { operation: "ASSERT_TEXT_NOT_EMPTY", selector };
     if (/absent|hidden|not visible|remains absent/.test(lower)) return { operation: "ASSERT_HIDDEN_OR_ABSENT", selector };
     if (/visible|shown|displayed|appears/.test(lower)) return { operation: "ASSERT_VISIBLE", selector };
   }
+
+  const queryFragment = text.match(/(?:url|query parameter|query string)[^'"`]*['"`]([^'"`=]+=[^'"`]+)['"`]/i)?.[1];
+  if (queryFragment && /contain|contains|includes|include/.test(lower)) return { operation: "ASSERT_URL_CONTAINS", fragment: queryFragment };
 
   const pathMatch = text.match(/\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)+/);
   const path = pathMatch?.[0] || "";
@@ -174,21 +167,44 @@ function compileExpected(expected, discovery) {
 function ensureGroundedStartPage(actions, discovery) {
   if (!actions.length) return actions;
   if (actions[0].operation === "NAVIGATE" || actions[0].operation === "LOGIN_VALID") return actions;
-
   const firstSelectorAction = actions.find((action) => action.selector && discovery.selectorPaths.has(action.selector));
   if (!firstSelectorAction) return actions;
-
   const path = discovery.selectorPaths.get(firstSelectorAction.selector);
   if (!path || !discovery.paths.has(path)) return actions;
   return [{ operation: "NAVIGATE", path }, ...actions];
 }
 
+function addDeterministicFallbackAssertions(testCase, actions, assertions, narratives, discovery) {
+  const primarySelector = actions.find((action) => action.operation === "TYPE" || action.operation === "CLEAR")?.selector || "";
+  const element = primarySelector ? discovery.selectors.get(primarySelector) : null;
+  const ownerPath = primarySelector ? discovery.selectorPaths.get(primarySelector) : null;
+
+  for (const text of narratives) {
+    const lower = String(text).toLowerCase();
+    const quotedQuery = String(text).match(/['"`]([^'"`=]+=[^'"`]+)['"`]/)?.[1];
+    if (quotedQuery && /url|query parameter|query string/.test(lower) && /contain|include/.test(lower)) {
+      assertions.push({ operation: "ASSERT_URL_CONTAINS", fragment: quotedQuery });
+      continue;
+    }
+
+    if (ownerPath && /remain|stays|not submitted|no search results page|homepage/.test(lower)) {
+      assertions.push({ operation: "ASSERT_PATH_EQUALS", path: ownerPath.split("?")[0] || "/" });
+      continue;
+    }
+
+    const length = Number(String(text).match(/\b(\d{2,6})\s*(?:characters?|chars?)\b/i)?.[1]);
+    if (primarySelector && Number.isFinite(length) && /accepts? up to|does not accept more than|maximum|max length|truncated|boundary/.test(lower)) {
+      const discoveredMax = Number(element?.maxlength);
+      if (Number.isFinite(discoveredMax) && discoveredMax !== length) continue;
+      assertions.push({ operation: /exactly|full query/.test(lower) ? "ASSERT_VALUE_LENGTH_EQUALS" : "ASSERT_VALUE_LENGTH_AT_MOST", selector: primarySelector, length });
+    }
+  }
+}
+
 function compileTestCase(testCase, { pageDiscoveries = [], hasCredentials = false } = {}) {
   const discovery = buildDiscoveryIndex(pageDiscoveries);
   const validLoginRequired = requiresValidLogin(testCase);
-  if (validLoginRequired && !hasCredentials) {
-    return { ok: false, reasonCode: "MISSING_CREDENTIALS", reason: "Valid runtime credentials are required before this test can compile into the automation contract." };
-  }
+  if (validLoginRequired && !hasCredentials) return { ok: false, reasonCode: "MISSING_CREDENTIALS", reason: "Valid runtime credentials are required before this test can compile into the automation contract." };
 
   const state = { validLoginRequired, loginInserted: false };
   let actions = [];
@@ -199,7 +215,6 @@ function compileTestCase(testCase, { pageDiscoveries = [], hasCredentials = fals
     if (compiled.error) errors.push(compiled.error);
     else actions.push(compiled);
   }
-
   if (validLoginRequired && !state.loginInserted) actions.unshift({ operation: "LOGIN_VALID" });
   actions = ensureGroundedStartPage(actions, discovery);
 
@@ -211,19 +226,14 @@ function compileTestCase(testCase, { pageDiscoveries = [], hasCredentials = fals
     else if (compiled.operation) assertions.push(compiled);
     else if (compiled.narrative) narratives.push(compiled.narrative);
   }
+  addDeterministicFallbackAssertions(testCase, actions, assertions, narratives, discovery);
 
   if (!actions.length) errors.push("No deterministic executable actions could be compiled.");
   if (!assertions.length) errors.push("No deterministic assertion could be compiled from the expected results.");
 
   const unsupported = [...new Set(errors)];
-  if (unsupported.length) {
-    return { ok: false, reasonCode: "AUTOMATION_CONTRACT_INCOMPLETE", reason: unsupported[0], errors: unsupported, supportedOperations: [...SUPPORTED_OPERATIONS] };
-  }
-
-  return {
-    ok: true,
-    plan: { version: 1, testCaseId: testCase.id, title: testCase.title, actions, assertions, narrativeExpectations: narratives },
-  };
+  if (unsupported.length) return { ok: false, reasonCode: "AUTOMATION_CONTRACT_INCOMPLETE", reason: unsupported[0], errors: unsupported, supportedOperations: [...SUPPORTED_OPERATIONS] };
+  return { ok: true, plan: { version: 1, testCaseId: testCase.id, title: testCase.title, actions, assertions, narrativeExpectations: narratives } };
 }
 
 module.exports = { SUPPORTED_OPERATIONS, buildDiscoveryIndex, compileTestCase };
