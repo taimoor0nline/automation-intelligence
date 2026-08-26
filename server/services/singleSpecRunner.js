@@ -135,6 +135,17 @@ function killProcessTree(pid) {
 }
 
 function validateRuntimeContext(executionContext = {}) {
+  if (String(executionContext.targetType || 'WEB').toUpperCase() === 'REST') {
+    const auth = executionContext.apiAuth || { type: 'NONE' };
+    const type = String(auth.type || 'NONE').toUpperCase();
+    if (!['NONE','BASIC','BEARER','API_KEY_HEADER'].includes(type)) throw new Error(`Unsupported REST authentication type: ${type}.`);
+    if (type !== 'NONE' && !auth.secret) throw new Error('REST authentication secret is missing before API execution.');
+    if (type === 'BASIC' && !auth.username) throw new Error('REST basic-auth username is missing before API execution.');
+    if (type === 'API_KEY_HEADER' && !auth.headerName) throw new Error('REST API-key header name is missing before API execution.');
+    console.log(`[runtime-preflight] target=REST auth=${type} base-url=${executionContext.baseUrl || '(missing)'}`);
+    return;
+  }
+
   const credentialsPresent = Boolean(executionContext.credentials?.username && executionContext.credentials?.password);
   const selectorsPresent = Boolean(
     executionContext.loginSelectors?.username &&
@@ -175,6 +186,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
   if (headed) args.push("--headed", "--no-runner-ui");
   else args.push("--headless");
 
+  const apiAuth = executionContext.apiAuth || {};
   const env = {
     ...process.env,
     AUTOMATION_RESULT_FILE: RESULT_FILE,
@@ -187,6 +199,10 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     LOGIN_USERNAME_SELECTOR: executionContext.loginSelectors?.username || "",
     LOGIN_PASSWORD_SELECTOR: executionContext.loginSelectors?.password || "",
     LOGIN_SUBMIT_SELECTOR: executionContext.loginSelectors?.submit || "",
+    REST_AUTH_TYPE: String(apiAuth.type || 'NONE').toUpperCase(),
+    REST_AUTH_USERNAME: apiAuth.username || '',
+    REST_AUTH_SECRET: apiAuth.secret || '',
+    REST_AUTH_HEADER: apiAuth.headerName || '',
     DEMO_STEP_DELAY_MS: String(demoStepDelayMs),
   };
 
