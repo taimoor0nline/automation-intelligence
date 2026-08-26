@@ -5,10 +5,10 @@ const { requireAuth, requireRole } = require('../services/authService');
 
 router.get('/api/projects', requireAuth, async (req, res) => {
   try {
-    const manager = String(req.user.role).toUpperCase() === 'MANAGER';
-    const result = manager
+    const role = String(req.user.role || '').toUpperCase();
+    const result = ['QA','MANAGER'].includes(role)
       ? await db.query(`select p.*, u.display_name as created_by_name from projects p left join users u on u.id=p.created_by order by p.created_at desc`)
-      : await db.query(`select p.* from projects p join project_members pm on pm.project_id=p.id where pm.user_id=$1 order by p.created_at desc`, [req.user.sub]);
+      : await db.query(`select distinct p.* from projects p left join project_members pm on pm.project_id=p.id left join test_runs tr on tr.project_id=p.id left join defect_analyses da on da.run_id=tr.id where pm.user_id=$1 or da.assigned_to=$1 order by p.created_at desc`, [req.user.sub]);
     res.json({ ok: true, projects: result.rows });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
@@ -87,9 +87,14 @@ router.patch('/api/defects/:id/assign', requireAuth, requireRole('QA','MANAGER')
 
 router.patch('/api/defects/:id/resolve', requireAuth, requireRole('DEV','QA','MANAGER'), async (req, res) => {
   try {
+    const role=String(req.user.role||'').toUpperCase();
+    if(role==='DEV'){
+      const assigned=await db.query('select id from defect_analyses where id=$1 and assigned_to=$2',[req.params.id,req.user.sub]);
+      if(!assigned.rowCount)return res.status(403).json({reply:'Developers may resolve only defects assigned to them.'});
+    }
     const result = await db.query(`update defect_analyses set resolved_by=$1,resolved_at=now() where id=$2 returning *`, [req.user.sub, req.params.id]);
     if (!result.rowCount) return res.status(404).json({ reply: 'Defect not found.' });
-    res.json({ ok: true, defect: result.rows[0], note: 'Resolution status is administrative; a successful test re-run should still be used as technical proof.' });
+    res.json({ ok: true, defect: result.rows[0], note: 'Resolution status is administrative; a successful test re-run remains the technical proof.' });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
