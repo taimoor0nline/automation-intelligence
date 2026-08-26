@@ -3,4 +3,8 @@
     <ProjectReference Include="../AITestPilot.Domain/AITestPilot.Domain.csproj" />
     <ProjectReference Include="../AITestPilot.Application/AITestPilot.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Playwright" />
+    <PackageReference Include="Deque.AxeCore.Playwright" />
+  </ItemGroup>
 </Project>
