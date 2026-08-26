@@ -96,6 +96,20 @@ function requiresValidLogin(testCase) {
     (testCase?.steps || []).some((s) => isConfiguredCredentialStep(String(s?.action || "")));
 }
 
+function materializeDescribedValue(value, element) {
+  const text = String(value || "");
+  const match = text.match(/(?:a\s+)?string\s+of\s+(?:exactly\s+)?(\d{1,5})\s+['"](.{1})['"]\s+characters?/i);
+  if (!match) return value;
+
+  const count = Number(match[1]);
+  const char = match[2];
+  const discoveredMax = Number(element?.maxlength);
+  if (!Number.isFinite(count) || !Number.isFinite(discoveredMax)) return value;
+  if (![discoveredMax, discoveredMax + 1].includes(count)) return value;
+  if (count < 1 || count > 10000) return value;
+  return char.repeat(count);
+}
+
 function compileStep(step, discovery, state) {
   const actionRaw = String(step?.action || "").trim();
   const action = actionRaw.toLowerCase();
@@ -126,6 +140,7 @@ function compileStep(step, discovery, state) {
   if (/leave .*blank|clear|empty/.test(action)) return { operation: "CLEAR", selector: target };
   if (/enter|type|fill|input/.test(action)) {
     if ((value === null || value === "") && /white\s*space|spaces?[- ]only|blank spaces?/i.test(actionRaw)) value = " ";
+    value = materializeDescribedValue(value, element);
     if (value === null || value === "") return { error: `Typing step is missing a value for ${target}` };
     return { operation: "TYPE", selector: target, value };
   }
@@ -195,7 +210,7 @@ function addDeterministicFallbackAssertions(testCase, actions, assertions, narra
     const length = Number(String(text).match(/\b(\d{2,6})\s*(?:characters?|chars?)\b/i)?.[1]);
     if (primarySelector && Number.isFinite(length) && /accepts? up to|does not accept more than|maximum|max length|truncated|boundary/.test(lower)) {
       const discoveredMax = Number(element?.maxlength);
-      if (Number.isFinite(discoveredMax) && discoveredMax !== length) continue;
+      if (!Number.isFinite(discoveredMax) || discoveredMax !== length) continue;
       assertions.push({ operation: /exactly|full query/.test(lower) ? "ASSERT_VALUE_LENGTH_EQUALS" : "ASSERT_VALUE_LENGTH_AT_MOST", selector: primarySelector, length });
     }
   }
