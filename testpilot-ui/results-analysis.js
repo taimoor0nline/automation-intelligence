@@ -40,6 +40,9 @@
       .ai-resolution-detail b{color:#1f2937}
       .ai-resolution-steps{margin:5px 0 0 18px;padding:0}.ai-resolution-steps li{margin:3px 0}
       .ai-resolution-warning{margin-top:8px;padding-top:7px;border-top:1px solid #dbeafe;font-size:10px;color:#64748b;line-height:1.4}
+      .developer-guidance{margin-top:10px;padding:11px;border:1px solid #c7d2fe;border-radius:9px;background:#fff}
+      .developer-guidance-head{font-size:10.5px;font-weight:900;color:#4338ca;text-transform:uppercase;letter-spacing:.03em}
+      .developer-example{margin-top:7px;padding:9px;border-radius:7px;background:#111827;color:#e5e7eb;font-family:Consolas,monospace;font-size:10.5px;line-height:1.45;white-space:pre-wrap;overflow:auto}
     `;
     document.head.appendChild(style);
   }
@@ -48,10 +51,23 @@
     const target = document.getElementById('analysis');
     if (!target || !Array.isArray(analyses) || !analyses.length) return;
     ensureResolutionStyles();
-    target.innerHTML = '<div class="sub"><b>AI failure analysis & resolution guidance</b><br>Recommendations are advisory. Human review and a successful re-run are required before a failure is considered resolved.</div>' + analyses.map((a) => {
+    target.innerHTML = '<div class="sub"><b>AI failure analysis & developer resolution guidance</b><br>Recommendations are advisory. Human review, application correction, and a successful re-run are required before a failure is considered resolved.</div>' + analyses.map((a) => {
       const confidence = Math.round((Number(a.confidence) || 0) * 100);
       const steps = Array.isArray(a.verificationSteps) && a.verificationSteps.length
         ? '<ol class="ai-resolution-steps">' + a.verificationSteps.map((step) => '<li>' + esc(step) + '</li>').join('') + '</ol>'
+        : '';
+      const regression = Array.isArray(a.regressionChecks) && a.regressionChecks.length
+        ? '<ol class="ai-resolution-steps">' + a.regressionChecks.map((step) => '<li>' + esc(step) + '</li>').join('') + '</ol>'
+        : '';
+      const developer = a.classification === 'APPLICATION_DEFECT' && (a.developerReviewArea || a.developerImplementationHint || a.developerExampleFix || regression)
+        ? '<div class="developer-guidance">' +
+            '<div class="developer-guidance-head">Developer fix suggestion</div>' +
+            (a.developerReviewArea ? '<div class="ai-resolution-detail"><b>Where to inspect:</b> ' + esc(a.developerReviewArea) + '</div>' : '') +
+            (a.developerImplementationHint ? '<div class="ai-resolution-detail"><b>Implementation hint:</b> ' + esc(a.developerImplementationHint) + '</div>' : '') +
+            (a.developerExampleFix ? '<div class="ai-resolution-detail"><b>Illustrative fix pattern:</b></div><div class="developer-example">' + esc(a.developerExampleFix) + '</div>' : '') +
+            (regression ? '<div class="ai-resolution-detail"><b>Regression checks:</b>' + regression + '</div>' : '') +
+            '<div class="ai-resolution-warning">This is a developer aid based on observed behavior. Unless source code was explicitly provided to the analysis, it is not a verified source patch and must be reviewed against the real implementation.</div>' +
+          '</div>'
         : '';
       const resolution = a.resolutionComment || a.recommendedFix || steps
         ? '<div class="ai-resolution-box">' +
@@ -59,6 +75,7 @@
             (a.resolutionComment ? '<div class="ai-resolution-text">' + esc(a.resolutionComment) + '</div>' : '') +
             (a.recommendedFix ? '<div class="ai-resolution-detail"><b>Recommended fix:</b> ' + esc(a.recommendedFix) + '</div>' : '') +
             (a.recommendedOwner ? '<div class="ai-resolution-detail"><b>Suggested owner:</b> ' + esc(ownerLabel(a.recommendedOwner)) + '</div>' : '') +
+            developer +
             (steps ? '<div class="ai-resolution-detail"><b>Verify after correction:</b>' + steps + '</div>' : '') +
             '<div class="ai-resolution-warning">The AI has not changed the application or test. Do not close the defect or weaken the assertion from this recommendation; re-run the original approved test after the human-reviewed correction.</div>' +
           '</div>'
@@ -85,8 +102,8 @@
     box.style.display = 'none';
     box.style.marginTop = '12px';
     box.innerHTML =
-      '<button id="analyzeResultsBtn" class="btn secondary" type="button" style="width:100%">Analyze & Suggest Resolution with AI</button>' +
-      '<div id="analyzeResultsHint" class="sub" style="margin-top:7px;text-align:center">Browser execution is complete. AI analysis and remediation guidance run only for failed tests and only when you request it.</div>';
+      '<button id="analyzeResultsBtn" class="btn secondary" type="button" style="width:100%">Analyze & Suggest Developer Fix with AI</button>' +
+      '<div id="analyzeResultsHint" class="sub" style="margin-top:7px;text-align:center">Browser execution is complete. AI can analyze failed tests and suggest a developer remediation approach without changing application code.</div>';
     analysis.insertAdjacentElement('beforebegin', box);
 
     document.getElementById('analyzeResultsBtn').addEventListener('click', analyzeResults);
@@ -113,7 +130,7 @@
     analysisInFlight = true;
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Analyzing failures & preparing resolution guidance…';
+      btn.textContent = 'Analyzing failure & preparing developer guidance…';
     }
     if (hint) hint.textContent = 'Sending only completed failed-test evidence to the selected AI profile. No browser execution or application modification is occurring now.';
     setActivityStatus('Analyzing failures', true);
@@ -135,7 +152,7 @@
         document.getElementById('reportLink').href = data.reportUrl;
         document.getElementById('reportBox').style.display = 'block';
       }
-      if (hint) hint.textContent = analyses.length ? 'AI analysis and advisory resolution guidance completed for the failed tests.' : 'There were no failed tests requiring AI analysis.';
+      if (hint) hint.textContent = analyses.length ? 'AI analysis and developer-oriented remediation guidance completed for the failed tests.' : 'There were no failed tests requiring AI analysis.';
       if (btn) btn.style.display = 'none';
       setActivityStatus('Analysis complete', false);
       markReadyForRerun(summary);
@@ -144,7 +161,7 @@
       if (hint) hint.textContent = 'AI analysis did not complete. Browser test results remain available above and you can still run again.';
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Retry AI Analysis & Resolution Guidance';
+        btn.textContent = 'Retry AI Developer Fix Guidance';
       }
       setActivityStatus('Completed · analysis pending', false);
       markReadyForRerun(lastExecutionSummary);
@@ -158,7 +175,7 @@
   const sectionHeading = [...document.querySelectorAll('.section-head h2')].find((el) => el.textContent.includes('Execution'));
   const sectionSub = sectionHeading?.parentElement?.querySelector('.sub');
   if (sectionSub) {
-    sectionSub.textContent = 'The automation system executes approved tests deterministically. Failed-test AI analysis and remediation guidance are optional and run only after execution completes.';
+    sectionSub.textContent = 'The automation system executes approved tests deterministically. Failed-test AI analysis and developer remediation guidance are optional and run only after execution completes.';
   }
 
   const originalRenderResults = window.renderResults;
@@ -180,15 +197,15 @@
       if (failed > 0 && !hasAnalyses && btn) {
         btn.style.display = 'block';
         btn.disabled = false;
-        btn.textContent = 'Analyze & Suggest Resolution with AI';
-        if (hint) hint.textContent = `${failed} failed test(s) are available for optional AI analysis and remediation guidance. Browser execution has already finished.`;
+        btn.textContent = 'Analyze & Suggest Developer Fix with AI';
+        if (hint) hint.textContent = `${failed} failed test(s) are available for optional AI analysis and developer remediation guidance. Browser execution has already finished.`;
         setTimeout(() => {
           const reportBox = document.getElementById('reportBox');
           if (reportBox) reportBox.style.display = 'none';
         }, 0);
       } else if (hasAnalyses && btn) {
         btn.style.display = 'none';
-        if (hint) hint.textContent = 'AI analysis and advisory resolution guidance completed for the failed tests.';
+        if (hint) hint.textContent = 'AI analysis and developer-oriented remediation guidance completed for the failed tests.';
       }
     };
     try { renderResults = window.renderResults; } catch {}
