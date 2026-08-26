@@ -32,6 +32,10 @@ module.exports = defineConfig({
       LOGIN_USERNAME_SELECTOR: process.env.LOGIN_USERNAME_SELECTOR || "",
       LOGIN_PASSWORD_SELECTOR: process.env.LOGIN_PASSWORD_SELECTOR || "",
       LOGIN_SUBMIT_SELECTOR: process.env.LOGIN_SUBMIT_SELECTOR || "",
+      REST_AUTH_TYPE: process.env.REST_AUTH_TYPE || "NONE",
+      REST_AUTH_USERNAME: process.env.REST_AUTH_USERNAME || "",
+      REST_AUTH_SECRET: process.env.REST_AUTH_SECRET || "",
+      REST_AUTH_HEADER: process.env.REST_AUTH_HEADER || "",
       DEMO_STEP_DELAY_MS: Math.max(0, Math.min(numberEnv(process.env.DEMO_STEP_DELAY_MS, 0), 3000)),
     },
     setupNodeEvents(on, config) {
