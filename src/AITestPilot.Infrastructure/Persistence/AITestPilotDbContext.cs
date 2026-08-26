@@ -17,8 +17,9 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
 {
     private readonly ICurrentUserContext? _currentUser;
 
-    public AITestPilotDbContext(DbContextOptions<AITestPilotDbContext> options, ICurrentUserContext? currentUser = null)
-        : base(options) => _currentUser = currentUser;
+    public AITestPilotDbContext(
+        DbContextOptions<AITestPilotDbContext> options,
+        ICurrentUserContext? currentUser = null) : base(options) => _currentUser = currentUser;
 
     public DbSet<Workspace> Workspaces => Set<Workspace>();
     public DbSet<WorkspaceMembership> WorkspaceMemberships => Set<WorkspaceMembership>();
@@ -27,6 +28,7 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
     public DbSet<ProjectEnvironment> ProjectEnvironments => Set<ProjectEnvironment>();
     public DbSet<TestCase> TestCases => Set<TestCase>();
     public DbSet<TestRun> TestRuns => Set<TestRun>();
+    public DbSet<TestRunCase> TestRunCases => Set<TestRunCase>();
     public DbSet<TestResult> TestResults => Set<TestResult>();
     public DbSet<TestAssertionResult> TestAssertionResults => Set<TestAssertionResult>();
     public DbSet<TestNetworkEvent> TestNetworkEvents => Set<TestNetworkEvent>();
@@ -44,46 +46,18 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
         builder.Entity<ProjectEnvironment>().ToTable("project_environments");
         builder.Entity<TestCase>().ToTable("test_cases");
         builder.Entity<TestRun>().ToTable("test_runs");
+        builder.Entity<TestRunCase>().ToTable("test_run_cases");
         builder.Entity<TestResult>().ToTable("test_results");
         builder.Entity<TestAssertionResult>().ToTable("test_assertion_results");
         builder.Entity<TestNetworkEvent>().ToTable("test_network_events");
         builder.Entity<TestBrowserEvent>().ToTable("test_browser_events");
         builder.Entity<AuditEvent>().ToTable("audit_events");
-        builder.Entity<ApplicationUser>().ToTable("users");
-        builder.Entity<IdentityRole<Guid>>().ToTable("roles");
-        builder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
-        builder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims");
-        builder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins");
-        builder.Entity<IdentityRoleClaim<Guid>>().ToTable("role_claims");
-        builder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
 
-        builder.Entity<Workspace>().HasIndex(x => x.Code).IsUnique();
-        builder.Entity<WorkspaceMembership>().HasIndex(x => new { x.WorkspaceId, x.UserId }).IsUnique();
-        builder.Entity<ProjectCategory>().HasIndex(x => new { x.WorkspaceId, x.Code }).IsUnique();
-        builder.Entity<Project>().HasIndex(x => new { x.WorkspaceId, x.Code }).IsUnique();
-        builder.Entity<ProjectEnvironment>().HasIndex(x => new { x.WorkspaceId, x.ProjectId, x.Name }).IsUnique();
-        builder.Entity<TestCase>().HasIndex(x => new { x.WorkspaceId, x.ProjectId, x.TestCaseNumber }).IsUnique();
-        builder.Entity<TestRun>().HasIndex(x => new { x.WorkspaceId, x.ProjectId, x.RunNumber }).IsUnique();
-        builder.Entity<TestResult>().HasIndex(x => new { x.WorkspaceId, x.TestRunId, x.TestCaseId });
-        builder.Entity<TestAssertionResult>().HasIndex(x => new { x.WorkspaceId, x.TestRunId, x.TestCaseId, x.Sequence });
-        builder.Entity<TestNetworkEvent>().HasIndex(x => new { x.WorkspaceId, x.TestRunId, x.OccurredAtUtc });
-        builder.Entity<TestBrowserEvent>().HasIndex(x => new { x.WorkspaceId, x.TestRunId, x.OccurredAtUtc });
-        builder.Entity<AuditEvent>().HasIndex(x => new { x.WorkspaceId, x.OccurredAtUtc });
-
-        builder.Entity<TestCase>()
-            .Property(x => x.Definition)
-            .HasColumnType("jsonb")
-            .HasConversion(
-                value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
-                value => JsonSerializer.Deserialize<TestDefinition>(value, (JsonSerializerOptions?)null) ?? new TestDefinition(1, [], []));
-
-        foreach (var entityType in builder.Model.GetEntityTypes())
-        {
-            foreach (var property in entityType.GetProperties())
-            {
-                property.SetColumnName(ToSnakeCase(property.Name));
-            }
-        }
+        ConfigureIdentityTables(builder);
+        ConfigureIndexes(builder);
+        ConfigureJson(builder);
+        ConfigureLengths(builder);
+        ApplySnakeCaseColumns(builder);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -92,16 +66,86 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
     {
         StampAuditing();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
+    private static void ConfigureIdentityTables(ModelBuilder builder)
+    {
+        builder.Entity<ApplicationUser>().ToTable("users");
+        builder.Entity<IdentityRole<Guid>>().ToTable("roles");
+        builder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
+        builder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims");
+        builder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins");
+        builder.Entity<IdentityRoleClaim<Guid>>().ToTable("role_claims");
+        builder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
+    }
+
+    private static void ConfigureIndexes(ModelBuilder builder)
+    {
+        builder.Entity<Workspace>().HasIndex(value => value.Code).IsUnique();
+        builder.Entity<WorkspaceMembership>().HasIndex(value => new { value.WorkspaceId, value.UserId }).IsUnique();
+        builder.Entity<ProjectCategory>().HasIndex(value => new { value.WorkspaceId, value.Code }).IsUnique();
+        builder.Entity<Project>().HasIndex(value => new { value.WorkspaceId, value.Code }).IsUnique();
+        builder.Entity<ProjectEnvironment>().HasIndex(value => new { value.WorkspaceId, value.ProjectId, value.Name }).IsUnique();
+        builder.Entity<ProjectEnvironment>()
+            .HasIndex(value => new { value.WorkspaceId, value.ProjectId, value.IsDefault })
+            .IsUnique()
+            .HasFilter("is_default = TRUE");
+        builder.Entity<TestCase>().HasIndex(value => new { value.WorkspaceId, value.ProjectId, value.TestCaseNumber }).IsUnique();
+        builder.Entity<TestRun>().HasIndex(value => new { value.WorkspaceId, value.ProjectId, value.RunNumber }).IsUnique();
+        builder.Entity<TestRunCase>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.Sequence }).IsUnique();
+        builder.Entity<TestRunCase>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.TestCaseId }).IsUnique();
+        builder.Entity<TestResult>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.TestCaseId }).IsUnique();
+        builder.Entity<TestAssertionResult>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.TestCaseId, value.Sequence });
+        builder.Entity<TestNetworkEvent>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.OccurredAtUtc });
+        builder.Entity<TestBrowserEvent>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.OccurredAtUtc });
+        builder.Entity<AuditEvent>().HasIndex(value => new { value.WorkspaceId, value.OccurredAtUtc });
+    }
+
+    private static void ConfigureJson(ModelBuilder builder)
+    {
+        builder.Entity<TestCase>()
+            .Property(value => value.Definition)
+            .HasColumnType("jsonb")
+            .HasConversion(
+                value => SerializeDefinition(value),
+                value => DeserializeDefinition(value));
+
+        builder.Entity<TestRunCase>()
+            .Property(value => value.DefinitionSnapshot)
+            .HasColumnType("jsonb")
+            .HasConversion(
+                value => SerializeDefinition(value),
+                value => DeserializeDefinition(value));
+    }
+
+    private static void ConfigureLengths(ModelBuilder builder)
+    {
+        builder.Entity<ApplicationUser>().Property(value => value.DisplayName).HasMaxLength(200);
+        builder.Entity<TestRun>().Property(value => value.Browser).HasMaxLength(50);
+        builder.Entity<TestRun>().Property(value => value.ExecutionEngine).HasMaxLength(50);
+        builder.Entity<TestRunCase>().Property(value => value.TestCaseNumberSnapshot).HasMaxLength(50);
+        builder.Entity<TestRunCase>().Property(value => value.TitleSnapshot).HasMaxLength(300);
+    }
+
+    private static string SerializeDefinition(TestDefinition value) =>
+        JsonSerializer.Serialize(value, (JsonSerializerOptions?)null);
+
+    private static TestDefinition DeserializeDefinition(string value) =>
+        JsonSerializer.Deserialize<TestDefinition>(value, (JsonSerializerOptions?)null)
+        ?? new TestDefinition(1, [], []);
+
     private void StampAuditing()
     {
         var now = DateTimeOffset.UtcNow;
-        var userId = _currentUser is { IsAuthenticated: true } ? _currentUser.UserId : (Guid?)null;
+        var userId = _currentUser is { IsAuthenticated: true }
+            ? _currentUser.UserId
+            : (Guid?)null;
 
         foreach (var entry in ChangeTracker.Entries<AuditableEntity>())
         {
@@ -119,15 +163,26 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
         }
     }
 
+    private static void ApplySnakeCaseColumns(ModelBuilder builder)
+    {
+        foreach (var entityType in builder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
+    }
+
     private static string ToSnakeCase(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return value;
         var chars = new List<char>(value.Length + 8);
-        for (var i = 0; i < value.Length; i++)
+        for (var index = 0; index < value.Length; index++)
         {
-            var c = value[i];
-            if (char.IsUpper(c) && i > 0) chars.Add('_');
-            chars.Add(char.ToLowerInvariant(c));
+            var character = value[index];
+            if (char.IsUpper(character) && index > 0) chars.Add('_');
+            chars.Add(char.ToLowerInvariant(character));
         }
         return new string([.. chars]);
     }
