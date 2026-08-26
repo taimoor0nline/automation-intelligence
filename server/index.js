@@ -8,9 +8,15 @@ const chatRoutes = require("./routes/chat");
 const runRoutes = require("./routes/run");
 const testCaseLifecycleRoutes = require("./routes/testCaseLifecycle");
 const liveBrowserRoutes = require("./routes/liveBrowser");
+const authRoutes = require("./routes/auth");
+const projectRoutes = require("./routes/projects");
+const sessionContextRoutes = require("./routes/sessionContext");
 const qwen = require("./services/qwenClient");
 const { analyzeFailureWithResolution } = require("./services/failureResolutionAiService");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
+const { optionalAuth } = require("./services/authService");
+const sessionPersistence = require("./middleware/sessionPersistence");
+const db = require("./db");
 
 qwen.analyzeFailure = async (args) => {
   const analysis = await analyzeFailureWithResolution(args);
@@ -22,6 +28,17 @@ qwen.analyzeFailure = async (args) => {
   const seededDemoCase = tc.id === "TC004" || tc.id === "TC005";
 
   if (seededDemoCase && validationExpectation && validationNotShown) {
+    const hasSourceGuidance = analysis.sourceGuidanceLevel && analysis.sourceGuidanceLevel !== "BLACK_BOX";
+    const blackBoxReviewArea = tc.id === "TC004"
+      ? "Inspect the feedback submission age validation in both the browser-side form validation and the server/API validation path. The rule should have one consistent lower boundary: age >= 18."
+      : "Inspect the feedback website-field validation in both the browser-side form validation and the server/API validation path. A supplied value should be accepted only when it is a valid HTTP/HTTPS URL.";
+    const blackBoxHint = tc.id === "TC004"
+      ? "The rejection condition should treat every numeric age below 18 as invalid, preserve the upper boundary, return a validation error, and keep the form editable. Make the same rule authoritative on the server even if the browser also validates it."
+      : "Do not gate URL validation on whether the value contains a dot. If the optional website field is non-empty, parse/validate the complete URL and allow only the approved protocols; otherwise return the website validation error and keep the form editable.";
+    const blackBoxExample = tc.id === "TC004"
+      ? "Example pattern (illustrative, not an applied patch):\nconst age = Number(input.age);\nif (!input.age) errors.age = 'Age is required.';\nelse if (age < 18 || age > 100) errors.age = 'Age must be between 18 and 100.';"
+      : "Example pattern (illustrative, not an applied patch):\nif (input.website && !isValidHttpUrl(input.website)) {\n  errors.website = 'Please enter a valid website URL.';\n}\n// Do not skip validation merely because the value has no dot.";
+
     return {
       ...analysis,
       classification: "APPLICATION_DEFECT",
@@ -40,45 +57,17 @@ qwen.analyzeFailure = async (args) => {
         ? "Correct the age boundary logic so values below 18 are rejected and the age validation message is rendered while the form remains available for correction."
         : "Correct website validation so malformed non-empty values such as abc are rejected and the website validation message is rendered while the form remains available for correction.",
       recommendedOwner: "APPLICATION_TEAM",
-      developerReviewArea: tc.id === "TC004"
-        ? "Inspect the feedback submission age validation in both the browser-side form validation and the server/API validation path. The rule should have one consistent lower boundary: age >= 18."
-        : "Inspect the feedback website-field validation in both the browser-side form validation and the server/API validation path. A supplied value should be accepted only when it is a valid HTTP/HTTPS URL.",
-      developerImplementationHint: tc.id === "TC004"
-        ? "The rejection condition should treat every numeric age below 18 as invalid, preserve the upper boundary, return a validation error, and keep the form editable. Make the same rule authoritative on the server even if the browser also validates it."
-        : "Do not gate URL validation on whether the value contains a dot. If the optional website field is non-empty, parse/validate the complete URL and allow only the approved protocols; otherwise return the website validation error and keep the form editable.",
-      developerExampleFix: tc.id === "TC004"
-        ? "Example pattern (illustrative, not an applied patch):\nconst age = Number(input.age);\nif (!input.age) errors.age = 'Age is required.';\nelse if (age < 18 || age > 100) errors.age = 'Age must be between 18 and 100.';"
-        : "Example pattern (illustrative, not an applied patch):\nif (input.website && !isValidHttpUrl(input.website)) {\n  errors.website = 'Please enter a valid website URL.';\n}\n// Do not skip validation merely because the value has no dot.",
+      developerReviewArea: hasSourceGuidance ? analysis.developerReviewArea : blackBoxReviewArea,
+      developerImplementationHint: hasSourceGuidance ? analysis.developerImplementationHint : blackBoxHint,
+      developerExampleFix: hasSourceGuidance ? analysis.developerExampleFix : blackBoxExample,
       regressionChecks: tc.id === "TC004"
-        ? [
-            "Age 17 is rejected.",
-            "Age 18 is accepted when all other fields are valid.",
-            "Age 100 remains accepted.",
-            "Age 101 remains rejected.",
-            "The age validation message is rendered and the user can correct the value.",
-          ]
-        : [
-            "Website abc is rejected.",
-            "A valid https:// URL is accepted.",
-            "A valid http:// URL is accepted if HTTP remains an approved protocol.",
-            "An empty website remains accepted because the field is optional.",
-            "The website validation message is rendered and the user can correct the value.",
-          ],
+        ? ["Age 17 is rejected.","Age 18 is accepted when all other fields are valid.","Age 100 remains accepted.","Age 101 remains rejected.","The age validation message is rendered and the user can correct the value."]
+        : ["Website abc is rejected.","A valid https:// URL is accepted.","A valid http:// URL is accepted if HTTP remains an approved protocol.","An empty website remains accepted because the field is optional.","The website validation message is rendered and the user can correct the value."],
       verificationSteps: tc.id === "TC004"
-        ? [
-            "Apply the reviewed age-validation correction in the application.",
-            "Re-run TC004 with age 17 and confirm submission is rejected.",
-            "Confirm [data-testid=\"age-error\"] becomes visible with non-empty validation text.",
-            "Re-run the valid age scenario to confirm valid feedback submission still succeeds.",
-          ]
-        : [
-            "Apply the reviewed website-validation correction in the application.",
-            "Re-run TC005 with website value abc and confirm submission is rejected.",
-            "Confirm [data-testid=\"website-error\"] becomes visible with non-empty validation text.",
-            "Re-run a valid HTTP/HTTPS website scenario to confirm valid feedback submission still succeeds.",
-          ],
+        ? ["Apply the reviewed age-validation correction in the application.","Re-run TC004 with age 17 and confirm submission is rejected.","Confirm [data-testid=\"age-error\"] becomes visible with non-empty validation text.","Re-run the valid age scenario to confirm valid feedback submission still succeeds."]
+        : ["Apply the reviewed website-validation correction in the application.","Re-run TC005 with website value abc and confirm submission is rejected.","Confirm [data-testid=\"website-error\"] becomes visible with non-empty validation text.","Re-run a valid HTTP/HTTPS website scenario to confirm valid feedback submission still succeeds."],
       safeToAutoResolve: false,
-      resolutionSource: "AI_ADVISORY_WITH_DETERMINISTIC_DEMO_GUARDRAIL",
+      resolutionSource: hasSourceGuidance ? analysis.resolutionSource : "AI_ADVISORY_WITH_DETERMINISTIC_DEMO_GUARDRAIL",
     };
   }
   return analysis;
@@ -87,9 +76,23 @@ qwen.analyzeFailure = async (args) => {
 const app = express();
 const PORT = process.env.SERVER_PORT || 5000;
 const HOST = process.env.SERVER_HOST || "0.0.0.0";
+const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || "false").toLowerCase() === "true";
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+app.use(optionalAuth);
+
+app.use((req, res, next) => {
+  if (!AUTH_REQUIRED || !req.path.startsWith('/api/')) return next();
+  if (req.path === '/api/auth/login' || req.path === '/api/auth/bootstrap' || req.path === '/health') return next();
+  if (!req.user) return res.status(401).json({ reply: 'Authentication is required for this platform.' });
+  const role = String(req.user.role || '').toUpperCase();
+  const qaOnly = req.path === '/api/chat' || req.path.startsWith('/api/test-cases') || req.path.startsWith('/api/live-browser') || req.path === '/api/reset';
+  if (qaOnly && !['QA','MANAGER'].includes(role)) return res.status(403).json({ reply: 'QA or MANAGER role is required for test design/execution.' });
+  next();
+});
+
+app.use(sessionPersistence);
 
 function sanitizePublicPayload(value) {
   if (Array.isArray(value)) return value.map(sanitizePublicPayload);
@@ -101,9 +104,7 @@ function sanitizePublicPayload(value) {
     }
     return out;
   }
-  if (typeof value === "string") {
-    return value.replace(/Qwen/gi, "AI").replace(/qwen\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?/gi, "AI");
-  }
+  if (typeof value === "string") return value.replace(/Qwen/gi, "AI").replace(/qwen\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?/gi, "AI");
   return value;
 }
 
@@ -119,13 +120,24 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
   return res.sendFile(filePath);
 });
 
+app.use(authRoutes);
+app.use(projectRoutes);
+app.use(sessionContextRoutes);
 app.use(liveBrowserRoutes);
 app.use(testCaseLifecycleRoutes);
 app.use(runRoutes);
 app.use(chatRoutes);
 
-app.get("/health", (req, res) => {
-  res.json({ ok: true, aiConnected: qwen.isConfigured(), defaultAiProfile: process.env.AI_MODEL_DEFAULT || "strong" });
+app.get("/health", async (_req, res) => {
+  const database = await db.health();
+  res.json({
+    ok: !db.isRequired() || database.connected === true,
+    aiConnected: qwen.isConfigured(),
+    database,
+    authRequired: AUTH_REQUIRED,
+    sourceAwareEnabled: db.isConfigured(),
+    defaultAiProfile: process.env.AI_MODEL_DEFAULT || "strong"
+  });
 });
 
 app.get("/live", (_req, res) => {
@@ -169,13 +181,13 @@ function serveUi(req, res, next) {
       .replace("User Story → Qwen → Human Review → Automated Execution → Analytics", "User Story → AI → Human Review → Automated Execution → Analytics")
       .replace("They are not sent to Qwen.", "They are not sent to the AI model.")
       .replace("The automation engine runs the reviewed cases; Qwen then explains failures.", "The automation system runs the reviewed cases deterministically; AI analysis is available on demand after execution.")
-      .replace("$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthDot').className='dot '+(data.aiConnected?'ok':'bad');$('healthText').textContent=data.aiConnected?'Connected':'Not connected'")
+      .replace("$('healthDot').className='dot '+(data.qwenConfigured?'ok':'bad');$('healthText').textContent=data.qwenConfigured?`Qwen ${data.qwenModel} connected`:'Backend online · Qwen not configured'", "$('healthDot').className='dot '+(data.aiConnected?'ok':'bad');$('healthText').textContent=(data.aiConnected?'AI connected':'AI not connected')+(data.database?.connected?' · PostgreSQL connected':'')")
       .replace("Discovering relevant pages and asking Qwen. Please wait.", "Discovering relevant pages and generating AI test cases. Readiness will be checked after the cases appear.")
       .replace("Discovering pages & asking Qwen…", "Discovering pages & generating tests…")
       .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checking`")
       .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The automation system is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
       .replace("Qwen failure analysis", "AI failure analysis")
-      .replace("</body>", `<script src="/readiness.js"></script><script src="/add-test-mode.js"></script><script src="/results-analysis.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
+      .replace("</body>", `<script src="/platform-ui.js"></script><script src="/readiness.js"></script><script src="/add-test-mode.js"></script><script src="/results-analysis.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
 
     res.type("html").send(adjusted);
   });
@@ -184,10 +196,14 @@ function serveUi(req, res, next) {
 app.get(["/", "/index.html"], serveUi);
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
-app.listen(PORT, HOST, () => {
+app.listen(PORT, HOST, async () => {
   console.log(`[ai-testpilot] Backend listening on ${HOST}:${PORT}`);
   console.log(`[ai-testpilot] UI available locally at http://localhost:${PORT}/`);
   console.log(`[ai-testpilot] Experimental live browser viewer: http://localhost:${PORT}/live`);
+  const database = await db.health();
+  if (database.connected) console.log('[ai-testpilot] ✅ PostgreSQL connected');
+  else if (db.isRequired()) console.error(`[ai-testpilot] ❌ PostgreSQL required: ${database.error || 'not configured'}`);
+  else console.log('[ai-testpilot] ℹ PostgreSQL optional mode; configure DATABASE_URL for persistence/source-aware projects');
   if (qwen.isConfigured()) console.log(`[ai-testpilot] ✅ AI provider connected · default profile ${(process.env.AI_MODEL_DEFAULT || "strong").toLowerCase()}`);
   else console.log("[ai-testpilot] ❌ AI provider is not configured. Check the server-side AI configuration in .env.");
 });
