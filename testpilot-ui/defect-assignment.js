@@ -7,7 +7,24 @@
   function projectId(){return document.getElementById('platformProject')?.value||''}
   function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 
+  function ensureRestEntry(){
+    const actions=document.querySelector('#platformSignedIn .platform-actions');
+    if(!actions)return;
+    let button=document.getElementById('platformRestApi');
+    if(!button){
+      button=document.createElement('button');
+      button.id='platformRestApi';
+      button.type='button';
+      button.className='btn ghost';
+      button.textContent='REST API';
+      button.onclick=()=>{window.location.href='/rest.html'};
+      actions.insertBefore(button,document.getElementById('platformDefects')||actions.firstChild);
+    }
+    button.style.display=['QA','MANAGER'].includes(role())?'':'none';
+  }
+
   async function decorate(){
+    ensureRestEntry();
     if(decorating||!['QA','MANAGER'].includes(role())||!projectId())return;
     const list=document.getElementById('platformDefectList');
     if(!list||!list.querySelector('.defect-card'))return;
@@ -43,8 +60,8 @@
 
   const observer=new MutationObserver(()=>decorate());
   function start(){
-    const modal=document.getElementById('platformDefectsModal');
-    if(modal)observer.observe(modal,{childList:true,subtree:true});
+    ensureRestEntry();
+    observer.observe(document.body,{childList:true,subtree:true,characterData:true});
     document.getElementById('platformDefects')?.addEventListener('click',()=>setTimeout(decorate,100));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
