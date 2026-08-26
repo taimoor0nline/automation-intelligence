@@ -2,212 +2,41 @@
   let lastExecutionSummary = null;
   let analysisInFlight = false;
 
-  function esc(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  function ownerLabel(value) {
-    const labels = {
-      APPLICATION_TEAM: 'Application team',
-      TEST_AUTOMATION_TEAM: 'Test automation team',
-      TEST_DATA_OWNER: 'Test data owner',
-      ENVIRONMENT_TEAM: 'Environment / DevOps team',
-      BUSINESS_ANALYST: 'Business analyst / product owner',
-      MANUAL_REVIEW: 'Manual review'
-    };
-    return labels[value] || String(value || 'Manual review').replaceAll('_', ' ');
-  }
+  function esc(value) { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+  function ownerLabel(value) { const labels={APPLICATION_TEAM:'Application team',TEST_AUTOMATION_TEAM:'Test automation team',TEST_DATA_OWNER:'Test data owner',ENVIRONMENT_TEAM:'Environment / DevOps team',BUSINESS_ANALYST:'Business analyst / product owner',MANUAL_REVIEW:'Manual review'}; return labels[value]||String(value||'Manual review').replaceAll('_',' '); }
 
   function ensureResolutionStyles() {
     if (document.getElementById('aiResolutionStyles')) return;
-    const style = document.createElement('style');
-    style.id = 'aiResolutionStyles';
-    style.textContent = `
-      .ai-resolution-card{border:1px solid #fde2e2;background:#fffafa;border-radius:10px;padding:12px;margin-top:9px}
-      .ai-resolution-top{display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:10.5px;font-weight:800;color:#b91c1c}
-      .ai-resolution-meta{font-size:10px;padding:3px 6px;border-radius:999px;background:#f3f4f6;color:#475569}
-      .ai-resolution-summary{font-size:11.5px;color:#6b7385;line-height:1.45;margin-top:7px}
-      .ai-resolution-box{margin-top:10px;padding:10px 11px;border:1px solid #bfdbfe;border-radius:9px;background:#f8fbff}
-      .ai-resolution-head{font-size:10.5px;font-weight:900;color:#1d4ed8;text-transform:uppercase;letter-spacing:.03em}
-      .ai-resolution-review{display:inline-block;margin-left:6px;padding:2px 5px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:8.8px}
-      .ai-resolution-text{font-size:11.5px;color:#334155;line-height:1.45;margin-top:7px}
-      .ai-resolution-detail{font-size:11px;color:#475569;line-height:1.45;margin-top:6px}
-      .ai-resolution-detail b{color:#1f2937}
-      .ai-resolution-steps{margin:5px 0 0 18px;padding:0}.ai-resolution-steps li{margin:3px 0}
-      .ai-resolution-warning{margin-top:8px;padding-top:7px;border-top:1px solid #dbeafe;font-size:10px;color:#64748b;line-height:1.4}
-      .developer-guidance{margin-top:10px;padding:11px;border:1px solid #c7d2fe;border-radius:9px;background:#fff}
-      .developer-guidance-head{font-size:10.5px;font-weight:900;color:#4338ca;text-transform:uppercase;letter-spacing:.03em}
-      .developer-example{margin-top:7px;padding:9px;border-radius:7px;background:#111827;color:#e5e7eb;font-family:Consolas,monospace;font-size:10.5px;line-height:1.45;white-space:pre-wrap;overflow:auto}
-    `;
-    document.head.appendChild(style);
+    const style=document.createElement('style');style.id='aiResolutionStyles';style.textContent=`
+      .ai-resolution-card{border:1px solid #fde2e2;background:#fffafa;border-radius:10px;padding:12px;margin-top:9px}.ai-resolution-top{display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:10.5px;font-weight:800;color:#b91c1c}.ai-resolution-meta{font-size:10px;padding:3px 6px;border-radius:999px;background:#f3f4f6;color:#475569}.source-level{background:#dcfce7;color:#166534}.source-level.suggested{background:#fef3c7;color:#92400e}.source-level.blackbox{background:#e5e7eb;color:#475569}.ai-resolution-summary{font-size:11.5px;color:#6b7385;line-height:1.45;margin-top:7px}.ai-resolution-box{margin-top:10px;padding:10px 11px;border:1px solid #bfdbfe;border-radius:9px;background:#f8fbff}.ai-resolution-head{font-size:10.5px;font-weight:900;color:#1d4ed8;text-transform:uppercase;letter-spacing:.03em}.ai-resolution-review{display:inline-block;margin-left:6px;padding:2px 5px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:8.8px}.ai-resolution-text{font-size:11.5px;color:#334155;line-height:1.45;margin-top:7px}.ai-resolution-detail{font-size:11px;color:#475569;line-height:1.45;margin-top:6px}.ai-resolution-detail b{color:#1f2937}.ai-resolution-steps{margin:5px 0 0 18px;padding:0}.ai-resolution-steps li{margin:3px 0}.ai-resolution-warning{margin-top:8px;padding-top:7px;border-top:1px solid #dbeafe;font-size:10px;color:#64748b;line-height:1.4}.developer-guidance{margin-top:10px;padding:11px;border:1px solid #c7d2fe;border-radius:9px;background:#fff}.developer-guidance-head{font-size:10.5px;font-weight:900;color:#4338ca;text-transform:uppercase;letter-spacing:.03em}.developer-example{margin-top:7px;padding:9px;border-radius:7px;background:#111827;color:#e5e7eb;font-family:Consolas,monospace;font-size:10.5px;line-height:1.45;white-space:pre-wrap;overflow:auto}.source-files{margin-top:7px;border:1px solid #dbeafe;border-radius:8px;overflow:hidden}.source-file{padding:7px 9px;border-bottom:1px solid #eef2ff;font-size:10.5px;background:#f8fafc}.source-file:last-child{border-bottom:0}.source-file code{font-weight:800;color:#1d4ed8}.source-reason{display:block;color:#64748b;margin-top:2px}`;document.head.appendChild(style);
+  }
+
+  function sourceBlock(a) {
+    const level=String(a.sourceGuidanceLevel||'BLACK_BOX');
+    const files=Array.isArray(a.sourceCandidateFiles)?a.sourceCandidateFiles:[];
+    if(level==='BLACK_BOX' || !files.length) return '';
+    return '<div class="ai-resolution-detail"><b>Repository evidence:</b><div class="source-files">'+files.map(f=>{
+      const range=f.startLine?` · lines ${esc(f.startLine)}${f.endLine?'-'+esc(f.endLine):''}`:'';
+      return `<div class="source-file"><code>${esc(f.path)}</code>${range}${f.reason?`<span class="source-reason">${esc(f.reason)}</span>`:''}</div>`;
+    }).join('')+'</div></div>';
   }
 
   function renderRichAnalyses(analyses) {
-    const target = document.getElementById('analysis');
-    if (!target || !Array.isArray(analyses) || !analyses.length) return;
-    ensureResolutionStyles();
-    target.innerHTML = '<div class="sub"><b>AI failure analysis & developer resolution guidance</b><br>Recommendations are advisory. Human review, application correction, and a successful re-run are required before a failure is considered resolved.</div>' + analyses.map((a) => {
-      const confidence = Math.round((Number(a.confidence) || 0) * 100);
-      const steps = Array.isArray(a.verificationSteps) && a.verificationSteps.length
-        ? '<ol class="ai-resolution-steps">' + a.verificationSteps.map((step) => '<li>' + esc(step) + '</li>').join('') + '</ol>'
-        : '';
-      const regression = Array.isArray(a.regressionChecks) && a.regressionChecks.length
-        ? '<ol class="ai-resolution-steps">' + a.regressionChecks.map((step) => '<li>' + esc(step) + '</li>').join('') + '</ol>'
-        : '';
-      const developer = a.classification === 'APPLICATION_DEFECT' && (a.developerReviewArea || a.developerImplementationHint || a.developerExampleFix || regression)
-        ? '<div class="developer-guidance">' +
-            '<div class="developer-guidance-head">Developer fix suggestion</div>' +
-            (a.developerReviewArea ? '<div class="ai-resolution-detail"><b>Where to inspect:</b> ' + esc(a.developerReviewArea) + '</div>' : '') +
-            (a.developerImplementationHint ? '<div class="ai-resolution-detail"><b>Implementation hint:</b> ' + esc(a.developerImplementationHint) + '</div>' : '') +
-            (a.developerExampleFix ? '<div class="ai-resolution-detail"><b>Illustrative fix pattern:</b></div><div class="developer-example">' + esc(a.developerExampleFix) + '</div>' : '') +
-            (regression ? '<div class="ai-resolution-detail"><b>Regression checks:</b>' + regression + '</div>' : '') +
-            '<div class="ai-resolution-warning">This is a developer aid based on observed behavior. Unless source code was explicitly provided to the analysis, it is not a verified source patch and must be reviewed against the real implementation.</div>' +
-          '</div>'
-        : '';
-      const resolution = a.resolutionComment || a.recommendedFix || steps
-        ? '<div class="ai-resolution-box">' +
-            '<div class="ai-resolution-head">AI resolution guidance <span class="ai-resolution-review">Human review required</span></div>' +
-            (a.resolutionComment ? '<div class="ai-resolution-text">' + esc(a.resolutionComment) + '</div>' : '') +
-            (a.recommendedFix ? '<div class="ai-resolution-detail"><b>Recommended fix:</b> ' + esc(a.recommendedFix) + '</div>' : '') +
-            (a.recommendedOwner ? '<div class="ai-resolution-detail"><b>Suggested owner:</b> ' + esc(ownerLabel(a.recommendedOwner)) + '</div>' : '') +
-            developer +
-            (steps ? '<div class="ai-resolution-detail"><b>Verify after correction:</b>' + steps + '</div>' : '') +
-            '<div class="ai-resolution-warning">The AI has not changed the application or test. Do not close the defect or weaken the assertion from this recommendation; re-run the original approved test after the human-reviewed correction.</div>' +
-          '</div>'
-        : '';
-      return '<div class="ai-resolution-card">' +
-        '<div class="ai-resolution-top">' + esc(a.testCase) + ' · ' + esc(a.classification) +
-          '<span class="ai-resolution-meta">Severity: ' + esc(a.severity || 'medium') + '</span>' +
-          '<span class="ai-resolution-meta">Confidence: ' + confidence + '%</span>' +
-        '</div>' +
-        '<div class="ai-resolution-summary">' + esc(a.summary || '') + '</div>' +
-        (a.probableCause ? '<div class="ai-resolution-detail"><b>Probable cause:</b> ' + esc(a.probableCause) + '</div>' : '') +
-        resolution +
-      '</div>';
+    const target=document.getElementById('analysis');if(!target||!Array.isArray(analyses)||!analyses.length)return;ensureResolutionStyles();
+    target.innerHTML='<div class="sub"><b>AI failure analysis & developer resolution guidance</b><br>Source-aware recommendations are grounded only in bounded repository candidates. Human review and a successful re-run are still required.</div>'+analyses.map(a=>{
+      const confidence=Math.round((Number(a.confidence)||0)*100),level=String(a.sourceGuidanceLevel||'BLACK_BOX');
+      const levelClass=level==='SOURCE_VERIFIED'?'source-level':level==='SOURCE_SUGGESTED'?'source-level suggested':'source-level blackbox';
+      const steps=Array.isArray(a.verificationSteps)&&a.verificationSteps.length?'<ol class="ai-resolution-steps">'+a.verificationSteps.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ol>':'';
+      const regression=Array.isArray(a.regressionChecks)&&a.regressionChecks.length?'<ol class="ai-resolution-steps">'+a.regressionChecks.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ol>':'';
+      const developer=a.classification==='APPLICATION_DEFECT'?'<div class="developer-guidance"><div class="developer-guidance-head">Developer fix suggestion</div>'+sourceBlock(a)+(a.developerReviewArea?'<div class="ai-resolution-detail"><b>Where to inspect:</b> '+esc(a.developerReviewArea)+'</div>':'')+(a.developerImplementationHint?'<div class="ai-resolution-detail"><b>Implementation hint:</b> '+esc(a.developerImplementationHint)+'</div>':'')+(a.developerExampleFix?'<div class="ai-resolution-detail"><b>Illustrative / proposed fix:</b></div><div class="developer-example">'+esc(a.developerExampleFix)+'</div>':'')+(regression?'<div class="ai-resolution-detail"><b>Regression checks:</b>'+regression+'</div>':'')+'<div class="ai-resolution-warning">SOURCE_VERIFIED means the named candidate/line area came from repository evidence; it still does not mean the AI has applied or proven the patch.</div></div>':'';
+      return '<div class="ai-resolution-card"><div class="ai-resolution-top">'+esc(a.testCase)+' · '+esc(a.classification)+'<span class="ai-resolution-meta">Severity: '+esc(a.severity||'medium')+'</span><span class="ai-resolution-meta">Confidence: '+confidence+'%</span><span class="ai-resolution-meta '+levelClass+'">'+esc(level.replaceAll('_',' '))+'</span></div><div class="ai-resolution-summary">'+esc(a.summary||'')+'</div>'+(a.probableCause?'<div class="ai-resolution-detail"><b>Probable cause:</b> '+esc(a.probableCause)+'</div>':'')+'<div class="ai-resolution-box"><div class="ai-resolution-head">AI resolution guidance <span class="ai-resolution-review">Human review required</span></div>'+(a.resolutionComment?'<div class="ai-resolution-text">'+esc(a.resolutionComment)+'</div>':'')+(a.recommendedFix?'<div class="ai-resolution-detail"><b>Recommended fix:</b> '+esc(a.recommendedFix)+'</div>':'')+(a.recommendedOwner?'<div class="ai-resolution-detail"><b>Suggested owner:</b> '+esc(ownerLabel(a.recommendedOwner))+'</div>':'')+developer+(steps?'<div class="ai-resolution-detail"><b>Verify after correction:</b>'+steps+'</div>':'')+'<div class="ai-resolution-warning">AI has not changed the application or weakened the test. Resolution is proven by the original approved test passing after the reviewed correction.</div></div></div>';
     }).join('');
   }
 
-  function ensureAnalysisControls() {
-    const analysis = document.getElementById('analysis');
-    if (!analysis || document.getElementById('analyzeResultsBox')) return;
-    ensureResolutionStyles();
+  function ensureAnalysisControls(){const analysis=document.getElementById('analysis');if(!analysis||document.getElementById('analyzeResultsBox'))return;ensureResolutionStyles();const box=document.createElement('div');box.id='analyzeResultsBox';box.style.display='none';box.style.marginTop='12px';box.innerHTML='<button id="analyzeResultsBtn" class="btn secondary" type="button" style="width:100%">Analyze & Suggest Developer Fix with AI</button><div id="analyzeResultsHint" class="sub" style="margin-top:7px;text-align:center">If a source repository is selected, AI will first inspect bounded repository candidates for the failed behavior.</div>';analysis.insertAdjacentElement('beforebegin',box);document.getElementById('analyzeResultsBtn').addEventListener('click',analyzeResults)}
+  function markReadyForRerun(summary){if(!summary)return;setTimeout(()=>{const runBtn=document.getElementById('runBtn'),runHint=document.getElementById('runHint');if(!runBtn)return;runBtn.textContent='Run Again';runBtn.disabled=false;if(runHint)runHint.textContent=`${summary.passed||0} passed · ${summary.failed||0} failed · apply reviewed corrections or run again`},0)}
+  async function analyzeResults(){if(!sessionId||!lastExecutionSummary||analysisInFlight)return;const btn=document.getElementById('analyzeResultsBtn'),hint=document.getElementById('analyzeResultsHint');analysisInFlight=true;if(btn){btn.disabled=true;btn.textContent='Analyzing failure & source candidates…'}if(hint)hint.textContent='Analyzing completed failure evidence. Repository source is read-only; no application code is being modified.';setActivityStatus('Analyzing failures',true);try{const response=await fetch('/api/test-results/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId})}),data=await response.json();if(!response.ok)throw new Error(data.reply||'AI failure analysis failed.');const summary=data.summary||lastExecutionSummary,analyses=data.failureAnalyses||[];if(typeof window.renderResults==='function')window.renderResults(summary,analyses);renderRichAnalyses(analyses);if(data.reportUrl){document.getElementById('reportLink').href=data.reportUrl;document.getElementById('reportBox').style.display='block'}if(hint)hint.textContent=analyses.length?'AI developer guidance completed. Source evidence level is shown per failure.':'There were no failed tests requiring AI analysis.';if(btn)btn.style.display='none';setActivityStatus('Analysis complete',false);markReadyForRerun(summary)}catch(err){showError(err.message);if(hint)hint.textContent='AI analysis did not complete. Browser results remain available.';if(btn){btn.disabled=false;btn.textContent='Retry AI Developer Fix Guidance'}setActivityStatus('Completed · analysis pending',false);markReadyForRerun(lastExecutionSummary)}finally{analysisInFlight=false}}
 
-    const box = document.createElement('div');
-    box.id = 'analyzeResultsBox';
-    box.style.display = 'none';
-    box.style.marginTop = '12px';
-    box.innerHTML =
-      '<button id="analyzeResultsBtn" class="btn secondary" type="button" style="width:100%">Analyze & Suggest Developer Fix with AI</button>' +
-      '<div id="analyzeResultsHint" class="sub" style="margin-top:7px;text-align:center">Browser execution is complete. AI can analyze failed tests and suggest a developer remediation approach without changing application code.</div>';
-    analysis.insertAdjacentElement('beforebegin', box);
-
-    document.getElementById('analyzeResultsBtn').addEventListener('click', analyzeResults);
-  }
-
-  function markReadyForRerun(summary) {
-    if (!summary) return;
-    setTimeout(() => {
-      const runBtn = document.getElementById('runBtn');
-      const runHint = document.getElementById('runHint');
-      if (!runBtn) return;
-      runBtn.textContent = 'Run Again';
-      runBtn.disabled = false;
-      if (runHint) {
-        runHint.textContent = `${summary.passed || 0} passed · ${summary.failed || 0} failed · apply reviewed corrections, adjust selections, or run the approved set again`;
-      }
-    }, 0);
-  }
-
-  async function analyzeResults() {
-    if (!sessionId || !lastExecutionSummary || analysisInFlight) return;
-    const btn = document.getElementById('analyzeResultsBtn');
-    const hint = document.getElementById('analyzeResultsHint');
-    analysisInFlight = true;
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Analyzing failure & preparing developer guidance…';
-    }
-    if (hint) hint.textContent = 'Sending only completed failed-test evidence to the selected AI profile. No browser execution or application modification is occurring now.';
-    setActivityStatus('Analyzing failures', true);
-
-    try {
-      const response = await fetch('/api/test-results/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.reply || 'AI failure analysis failed.');
-
-      const summary = data.summary || lastExecutionSummary;
-      const analyses = data.failureAnalyses || [];
-      if (typeof window.renderResults === 'function') window.renderResults(summary, analyses);
-      renderRichAnalyses(analyses);
-      if (data.reportUrl) {
-        document.getElementById('reportLink').href = data.reportUrl;
-        document.getElementById('reportBox').style.display = 'block';
-      }
-      if (hint) hint.textContent = analyses.length ? 'AI analysis and developer-oriented remediation guidance completed for the failed tests.' : 'There were no failed tests requiring AI analysis.';
-      if (btn) btn.style.display = 'none';
-      setActivityStatus('Analysis complete', false);
-      markReadyForRerun(summary);
-    } catch (err) {
-      showError(err.message);
-      if (hint) hint.textContent = 'AI analysis did not complete. Browser test results remain available above and you can still run again.';
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Retry AI Developer Fix Guidance';
-      }
-      setActivityStatus('Completed · analysis pending', false);
-      markReadyForRerun(lastExecutionSummary);
-    } finally {
-      analysisInFlight = false;
-    }
-  }
-
-  ensureAnalysisControls();
-
-  const sectionHeading = [...document.querySelectorAll('.section-head h2')].find((el) => el.textContent.includes('Execution'));
-  const sectionSub = sectionHeading?.parentElement?.querySelector('.sub');
-  if (sectionSub) {
-    sectionSub.textContent = 'The automation system executes approved tests deterministically. Failed-test AI analysis and developer remediation guidance are optional and run only after execution completes.';
-  }
-
-  const originalRenderResults = window.renderResults;
-  if (typeof originalRenderResults === 'function') {
-    window.renderResults = function (summary, analyses) {
-      lastExecutionSummary = summary || lastExecutionSummary;
-      originalRenderResults(summary, analyses || []);
-      ensureAnalysisControls();
-      markReadyForRerun(summary);
-
-      const box = document.getElementById('analyzeResultsBox');
-      const btn = document.getElementById('analyzeResultsBtn');
-      const hint = document.getElementById('analyzeResultsHint');
-      const failed = Number(summary?.failed || 0);
-      const hasAnalyses = Array.isArray(analyses) && analyses.length > 0;
-
-      if (hasAnalyses) renderRichAnalyses(analyses);
-      if (box) box.style.display = failed > 0 ? 'block' : 'none';
-      if (failed > 0 && !hasAnalyses && btn) {
-        btn.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = 'Analyze & Suggest Developer Fix with AI';
-        if (hint) hint.textContent = `${failed} failed test(s) are available for optional AI analysis and developer remediation guidance. Browser execution has already finished.`;
-        setTimeout(() => {
-          const reportBox = document.getElementById('reportBox');
-          if (reportBox) reportBox.style.display = 'none';
-        }, 0);
-      } else if (hasAnalyses && btn) {
-        btn.style.display = 'none';
-        if (hint) hint.textContent = 'AI analysis and developer-oriented remediation guidance completed for the failed tests.';
-      }
-    };
-    try { renderResults = window.renderResults; } catch {}
-  }
+  ensureAnalysisControls();const sectionHeading=[...document.querySelectorAll('.section-head h2')].find(el=>el.textContent.includes('Execution')),sectionSub=sectionHeading?.parentElement?.querySelector('.sub');if(sectionSub)sectionSub.textContent='Approved tests execute deterministically. Optional AI failure analysis can use a configured source repository after execution.';
+  const originalRenderResults=window.renderResults;if(typeof originalRenderResults==='function'){window.renderResults=function(summary,analyses){lastExecutionSummary=summary||lastExecutionSummary;originalRenderResults(summary,analyses||[]);ensureAnalysisControls();markReadyForRerun(summary);const box=document.getElementById('analyzeResultsBox'),btn=document.getElementById('analyzeResultsBtn'),hint=document.getElementById('analyzeResultsHint'),failed=Number(summary?.failed||0),hasAnalyses=Array.isArray(analyses)&&analyses.length>0;if(hasAnalyses)renderRichAnalyses(analyses);if(box)box.style.display=failed>0?'block':'none';if(failed>0&&!hasAnalyses&&btn){btn.style.display='block';btn.disabled=false;btn.textContent='Analyze & Suggest Developer Fix with AI';if(hint)hint.textContent=`${failed} failed test(s) can be analyzed${' with optional source repository evidence'}.`;setTimeout(()=>{const reportBox=document.getElementById('reportBox');if(reportBox)reportBox.style.display='none'},0)}else if(hasAnalyses&&btn){btn.style.display='none';if(hint)hint.textContent='AI analysis and developer guidance completed.'}};try{renderResults=window.renderResults}catch{}}
 })();
