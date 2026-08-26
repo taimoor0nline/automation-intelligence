@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../AITestPilot.Domain/AITestPilot.Domain.csproj" />
+    <ProjectReference Include="../AITestPilot.Application/AITestPilot.Application.csproj" />
+  </ItemGroup>
+</Project>
