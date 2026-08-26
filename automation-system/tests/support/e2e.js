@@ -1,6 +1,8 @@
 // AI TestPilot — automation support file
 // Global behaviour for deterministic browser automation specs.
 
+require("cypress-axe");
+
 function getDemoStepDelayMs() {
   const value = Number(Cypress.env("DEMO_STEP_DELAY_MS") || 0);
   if (!Number.isFinite(value)) return 0;
