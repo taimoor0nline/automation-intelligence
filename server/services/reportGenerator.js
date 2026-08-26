@@ -63,8 +63,23 @@ function analysisHtml(analysis, test) {
   if (analysis.actual) details.push(`<div class="analysis-detail"><b>Observed:</b> ${esc(analysis.actual)}</div>`);
   if (analysis.probableCause) details.push(`<div class="analysis-detail"><b>Probable cause:</b> ${esc(analysis.probableCause)}</div>`);
 
+  let developer = "";
+  if (analysis.classification === "APPLICATION_DEFECT" && (analysis.developerReviewArea || analysis.developerImplementationHint || analysis.developerExampleFix || analysis.regressionChecks?.length)) {
+    const regression = Array.isArray(analysis.regressionChecks) && analysis.regressionChecks.length
+      ? `<ol>${analysis.regressionChecks.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`
+      : "";
+    developer = `<div class="developer-box">
+      <div class="developer-head">Developer fix suggestion</div>
+      ${analysis.developerReviewArea ? `<div class="analysis-detail"><b>Where to inspect:</b> ${esc(analysis.developerReviewArea)}</div>` : ""}
+      ${analysis.developerImplementationHint ? `<div class="analysis-detail"><b>Implementation hint:</b> ${esc(analysis.developerImplementationHint)}</div>` : ""}
+      ${analysis.developerExampleFix ? `<div class="analysis-detail"><b>Illustrative fix pattern:</b></div><pre>${esc(analysis.developerExampleFix)}</pre>` : ""}
+      ${regression ? `<div class="analysis-detail"><b>Regression checks:</b>${regression}</div>` : ""}
+      <div class="developer-warning">Developer aid only. Unless source code was explicitly supplied to the analysis, this is not a verified source patch and must be reviewed against the real implementation.</div>
+    </div>`;
+  }
+
   let resolution = "";
-  if (analysis.resolutionComment || analysis.recommendedFix || analysis.verificationSteps?.length) {
+  if (analysis.resolutionComment || analysis.recommendedFix || analysis.verificationSteps?.length || developer) {
     const verification = Array.isArray(analysis.verificationSteps) && analysis.verificationSteps.length
       ? `<ol>${analysis.verificationSteps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`
       : "";
@@ -73,6 +88,7 @@ function analysisHtml(analysis, test) {
       ${analysis.resolutionComment ? `<div class="resolution-comment">${esc(analysis.resolutionComment)}</div>` : ""}
       ${analysis.recommendedFix ? `<div class="analysis-detail"><b>Recommended fix:</b> ${esc(analysis.recommendedFix)}</div>` : ""}
       ${analysis.recommendedOwner ? `<div class="analysis-detail"><b>Suggested owner:</b> ${esc(ownerLabel(analysis.recommendedOwner))}</div>` : ""}
+      ${developer}
       ${verification ? `<div class="analysis-detail"><b>Verify after correction:</b>${verification}</div>` : ""}
       <div class="resolution-warning">Advisory only — this does not modify the application, weaken the test, close the defect, or mark the test resolved. Resolution is proven only by a successful re-run.</div>
     </div>`;
@@ -137,6 +153,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   .classification{display:inline-block;font-size:11px;font-weight:800;padding:4px 7px;border-radius:6px;background:#eef2ff;color:#3730a3}.classification.defect{background:#fee2e2;color:var(--red)}.classification.automation{background:#fef3c7;color:var(--amber)}
   .analysis-summary{margin-top:7px;line-height:1.45;color:var(--muted)}.analysis-detail{margin-top:6px;line-height:1.4;font-size:12px}.analysis-detail b{color:var(--text)}
   .resolution-box{margin-top:10px;padding:11px 12px;border-radius:9px;border:1px solid #bfdbfe;background:#f8fbff}.resolution-head{font-size:11px;font-weight:900;color:#1d4ed8;text-transform:uppercase;letter-spacing:.03em}.resolution-head span{margin-left:6px;padding:2px 5px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:9px}.resolution-comment{margin-top:7px;line-height:1.45;font-size:12px;color:#334155}.resolution-box ol{margin:5px 0 0 18px;padding:0}.resolution-box li{margin:3px 0}.resolution-warning{margin-top:9px;padding-top:7px;border-top:1px solid #dbeafe;color:#64748b;font-size:10.5px;line-height:1.4}
+  .developer-box{margin-top:10px;padding:11px;border-radius:9px;border:1px solid #c7d2fe;background:#fff}.developer-head{font-size:11px;font-weight:900;color:#4338ca;text-transform:uppercase;letter-spacing:.03em}.developer-box pre{margin:7px 0 0;padding:10px;border-radius:7px;background:#111827;color:#e5e7eb;font-family:Consolas,monospace;font-size:11px;line-height:1.45;white-space:pre-wrap;overflow:auto}.developer-warning{margin-top:8px;padding-top:7px;border-top:1px solid #e0e7ff;color:#64748b;font-size:10.5px;line-height:1.4}
   @media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}}@media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr)}.hero{display:block}.meta{text-align:left;margin-top:14px}table{display:block;overflow:auto}}
 </style>
 </head>
@@ -160,8 +177,8 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   <h2 class="section-title">Business story</h2>
   <div class="card story">${esc(story)}</div>
   <h2 class="section-title">Execution results</h2>
-  <table><thead><tr><th>Case</th><th>Test</th><th>Execution outcome</th><th>Duration</th><th>Evidence</th><th>Failure analysis & AI resolution guidance</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="muted" style="margin-top:12px">Every row shown here passed the automation-readiness gate before execution. AI resolution guidance is advisory and requires human review. A defect is considered resolved only after the responsible change is made and the original approved test passes on re-run.</div>
+  <table><thead><tr><th>Case</th><th>Test</th><th>Execution outcome</th><th>Duration</th><th>Evidence</th><th>Failure analysis & developer guidance</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="muted" style="margin-top:12px">Every row shown here passed the automation-readiness gate before execution. Developer suggestions are advisory and require human review. A defect is considered resolved only after the responsible change is made and the original approved test passes on re-run.</div>
 </div></body></html>`;
 
   saveReportHtml(sessionId, html);
