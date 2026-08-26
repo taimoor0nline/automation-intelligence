@@ -33,6 +33,7 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
     public DbSet<TestAssertionResult> TestAssertionResults => Set<TestAssertionResult>();
     public DbSet<TestNetworkEvent> TestNetworkEvents => Set<TestNetworkEvent>();
     public DbSet<TestBrowserEvent> TestBrowserEvents => Set<TestBrowserEvent>();
+    public DbSet<TestArtifact> TestArtifacts => Set<TestArtifact>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -51,6 +52,7 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
         builder.Entity<TestAssertionResult>().ToTable("test_assertion_results");
         builder.Entity<TestNetworkEvent>().ToTable("test_network_events");
         builder.Entity<TestBrowserEvent>().ToTable("test_browser_events");
+        builder.Entity<TestArtifact>().ToTable("test_artifacts");
         builder.Entity<AuditEvent>().ToTable("audit_events");
 
         ConfigureIdentityTables(builder);
@@ -104,6 +106,7 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
         builder.Entity<TestAssertionResult>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.TestCaseId, value.Sequence });
         builder.Entity<TestNetworkEvent>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.OccurredAtUtc });
         builder.Entity<TestBrowserEvent>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.OccurredAtUtc });
+        builder.Entity<TestArtifact>().HasIndex(value => new { value.WorkspaceId, value.TestRunId, value.TestResultId });
         builder.Entity<AuditEvent>().HasIndex(value => new { value.WorkspaceId, value.OccurredAtUtc });
     }
 
@@ -131,6 +134,8 @@ public sealed class AITestPilotDbContext : IdentityDbContext<ApplicationUser, Id
         builder.Entity<TestRun>().Property(value => value.ExecutionEngine).HasMaxLength(50);
         builder.Entity<TestRunCase>().Property(value => value.TestCaseNumberSnapshot).HasMaxLength(50);
         builder.Entity<TestRunCase>().Property(value => value.TitleSnapshot).HasMaxLength(300);
+        builder.Entity<TestArtifact>().Property(value => value.StorageProvider).HasMaxLength(100);
+        builder.Entity<TestArtifact>().Property(value => value.ContentType).HasMaxLength(200);
     }
 
     private static string SerializeDefinition(TestDefinition value) =>
