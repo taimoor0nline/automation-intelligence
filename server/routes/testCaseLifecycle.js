@@ -9,7 +9,7 @@ const {
   classifyTestCase,
   readinessSummary,
 } = require("../services/testCaseFeasibility");
-const { generateSingleTestCase, repairTestCase } = require("../services/testCaseAiService");
+const { generateSingleTestCase, repairTestCase, suggestAssertionCapability } = require("../services/testCaseAiService");
 
 function cleanString(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
@@ -183,6 +183,39 @@ router.post("/api/test-cases/repair", async (req, res) => {
     return res.json({ ok: true, repaired: true, testCase: repaired, automationReadiness: repaired.automationReadiness, aiModelTier: session.aiModelTier || "strong" });
   } catch (err) {
     return res.status(422).json({ ok: false, repaired: false, reply: err.message });
+  }
+});
+
+router.post("/api/test-cases/assertion-suggestion", async (req, res) => {
+  const { sessionId = "default", testCase: rawTestCase, credentials = null } = req.body || {};
+  const session = getSession(sessionId);
+
+  try {
+    if (session.state === "IDLE" || !session.story) throw new Error("Generate the initial test suite before requesting an assertion suggestion.");
+    updateCredentials(session, credentials);
+
+    const testCase = normalizeTestCase(rawTestCase, "TC-H001");
+    const readiness = classifyTestCase(testCase, context(session));
+    if (!readiness.canSuggestAssertion) {
+      return res.status(422).json({ ok: false, reply: "This test case does not currently contain an unsupported or uncompiled expectation that needs an assertion suggestion.", automationReadiness: readiness });
+    }
+
+    const suggestion = await suggestAssertionCapability({
+      testCase,
+      readiness,
+      story: session.story,
+      pageDiscoveries: session.pageDiscoveries,
+      modelTier: session.aiModelTier || "strong",
+    });
+
+    return res.json({
+      ok: true,
+      suggestion,
+      automationReadiness: readiness,
+      aiModelTier: session.aiModelTier || "strong",
+    });
+  } catch (err) {
+    return res.status(422).json({ ok: false, reply: err.message });
   }
 });
 
