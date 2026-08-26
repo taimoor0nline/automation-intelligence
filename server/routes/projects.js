@@ -32,6 +32,13 @@ router.post('/api/projects/:projectId/members', requireAuth, requireRole('MANAGE
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
+router.get('/api/developers', requireAuth, requireRole('QA','MANAGER'), async (_req, res) => {
+  try {
+    const result = await db.query(`select id,email,display_name as "displayName" from users where role='DEV' and is_active=true order by display_name,email`);
+    res.json({ ok: true, developers: result.rows });
+  } catch (err) { res.status(500).json({ reply: err.message }); }
+});
+
 router.get('/api/projects/:projectId/repositories', requireAuth, async (req, res) => {
   try {
     const result = await db.query(`select * from source_repositories where project_id=$1 order by created_at desc`, [req.params.projectId]);
@@ -79,7 +86,12 @@ router.get('/api/projects/:projectId/defects', requireAuth, async (req, res) => 
 
 router.patch('/api/defects/:id/assign', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
   try {
-    const result = await db.query(`update defect_analyses set assigned_to=$1 where id=$2 returning *`, [req.body?.userId || null, req.params.id]);
+    const userId = req.body?.userId || null;
+    if (userId) {
+      const developer = await db.query(`select id from users where id=$1 and role='DEV' and is_active=true`, [userId]);
+      if (!developer.rowCount) return res.status(400).json({ reply: 'Defects may be assigned only to an active DEV user.' });
+    }
+    const result = await db.query(`update defect_analyses set assigned_to=$1 where id=$2 returning *`, [userId, req.params.id]);
     if (!result.rowCount) return res.status(404).json({ reply: 'Defect not found.' });
     res.json({ ok: true, defect: result.rows[0] });
   } catch (err) { res.status(500).json({ reply: err.message }); }
