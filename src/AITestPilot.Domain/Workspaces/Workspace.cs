@@ -1,28 +1,24 @@
+using AITestPilot.Domain.Common;
+
 namespace AITestPilot.Domain.Workspaces;
 
-public sealed class Workspace
+public sealed class Workspace : AuditableEntity
 {
-    public Guid Id { get; private set; }
     public string Code { get; private set; } = string.Empty;
     public string Name { get; private set; } = string.Empty;
     public bool IsActive { get; private set; }
-    public DateTimeOffset CreatedAtUtc { get; private set; }
-    public DateTimeOffset UpdatedAtUtc { get; private set; }
 
     private Workspace()
     {
     }
 
-    public Workspace(Guid id, string code, string name)
+    public Workspace(Guid id, string code, string name) : base(id)
     {
         if (id == Guid.Empty) throw new ArgumentException("Workspace Id is required.", nameof(id));
 
-        Id = id;
         Code = NormalizeRequired(code, nameof(code), 50).ToUpperInvariant();
         Name = NormalizeRequired(name, nameof(name), 200);
         IsActive = true;
-        CreatedAtUtc = DateTimeOffset.UtcNow;
-        UpdatedAtUtc = CreatedAtUtc;
     }
 
     public void Rename(string name)
@@ -42,8 +38,6 @@ public sealed class Workspace
         IsActive = true;
         Touch();
     }
-
-    private void Touch() => UpdatedAtUtc = DateTimeOffset.UtcNow;
 
     private static string NormalizeRequired(string value, string parameterName, int maxLength)
     {
