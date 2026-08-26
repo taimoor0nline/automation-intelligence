@@ -1,5 +1,6 @@
 const { defineConfig } = require("cypress");
 const fs = require("fs");
+const path = require("path");
 
 function boolEnv(value, fallback) {
   if (value == null || value === "") return fallback;
@@ -36,22 +37,26 @@ module.exports = defineConfig({
       on("before:browser:launch", (browser, launchOptions) => {
         const streamingEnabled = boolEnv(process.env.AUTOMATION_LIVE_STREAM, false);
         if (!streamingEnabled || browser.family !== "chromium") return launchOptions;
+
         const preferredPort = Math.max(1024, Math.min(numberEnv(process.env.AUTOMATION_LIVE_STREAM_PORT, 9223), 65535));
         const existingIndex = launchOptions.args.findIndex((arg) => String(arg).startsWith("--remote-debugging-port="));
         const debugArg = `--remote-debugging-port=${preferredPort}`;
         if (existingIndex >= 0) launchOptions.args[existingIndex] = debugArg;
         else launchOptions.args.push(debugArg);
         launchOptions.args.push("--remote-debugging-address=127.0.0.1");
-        if (process.env.AUTOMATION_CDP_INFO_FILE) {
-          try {
-            fs.writeFileSync(process.env.AUTOMATION_CDP_INFO_FILE, JSON.stringify({ port: preferredPort, browser: browser.name, at: new Date().toISOString() }), "utf8");
-          } catch (err) {
-            console.warn(`[automation-engine] Could not publish live-stream debugger info: ${err.message}`);
-          }
+
+        const infoFile = process.env.AUTOMATION_CDP_INFO_FILE || path.join(__dirname, "artifacts", "live-browser-cdp.json");
+        try {
+          fs.mkdirSync(path.dirname(infoFile), { recursive: true });
+          fs.writeFileSync(infoFile, JSON.stringify({ port: preferredPort, browser: browser.name, at: new Date().toISOString() }), "utf8");
+        } catch (err) {
+          console.warn(`[automation-engine] Could not publish live-stream debugger info: ${err.message}`);
         }
+
         console.log(`[automation-engine] Live browser stream enabled on Chrome DevTools port ${preferredPort}.`);
         return launchOptions;
       });
+
       on("after:spec", (_spec, results) => {
         if (results) console.log(`[automation-engine] Spec teardown finished: ${results.stats?.passes || 0} passed, ${results.stats?.failures || 0} failed`);
       });
