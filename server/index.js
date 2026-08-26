@@ -9,11 +9,11 @@ const runRoutes = require("./routes/run");
 const testCaseLifecycleRoutes = require("./routes/testCaseLifecycle");
 const liveBrowserRoutes = require("./routes/liveBrowser");
 const qwen = require("./services/qwenClient");
+const { analyzeFailureWithResolution } = require("./services/failureResolutionAiService");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
 
-const analyzeFailure = qwen.analyzeFailure.bind(qwen);
 qwen.analyzeFailure = async (args) => {
-  const analysis = await analyzeFailure(args);
+  const analysis = await analyzeFailureWithResolution(args);
   const expected = String(args?.expected || "");
   const actual = String(args?.actual || "");
   const tc = args?.testCase || {};
@@ -29,10 +29,32 @@ qwen.analyzeFailure = async (args) => {
         ? "The application accepted age 17 even though the discovered minimum is 18, then hid the form instead of showing the required age validation."
         : "The application accepted the malformed website value even though the field requires a URL, then hid the form instead of showing the required website validation.",
       probableCause: tc.id === "TC004"
-        ? "The target application's age boundary check incorrectly allows 17."
-        : "The target application's website validation incorrectly allows values such as abc.",
+        ? "The target application's age boundary validation is not enforcing the approved minimum of 18."
+        : "The target application's website validation is not enforcing the approved URL-format requirement for values such as abc.",
       severity: "high",
       confidence: Math.max(Number(analysis.confidence) || 0, 0.98),
+      resolutionComment: tc.id === "TC004"
+        ? "Review the application's age-validation rule and align both client/server validation with the approved minimum age of 18. Do not change the test boundary or assertion to accommodate age 17."
+        : "Review the application's website-validation rule so a non-empty website value must satisfy the approved URL format. Do not weaken the URL test or remove the validation assertion.",
+      recommendedFix: tc.id === "TC004"
+        ? "Correct the age boundary logic so values below 18 are rejected and the age validation message is rendered while the form remains available for correction."
+        : "Correct website validation so malformed non-empty values such as abc are rejected and the website validation message is rendered while the form remains available for correction.",
+      recommendedOwner: "APPLICATION_TEAM",
+      verificationSteps: tc.id === "TC004"
+        ? [
+            "Apply the reviewed age-validation correction in the application.",
+            "Re-run TC004 with age 17 and confirm submission is rejected.",
+            "Confirm [data-testid=\"age-error\"] becomes visible with non-empty validation text.",
+            "Re-run the valid age scenario to confirm valid feedback submission still succeeds.",
+          ]
+        : [
+            "Apply the reviewed website-validation correction in the application.",
+            "Re-run TC005 with website value abc and confirm submission is rejected.",
+            "Confirm [data-testid=\"website-error\"] becomes visible with non-empty validation text.",
+            "Re-run a valid HTTP/HTTPS website scenario to confirm valid feedback submission still succeeds.",
+          ],
+      safeToAutoResolve: false,
+      resolutionSource: "AI_ADVISORY_WITH_DETERMINISTIC_DEMO_GUARDRAIL",
     };
   }
   return analysis;
