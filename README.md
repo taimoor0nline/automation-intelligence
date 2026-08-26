@@ -1,121 +1,103 @@
-# AI TestPilot — Real AI Automation Demo
+# AI TestPilot — Persistent Source-Aware Cypress Automation
 
-AI TestPilot is a focused demonstration of **story-driven test automation**:
+AI TestPilot is evolving from a focused demo into a persistent QA platform while retaining the current deterministic **Cypress** execution model.
 
 ```text
 Business user story
       ↓
-Page discovery (real controls/selectors from the target pages)
+Page discovery
       ↓
-Qwen Test Analyst
+AI test-case generation
       ↓
-Structured test cases / use cases
+Human QA review / approval
       ↓
-Human review and approval
+Deterministic Cypress compile + execution
       ↓
-Qwen Automation Engineer
+PASS / FAIL + evidence
       ↓
-Security + syntax validation
+Optional AI failure analysis
       ↓
-Visible browser automation
+Optional source-aware repository inspection
       ↓
-PASS / FAIL
+Developer fix guidance + candidate files/line areas
       ↓
-Qwen failure analysis
-      ↓
-HTML analytics report
+PostgreSQL persistence + defect ownership
 ```
 
-There is **no database** in this demo. Test cases, results and the HTML report live only in the Node.js process for the current run. Restarting the backend clears them.
+## Platform roles
 
-## Demo application
+The first platform roles are:
 
-The target demo app runs at `http://localhost:4000` and contains two pages:
+| Role | Current responsibility |
+|---|---|
+| `DEV` | Review assigned application defects and source-aware developer guidance; record administrative resolution after a code change. |
+| `QA` | Generate/review tests, execute Cypress runs, request failure/source analysis, connect source repositories. |
+| `MANAGER` | User/project administration plus QA permissions. Comparative management reporting is intentionally deferred to a later phase. |
 
-- `/` — login page
-- `/feedback` — customer feedback form
+For production use set `AUTH_REQUIRED=true`. The UI stores the JWT only in browser `sessionStorage`; passwords are bcrypt-hashed in PostgreSQL.
 
-Demo credentials:
+## PostgreSQL persistence
 
-```text
-Username: admin
-Password: admin123
-```
+PostgreSQL now stores projects, users, memberships, source repositories, test sessions, test cases, runs, results and defect analyses. Active browser execution still uses an in-process session object, but persisted sessions can be rehydrated after a backend restart.
 
-The feedback API intentionally keeps two application defects so the automation has genuine failures to detect:
+Sensitive runtime credentials are deliberately **not** written into `session_json`. Local artifact paths and generated report HTML are also not restored as durable secrets/state.
 
-- age `17` is incorrectly accepted although the UI/specification says 18–100;
-- a website such as `abc` is incorrectly accepted although the field requires a valid URL.
+The schema also captures fields needed later for manager analytics without creating rankings yet:
 
-For the current five-case demonstration, once the real login and feedback controls are discovered, the demo calibrates the reviewed set to a predictable shape:
+- defect assignment and resolution ownership;
+- developer/commit attribution;
+- files changed and lines added/deleted;
+- cyclomatic complexity;
+- cognitive complexity;
+- metadata for future normalized quality metrics.
 
-1. valid login + valid feedback submission — expected PASS;
-2. invalid login credentials — expected PASS;
-3. missing required email on the feedback form — expected PASS;
-4. age `17` against the discovered minimum of `18` — expected FAIL because of the demo application defect;
-5. malformed website value `abc` — expected FAIL because of the demo application defect.
+A future manager comparison should not rank developers by raw bug count alone. Useful comparisons should be normalized by code ownership, delivered change volume, severity, complexity and time period.
 
-The two failing checks are legitimate expected-behaviour tests. They fail because the demo target violates its own discovered constraints, not because the assertions are deliberately made incorrect. This calibration is only for the PoC/demo and should not be carried into the production test-generation policy.
+## Source-aware failed-test analysis
 
-## AI TestPilot UI
+A project may have one or more GitHub source repositories. When QA selects a repository for a run, failed `APPLICATION_DEFECT` scenarios can use bounded source evidence during the optional AI analysis stage.
 
-The testing UI runs at:
+The source analyzer:
 
-```text
-http://localhost:5000
-```
+1. reads the configured repository/branch server-side;
+2. limits inspection to supported source-code extensions;
+3. derives search terms from the approved test and observed failure;
+4. scores likely source files;
+5. reads only bounded candidate files/snippets;
+6. supplies those bounded snippets to the AI remediation analyst;
+7. stores the resulting source context with the defect analysis.
 
-The user provides:
+The AI output distinguishes:
 
-1. target URL;
-2. optional **Known pages** hints, such as `/feedback`;
-3. environment;
-4. test username/password;
-5. a business user story.
+- `BLACK_BOX` — no source-grounded file evidence;
+- `SOURCE_SUGGESTED` — repository candidate files were found but evidence is not strong enough to call the location verified;
+- `SOURCE_VERIFIED` — the named candidate/line area came from supplied repository snippets relevant to the failure.
 
-### Known pages are optional
+`SOURCE_VERIFIED` still does **not** mean an AI patch has been applied or proven. The developer reviews the suggestion, changes the application, and QA re-runs the original approved test.
 
-The current discovery service always starts from the Target URL. In addition to explicitly supplied Known pages, it now performs a small bounded same-origin discovery pass over real page route hints such as links, form actions and simple root-relative routes found in the page source.
+Private repositories require a server-side `GITHUB_SOURCE_TOKEN`. The token is never exposed to the browser. Repository code snippets used for source-aware analysis are intentionally sent to the configured AI provider, so enable this mode only for repositories whose code is permitted to be processed by that provider.
 
-For this demo, the login page contains a real `/feedback` redirect hint. Therefore `/feedback` can still be discovered even when the **Known pages (optional)** box is blank.
+## Database setup
 
-This remains deliberately limited static discovery. It is not intended to replace the future browser-driven discovery agent for real React/Next/Vue/SPA applications.
-
-Credentials are kept in the in-memory session and injected into the browser automation runtime at execution time. Their values are **not included in the Qwen prompt**. Generated automation reads `TEST_USERNAME` and `TEST_PASSWORD` from the secure runtime environment.
-
-## Review and edit test cases
-
-Qwen proposes the initial test set, but the tester can still control the final execution set before automation code is generated. A tester can:
-
-- include or exclude generated cases;
-- edit a generated case;
-- delete a case;
-- add a human-authored case;
-- start a new case from Functional, Validation, Boundary, Negative or Blank templates.
-
-The add/edit dialog explains the purpose of Functional, Positive, Negative, Boundary and Custom test types and provides starter preconditions, steps and expected results. Automation code is generated only from the final reviewed set.
-
-## Real Qwen only
-
-This branch deliberately removes the old hard-coded mock generators. Configure Alibaba Cloud Model Studio in your local `.env`:
+Create a PostgreSQL database and copy `.env.example` to `.env`. At minimum configure:
 
 ```env
-QWEN_API_KEY=your-new-key
-QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-QWEN_MODEL=qwen3.7-flash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_testpilot
+DATABASE_REQUIRED=true
+DATABASE_SSL=false
+AUTH_REQUIRED=true
+JWT_SECRET=replace-with-a-long-random-production-secret
+GITHUB_SOURCE_TOKEN=
 ```
 
-Never commit `.env`. It is already ignored by Git.
-
-## Install
-
-From the repository root:
+Then install dependencies and migrate:
 
 ```bash
 npm install
+npm run db:migrate
 ```
 
-Install the dedicated browser automation runtime:
+Install/verify the dedicated Cypress runtime as well:
 
 ```bash
 cd automation-system
@@ -124,20 +106,43 @@ npm run engine:verify
 cd ..
 ```
 
-## Run
+Start the platform and demo target:
 
 ```bash
 npm start
 ```
-
-This starts:
 
 ```text
 Demo target app: http://localhost:4000
 AI TestPilot:    http://localhost:5000
 ```
 
-## Suggested story
+On a fresh database, enter the intended first manager email/password in the platform sign-in card and choose **Bootstrap first manager**. Bootstrap is disabled once the first user exists.
+
+The manager can then create `DEV`, `QA`, or additional `MANAGER` users. The manager can also create a project and attach a GitHub repository from **Platform setup**. QA can select that project/repository before generating a run.
+
+## Demo application
+
+The demo target contains:
+
+- `/` — login page;
+- `/feedback` — customer feedback form.
+
+Demo application credentials:
+
+```text
+Username: admin
+Password: admin123
+```
+
+The target intentionally contains two defects for demonstration:
+
+- age `17` is incorrectly accepted although the discovered minimum is `18`;
+- website value `abc` is incorrectly accepted although a supplied website must be a valid URL.
+
+The normal five-case demonstration therefore has three passing checks and two real application-defect detections. Failed tests remain failed until the application is corrected and the original test passes on re-run.
+
+## Suggested business story
 
 ```text
 As a customer, I should be able to log in with valid credentials and submit feedback.
@@ -146,97 +151,59 @@ email format, age boundaries, website URL format and show a confirmation after
 successful submission.
 ```
 
-Use these page settings in the UI:
+## Deterministic automation contract
 
-```text
-Target URL:             http://localhost:4000/
-Known pages (optional): /feedback   # may also be left blank in this demo
-Username:               admin
-Password:               admin123
-```
+AI proposes/revises test cases, but browser execution is deterministic. Approved tests must pass the readiness compiler before execution. The runtime does not ask AI to write arbitrary executable code during the run.
 
-Click **Generate AI Test Cases**, review or modify the generated cases, then click **Run Approved Tests**. A real Chrome window opens automatically. The positive and validation cases now visibly continue onto the feedback form rather than stopping after login.
+`server/services/scriptValidator.js` blocks unsafe generated/runtime patterns such as `child_process`, `fs`, `eval`, `Function`, raw environment-secret access and unsupported arbitrary network modules.
 
-Each approved case is executed independently so every failed case can have its own video and failure screenshot.
+The current browser runtime remains **Cypress**. Do not migrate this branch to Playwright unless the branch strategy is explicitly changed.
 
-## Important implementation details
+## Evidence and analytics
 
-### Page discovery
+Failed cases can retain screenshot/video evidence when enabled. The HTML analytics report distinguishes automation readiness from execution outcome and includes optional AI failure analysis, developer fix guidance, and source-evidence level/candidate files when available.
 
-`server/services/pageDiscovery.js` inventories actual inputs, buttons, links, `data-testid` values, ids, names, constraints, dropdown options and nearby validation elements. It also performs a bounded same-origin pass over observed route hints so the current demo can find `/feedback` from the starting login page even without a manual Known pages entry.
+Run/result/defect records are normalized into PostgreSQL for later reporting. The standalone HTML report remains a generated artifact rather than the primary long-term reporting store.
 
-### AI generation
-
-`server/services/qwenClient.js` contains three prompts:
-
-- Test Analyst — story + discovered pages → structured test cases;
-- Automation Engineer — approved test case + discovered pages → executable JavaScript automation;
-- Failure Analyst — runtime error + expected behaviour → business-readable classification.
-
-For the current demo target only, a calibration layer pins the five reviewed cases to the predictable 3-pass / 2-defect-detection shape described above after the relevant real controls have been discovered.
-
-### Generated-code safety
-
-`server/services/scriptValidator.js` checks syntax, structure and denied patterns before execution. Generated specs cannot use `child_process`, `fs`, `eval`, `Function`, raw `process.env`, network modules or numeric fixed waits.
-
-### Visible execution
-
-`server/services/testRunner.js` launches the current browser automation engine using Chrome and headed mode by default. Configure locally if needed:
-
-```env
-AUTOMATION_BROWSER=chrome
-AUTOMATION_HEADED=true
-AUTOMATION_STEP_DELAY_MS=350
-AUTOMATION_VIDEO=true
-AUTOMATION_SCREENSHOT_ON_FAILURE=true
-```
-
-### Duration
-
-The runner records duration per independent case. It first uses attempt-level timing when provided by the runtime and then falls back through other available test/spec timing fields. This keeps the Duration value populated when the engine exposes timing at a different level.
-
-### Evidence
-
-Each approved test case runs as an independent spec. Failed cases therefore receive dedicated evidence when available:
-
-```text
-TC004 FAIL
-├── Video
-└── Screenshot
-
-TC005 FAIL
-├── Video
-└── Screenshot
-```
-
-### Analytics
-
-`server/services/reportGenerator.js` builds a standalone HTML analytics page after the run. It includes totals, pass/fail rate, test-level duration, per-failure evidence links and Qwen failure analysis. The HTML is stored only in the current in-memory session and served from `/api/reports/:sessionId`.
-
-## Production direction: Playwright
-
-The intended production architecture is to use **Playwright for both browser discovery and test execution**. In that model, the user should normally provide only the starting URL, credentials and business story. A bounded Playwright discovery agent can navigate the real application, observe authenticated routes and controls, build the relevant journey, and remove the need for manually supplied Known pages in most cases.
-
-Known pages can remain as an optional advanced hint or override for special routes that automated discovery cannot reach reliably.
-
-## Project layout
+## Current project layout
 
 ```text
 automation-intelligence/
-├── automation-system/          Browser automation runtime, generated specs and evidence
-├── testpilot-ui/               AI TestPilot browser UI
-├── demo-app/                   Login + feedback target application
+├── automation-system/             Cypress runtime + evidence
+├── demo-app/                      Demo login/feedback target
+├── testpilot-ui/
+│   ├── platform-ui.js             Login, role/project/repository setup
+│   └── results-analysis.js        AI + source-aware developer guidance
 └── server/
-    ├── data/sessionStore.js    In-memory run state
-    ├── routes/chat.js          Story → AI → automation orchestration
+    ├── db/
+    │   ├── 001_platform.sql
+    │   ├── index.js
+    │   └── migrate.js
+    ├── data/sessionStore.js
+    ├── middleware/sessionPersistence.js
+    ├── routes/
+    │   ├── auth.js
+    │   ├── projects.js
+    │   ├── sessionContext.js
+    │   └── run.js
     └── services/
-        ├── pageDiscovery.js
-        ├── qwenClient.js
-        ├── reportGenerator.js
-        ├── scriptValidator.js
-        └── testRunner.js
+        ├── authService.js
+        ├── persistenceService.js
+        ├── sourceAwareService.js
+        ├── failureResolutionAiService.js
+        └── requestContext.js
 ```
 
-## Security note
+## Production security notes
 
-This is a controlled demo, not a production remote-browser service. Before allowing arbitrary external targets, add a target-domain allowlist, authentication/authorization for AI TestPilot itself, network isolation, secret management and stronger sandboxing for generated automation.
+For production:
+
+- set `DATABASE_REQUIRED=true` and `AUTH_REQUIRED=true`;
+- use a strong externally managed `JWT_SECRET`;
+- put PostgreSQL and API secrets in a secret manager rather than source control;
+- use a least-privilege GitHub token with read-only repository-content access;
+- use HTTPS;
+- restrict target domains / outbound network access;
+- define retention/redaction rules for source snippets persisted with defect analysis;
+- keep source-aware AI disabled for code that is not approved for the configured AI provider;
+- treat AI remediation as advisory: no automatic defect closure or source modification from analysis output.
