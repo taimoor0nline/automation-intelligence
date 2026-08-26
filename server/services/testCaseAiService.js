@@ -1,4 +1,5 @@
 const { modelForProfile } = require("./aiModelProfiles");
+const { assertionCatalog, ASSERTION_OPERATION_SET } = require("./assertionRegistry");
 
 function numberEnv(value, fallback) {
   const n = Number(value);
@@ -67,6 +68,8 @@ Rules:
 - If valid runtime credentials are needed, describe that as a precondition/action; never include actual credentials.
 - Do not make an unsupported scenario appear automatable by removing or replacing its essential requirement.
 - Steps and expected results must be concrete enough for deterministic readiness checks.
+- For element expectations, include the exact discovered selector in the expected-result sentence whenever possible.
+- Prefer explicit assertion language such as visible, hidden, exists, text contains, value equals, checked, disabled, required, valid, attribute, class, count, URL/path, title, cookie or storage key.
 - Return JSON only.
 
 Schema:
@@ -111,6 +114,31 @@ Schema:
   }
 }`;
 
+const ASSERTION_SUGGESTION_PROMPT = `You are a Cypress assertion capability advisor for a deterministic AI test-automation platform.
+The platform has an allow-listed assertion registry. A human-approved expected result could not be fully represented by the current registry, or the reviewer wants a better assertion.
+
+Rules:
+- Preserve the exact business intent. Do not weaken or replace the expected result.
+- First determine whether an EXISTING supported assertion can legitimately express it. If yes, return USE_EXISTING and the exact operation name.
+- Otherwise return ADD_ASSERTION with one proposed ASSERT_* operation and a concise Cypress implementation strategy.
+- Return MANUAL only when browser automation should not attempt the behavior (for example CAPTCHA/biometric/native OS interaction).
+- Never return arbitrary executable JavaScript, eval, Function, child_process, fs, shell commands or secrets.
+- Cypress strategies may reference safe browser-testing primitives such as cy.get, cy.location, cy.title, cy.getCookie, cy.window, cy.intercept, cy.wait, cy.readFile, Chai/Chai-jQuery, or a named well-known test dependency when genuinely required.
+- If a new dependency is suggested, identify it explicitly and explain why; otherwise dependency must be null.
+- Page discovery is the only evidence for selectors/pages/controls. Do not invent selectors.
+- Return JSON only.
+
+Schema:
+{
+  "kind": "USE_EXISTING"|"ADD_ASSERTION"|"MANUAL",
+  "operation": string|null,
+  "title": string,
+  "rationale": string,
+  "cypressStrategy": string,
+  "dependency": string|null,
+  "expectedResult": string
+}`;
+
 function normalizeCandidate(raw, id, source) {
   const tc = raw && typeof raw === "object" ? raw : {};
   return {
@@ -135,6 +163,7 @@ async function generateSingleTestCase({ id, requestText, story, pageDiscoveries,
     requestText,
     businessStory: story,
     pageDiscoveries,
+    supportedAssertions: assertionCatalog(),
   }, modelTier);
   return normalizeCandidate(result?.testCase, id, "ai-on-demand");
 }
@@ -145,6 +174,7 @@ async function repairTestCase({ testCase, readiness, story, pageDiscoveries, mod
     originalTestCase: testCase,
     deterministicReadiness: readiness,
     pageDiscoveries,
+    supportedAssertions: assertionCatalog(),
   }, modelTier);
 
   if (!result?.repaired) {
@@ -158,4 +188,32 @@ async function repairTestCase({ testCase, readiness, story, pageDiscoveries, mod
   };
 }
 
-module.exports = { generateSingleTestCase, repairTestCase };
+async function suggestAssertionCapability({ testCase, readiness, story, pageDiscoveries, modelTier = "fast" }) {
+  const result = await callModel(ASSERTION_SUGGESTION_PROMPT, {
+    businessStory: story,
+    testCase,
+    deterministicReadiness: readiness,
+    uncompiledExpectations: readiness?.uncompiledExpectations || readiness?.automationPlan?.narrativeExpectations || [],
+    deterministicHints: readiness?.assertionSuggestions || readiness?.automationPlan?.assertionSuggestions || [],
+    supportedAssertions: assertionCatalog(),
+    pageDiscoveries,
+  }, modelTier);
+
+  let kind = ["USE_EXISTING", "ADD_ASSERTION", "MANUAL"].includes(String(result?.kind || "").toUpperCase()) ? String(result.kind).toUpperCase() : "ADD_ASSERTION";
+  let operation = result?.operation ? String(result.operation).trim().toUpperCase() : null;
+  if (kind === "USE_EXISTING" && (!operation || !ASSERTION_OPERATION_SET.has(operation))) kind = "ADD_ASSERTION";
+  if (kind === "ADD_ASSERTION" && operation && !/^ASSERT_[A-Z0-9_]+$/.test(operation)) operation = null;
+
+  return {
+    kind,
+    operation,
+    title: String(result?.title || (kind === "USE_EXISTING" ? "Use an existing assertion" : "Add a Cypress assertion capability")).trim().slice(0, 200),
+    rationale: String(result?.rationale || "This expectation needs an explicit assertion mapping before deterministic execution.").trim().slice(0, 1200),
+    cypressStrategy: String(result?.cypressStrategy || "Add an allow-listed deterministic Cypress assertion handler and parser mapping.").trim().slice(0, 1200),
+    dependency: result?.dependency ? String(result.dependency).trim().slice(0, 120) : null,
+    expectedResult: String(result?.expectedResult || readiness?.uncompiledExpectations?.[0] || "").trim().slice(0, 600),
+    supportedNow: kind === "USE_EXISTING" && Boolean(operation && ASSERTION_OPERATION_SET.has(operation)),
+  };
+}
+
+module.exports = { generateSingleTestCase, repairTestCase, suggestAssertionCapability };
