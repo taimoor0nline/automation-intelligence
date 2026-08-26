@@ -70,6 +70,7 @@ function saveReportHtml(sessionId, html) {
 
 function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summary, analyses }) {
   const successRate = pct(summary.passed, summary.total);
+  const defectCount = (analyses || []).filter((a) => a?.classification === "APPLICATION_DEFECT").length;
   const analysisById = new Map((analyses || []).map((a) => [a.testCase, a]));
 
   const rows = (summary.tests || []).map((t) => {
@@ -102,13 +103,13 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif}
   .wrap{max-width:1360px;margin:0 auto;padding:30px 22px 50px}.hero{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:24px}
   h1{margin:0 0 6px;font-size:28px}.muted{color:var(--muted);font-size:13px;line-height:1.45}.meta{font-size:12px;color:var(--muted);text-align:right}
-  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:20px 0}.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px}.metric{font-size:30px;font-weight:800;margin-top:6px}.label{font-size:12px;color:var(--muted)}
+  .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin:20px 0}.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px}.metric{font-size:30px;font-weight:800;margin-top:6px}.label{font-size:12px;color:var(--muted)}
   .story{white-space:pre-wrap;line-height:1.55}.section-title{margin:26px 0 10px;font-size:16px}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden}th,td{padding:12px 13px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;font-size:13px}th{background:#fafbfd;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.status{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:700;font-size:11px}.pass{background:#dcfce7;color:var(--green)}.fail{background:#fee2e2;color:var(--red)}code{font-family:Consolas,monospace;color:var(--blue)}
   .evidence-links{display:flex;gap:7px;flex-wrap:wrap}.evidence-link{display:inline-block;text-decoration:none;border:1px solid #dbe3ff;background:#f5f7ff;color:var(--blue);padding:5px 8px;border-radius:7px;font-size:11px;font-weight:700}.evidence-link:hover{background:#edf1ff}
   .readiness-note{border-left:4px solid var(--blue);background:#f5f7ff}.readiness-note strong{display:block;margin-bottom:5px}.detected{margin-top:5px;font-size:11px;font-weight:700;color:var(--red)}
   .classification{display:inline-block;font-size:11px;font-weight:800;padding:4px 7px;border-radius:6px;background:#eef2ff;color:#3730a3}.classification.defect{background:#fee2e2;color:var(--red)}.classification.automation{background:#fef3c7;color:var(--amber)}
   .analysis-summary{margin-top:7px;line-height:1.45;color:var(--muted)}.analysis-detail{margin-top:6px;line-height:1.4;font-size:12px}.analysis-detail b{color:var(--text)}
-  @media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr)}.hero{display:block}.meta{text-align:left;margin-top:14px}table{display:block;overflow:auto}}
+  @media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}}@media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr)}.hero{display:block}.meta{text-align:left;margin-top:14px}table{display:block;overflow:auto}}
 </style>
 </head>
 <body><div class="wrap">
@@ -120,6 +121,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
     <div class="card"><div class="label">Tests</div><div class="metric">${esc(summary.total)}</div></div>
     <div class="card"><div class="label">Passed</div><div class="metric" style="color:var(--green)">${esc(summary.passed)}</div></div>
     <div class="card"><div class="label">Failed</div><div class="metric" style="color:var(--red)">${esc(summary.failed)}</div></div>
+    <div class="card"><div class="label">Defects detected</div><div class="metric" style="color:var(--red)">${esc(defectCount)}</div></div>
     <div class="card"><div class="label">Execution pass rate</div><div class="metric" style="color:var(--blue)">${successRate}%</div></div>
   </div>
   <div class="card readiness-note">
