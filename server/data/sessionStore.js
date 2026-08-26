@@ -4,12 +4,17 @@ const hydrated = new Set();
 function createSession() {
   return {
     state: "IDLE",
+    targetType: "WEB",
     story: null,
     targetUrl: null,
     environment: null,
     additionalPaths: [],
     aiModelTier: "strong",
     credentials: null,
+    apiAuth: null,
+    apiTargetId: null,
+    apiOperationIds: [],
+    apiOperations: [],
     projectId: null,
     repositoryId: null,
     createdBy: null,
@@ -39,8 +44,9 @@ function hydrateSession(id, persisted) {
   }
   const existing = getSession(id);
   Object.assign(existing, createSession(), persisted);
-  // Credentials and local artifact paths are intentionally never restored from PostgreSQL.
+  // Browser credentials, REST authentication secrets and local artifact paths are intentionally never restored from PostgreSQL.
   existing.credentials = null;
+  existing.apiAuth = null;
   existing.artifacts = null;
   existing.reportHtml = null;
   hydrated.add(id);
