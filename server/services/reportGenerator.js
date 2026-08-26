@@ -33,6 +33,18 @@ function evidenceLinks(test) {
   return links.length ? `<div class="evidence-links">${links.join("")}</div>` : "—";
 }
 
+function ownerLabel(value) {
+  const labels = {
+    APPLICATION_TEAM: "Application team",
+    TEST_AUTOMATION_TEAM: "Test automation team",
+    TEST_DATA_OWNER: "Test data owner",
+    ENVIRONMENT_TEAM: "Environment / DevOps team",
+    BUSINESS_ANALYST: "Business analyst / product owner",
+    MANUAL_REVIEW: "Manual review",
+  };
+  return labels[value] || String(value || "Manual review").replaceAll("_", " ");
+}
+
 function analysisHtml(analysis, test) {
   if (!analysis) {
     return test.err?.message
@@ -51,9 +63,24 @@ function analysisHtml(analysis, test) {
   if (analysis.actual) details.push(`<div class="analysis-detail"><b>Observed:</b> ${esc(analysis.actual)}</div>`);
   if (analysis.probableCause) details.push(`<div class="analysis-detail"><b>Probable cause:</b> ${esc(analysis.probableCause)}</div>`);
 
+  let resolution = "";
+  if (analysis.resolutionComment || analysis.recommendedFix || analysis.verificationSteps?.length) {
+    const verification = Array.isArray(analysis.verificationSteps) && analysis.verificationSteps.length
+      ? `<ol>${analysis.verificationSteps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`
+      : "";
+    resolution = `<div class="resolution-box">
+      <div class="resolution-head">AI resolution guidance <span>Human review required</span></div>
+      ${analysis.resolutionComment ? `<div class="resolution-comment">${esc(analysis.resolutionComment)}</div>` : ""}
+      ${analysis.recommendedFix ? `<div class="analysis-detail"><b>Recommended fix:</b> ${esc(analysis.recommendedFix)}</div>` : ""}
+      ${analysis.recommendedOwner ? `<div class="analysis-detail"><b>Suggested owner:</b> ${esc(ownerLabel(analysis.recommendedOwner))}</div>` : ""}
+      ${verification ? `<div class="analysis-detail"><b>Verify after correction:</b>${verification}</div>` : ""}
+      <div class="resolution-warning">Advisory only — this does not modify the application, weaken the test, close the defect, or mark the test resolved. Resolution is proven only by a successful re-run.</div>
+    </div>`;
+  }
+
   return `<span class="${classificationClass}">${esc(analysis.classification)}</span>` +
     `<div class="analysis-summary">${esc(analysis.summary || "")}</div>` +
-    details.join("");
+    details.join("") + resolution;
 }
 
 function reportFileName(sessionId) {
@@ -101,7 +128,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
 <style>
   :root{--bg:#f6f8fb;--panel:#fff;--border:#e6eaf1;--text:#10141c;--muted:#6b7385;--blue:#2f5bff;--green:#15803d;--red:#b91c1c;--amber:#92400e}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif}
-  .wrap{max-width:1360px;margin:0 auto;padding:30px 22px 50px}.hero{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:24px}
+  .wrap{max-width:1420px;margin:0 auto;padding:30px 22px 50px}.hero{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:24px}
   h1{margin:0 0 6px;font-size:28px}.muted{color:var(--muted);font-size:13px;line-height:1.45}.meta{font-size:12px;color:var(--muted);text-align:right}
   .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin:20px 0}.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px}.metric{font-size:30px;font-weight:800;margin-top:6px}.label{font-size:12px;color:var(--muted)}
   .story{white-space:pre-wrap;line-height:1.55}.section-title{margin:26px 0 10px;font-size:16px}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden}th,td{padding:12px 13px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;font-size:13px}th{background:#fafbfd;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.status{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:700;font-size:11px}.pass{background:#dcfce7;color:var(--green)}.fail{background:#fee2e2;color:var(--red)}code{font-family:Consolas,monospace;color:var(--blue)}
@@ -109,6 +136,7 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   .readiness-note{border-left:4px solid var(--blue);background:#f5f7ff}.readiness-note strong{display:block;margin-bottom:5px}.detected{margin-top:5px;font-size:11px;font-weight:700;color:var(--red)}
   .classification{display:inline-block;font-size:11px;font-weight:800;padding:4px 7px;border-radius:6px;background:#eef2ff;color:#3730a3}.classification.defect{background:#fee2e2;color:var(--red)}.classification.automation{background:#fef3c7;color:var(--amber)}
   .analysis-summary{margin-top:7px;line-height:1.45;color:var(--muted)}.analysis-detail{margin-top:6px;line-height:1.4;font-size:12px}.analysis-detail b{color:var(--text)}
+  .resolution-box{margin-top:10px;padding:11px 12px;border-radius:9px;border:1px solid #bfdbfe;background:#f8fbff}.resolution-head{font-size:11px;font-weight:900;color:#1d4ed8;text-transform:uppercase;letter-spacing:.03em}.resolution-head span{margin-left:6px;padding:2px 5px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:9px}.resolution-comment{margin-top:7px;line-height:1.45;font-size:12px;color:#334155}.resolution-box ol{margin:5px 0 0 18px;padding:0}.resolution-box li{margin:3px 0}.resolution-warning{margin-top:9px;padding-top:7px;border-top:1px solid #dbeafe;color:#64748b;font-size:10.5px;line-height:1.4}
   @media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}}@media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr)}.hero{display:block}.meta{text-align:left;margin-top:14px}table{display:block;overflow:auto}}
 </style>
 </head>
@@ -132,8 +160,8 @@ function buildAnalyticsReport({ sessionId, story, targetUrl, environment, summar
   <h2 class="section-title">Business story</h2>
   <div class="card story">${esc(story)}</div>
   <h2 class="section-title">Execution results</h2>
-  <table><thead><tr><th>Case</th><th>Test</th><th>Execution outcome</th><th>Duration</th><th>Evidence</th><th>Failure analysis / error</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="muted" style="margin-top:12px">Every row shown here passed the automation-readiness gate before execution. Failed cases keep individual screenshots when enabled; video links, when enabled, point to the shared full-run recording.</div>
+  <table><thead><tr><th>Case</th><th>Test</th><th>Execution outcome</th><th>Duration</th><th>Evidence</th><th>Failure analysis & AI resolution guidance</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="muted" style="margin-top:12px">Every row shown here passed the automation-readiness gate before execution. AI resolution guidance is advisory and requires human review. A defect is considered resolved only after the responsible change is made and the original approved test passes on re-run.</div>
 </div></body></html>`;
 
   saveReportHtml(sessionId, html);
