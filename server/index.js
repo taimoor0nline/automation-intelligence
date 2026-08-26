@@ -13,13 +13,31 @@ const projectRoutes = require("./routes/projects");
 const sessionContextRoutes = require("./routes/sessionContext");
 const qwen = require("./services/qwenClient");
 const { analyzeFailureWithResolution } = require("./services/failureResolutionAiService");
+const { buildSourceContext } = require("./services/sourceAwareService");
+const requestContext = require("./services/requestContext");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
 const { optionalAuth } = require("./services/authService");
 const sessionPersistence = require("./middleware/sessionPersistence");
 const db = require("./db");
 
 qwen.analyzeFailure = async (args) => {
-  const analysis = await analyzeFailureWithResolution(args);
+  const ctx = requestContext.current();
+  let sourceContext = null;
+  if (ctx.repositoryId) {
+    try {
+      sourceContext = await buildSourceContext({
+        repositoryId: ctx.repositoryId,
+        testCase: args?.testCase,
+        expected: args?.expected,
+        actual: args?.actual,
+        analysis: null,
+      });
+    } catch (err) {
+      console.warn('[source-aware] source context unavailable; falling back to black-box guidance:', err.message);
+    }
+  }
+
+  const analysis = await analyzeFailureWithResolution({ ...args, sourceContext });
   const expected = String(args?.expected || "");
   const actual = String(args?.actual || "");
   const tc = args?.testCase || {};
@@ -93,6 +111,7 @@ app.use((req, res, next) => {
 });
 
 app.use(sessionPersistence);
+app.use(requestContext.middleware);
 
 function sanitizePublicPayload(value) {
   if (Array.isArray(value)) return value.map(sanitizePublicPayload);
