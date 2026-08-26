@@ -8,6 +8,7 @@
     "start:server": "node server/index.js",
     "start": "concurrently -n demo-app,server -c blue,green \"npm:start:demo-app\" \"npm:start:server\"",
     "db:migrate": "node server/db/migrate.js",
+    "test:platform": "node scripts/platform-smoke.js",
     "test:capabilities": "node scripts/capability-smoke.js"
   },
   "dependencies": {
