@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../AITestPilot.Domain/AITestPilot.Domain.csproj" />
+  </ItemGroup>
+</Project>
