@@ -23,10 +23,18 @@ function ext(filePath) {
 }
 
 function tokenizeFailure({ testCase, expected, actual, analysis }) {
-  const text = [testCase?.title, ...(testCase?.expectedResults || []), expected, actual, analysis?.probableCause, analysis?.developerReviewArea]
-    .filter(Boolean).join(' ').toLowerCase();
-  const stop = new Set(['the','and','for','with','from','that','this','should','must','when','then','into','because','expected','actual','application','validation','test','case','failed','error','element','visible','non','empty']);
-  return [...new Set((text.match(/[a-z][a-z0-9_-]{2,}/g) || []).filter((w) => !stop.has(w)))].slice(0, 30);
+  const text = [
+    testCase?.title,
+    JSON.stringify(testCase?.steps || []),
+    JSON.stringify(testCase?.testData || {}),
+    ...(testCase?.expectedResults || []),
+    expected,
+    actual,
+    analysis?.probableCause,
+    analysis?.developerReviewArea,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const stop = new Set(['the','and','for','with','from','that','this','should','must','when','then','into','because','expected','actual','application','validation','test','case','failed','error','element','visible','non','empty','data-testid','type','click','value']);
+  return [...new Set((text.match(/[a-z][a-z0-9_-]{2,}/g) || []).filter((w) => !stop.has(w)))].slice(0, 36);
 }
 
 async function fetchJson(url) {
@@ -70,8 +78,26 @@ function scorePath(filePath, tokens) {
   let score = 0;
   for (const token of tokens) if (lower.includes(token)) score += token.length >= 6 ? 4 : 2;
   if (/server|api|service|controller|validator|validation|form|feedback|auth|login/i.test(lower)) score += 1;
-  if (/test|spec|dist|build|node_modules|vendor/i.test(lower)) score -= 1;
+  if (/test|spec|dist|build|node_modules|vendor/i.test(lower)) score -= 2;
   return score;
+}
+
+function isCommonRuntimeFile(filePath) {
+  const lower = String(filePath || '').toLowerCase();
+  return /(^|\/)(server|app|index|main|api|controller|service|validator|validation)\.(js|jsx|ts|tsx|cs|java|py|php|rb|go)$/i.test(lower) ||
+    /(^|\/)(controllers?|services?|validators?|validation)\//i.test(lower);
+}
+
+function chooseCandidates(tree, tokens) {
+  const scored = tree.map((item) => ({ ...item, pathScore: scorePath(item.path, tokens) }));
+  const highSignal = [...scored].sort((a,b) => b.pathScore - a.pathScore).slice(0, Math.max(MAX_CANDIDATES * 2, 10));
+  const runtimeQuota = scored.filter((item) => isCommonRuntimeFile(item.path)).slice(0, Math.max(8, MAX_CANDIDATES));
+  const selected = new Map();
+  for (const item of [...highSignal, ...runtimeQuota]) {
+    if (!selected.has(item.path)) selected.set(item.path, item);
+    if (selected.size >= Math.max(MAX_CANDIDATES * 3, 18)) break;
+  }
+  return [...selected.values()];
 }
 
 function scoreContent(content, tokens) {
@@ -101,10 +127,7 @@ async function buildSourceContext({ repositoryId, testCase, expected, actual, an
   if (!repository || !repository.source_enabled) return null;
   const tokens = tokenizeFailure({ testCase, expected, actual, analysis });
   const tree = await listTree(repository);
-  const pathCandidates = tree
-    .map((item) => ({ ...item, pathScore: scorePath(item.path, tokens) }))
-    .sort((a, b) => b.pathScore - a.pathScore)
-    .slice(0, Math.max(MAX_CANDIDATES * 2, 10));
+  const pathCandidates = chooseCandidates(tree, tokens);
 
   const inspected = [];
   for (const item of pathCandidates) {
@@ -122,7 +145,11 @@ async function buildSourceContext({ repositoryId, testCase, expected, actual, an
     }
   }
 
-  const files = inspected.sort((a, b) => b.score - a.score).filter((x) => x.score > 0).slice(0, MAX_CANDIDATES);
+  const files = inspected
+    .sort((a,b) => b.score - a.score)
+    .filter((item) => item.score > 0 && item.snippets.length > 0)
+    .slice(0, MAX_CANDIDATES);
+
   return {
     mode: 'SOURCE_AWARE',
     repositoryId: repository.id,
@@ -130,7 +157,7 @@ async function buildSourceContext({ repositoryId, testCase, expected, actual, an
     branch: repository.default_branch || 'main',
     searchTokens: tokens,
     candidateFiles: files,
-    sourceVerified: files.some((file) => file.snippets.length > 0),
+    sourceVerified: files.length > 0,
   };
 }
 
