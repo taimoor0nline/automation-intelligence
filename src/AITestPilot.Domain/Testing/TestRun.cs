@@ -25,6 +25,7 @@ public sealed class TestRun : WorkspaceScopedEntity
     public DateTimeOffset? CompletedAtUtc { get; private set; }
     public DateTimeOffset? CancelledAtUtc { get; private set; }
     public Guid? CancelledByUserId { get; private set; }
+    public string? ErrorMessage { get; private set; }
 
     private TestRun() { }
 
@@ -74,6 +75,7 @@ public sealed class TestRun : WorkspaceScopedEntity
         if (Status != TestRunStatus.Queued) throw new InvalidOperationException("Only queued runs can start.");
         Status = TestRunStatus.Running;
         StartedAtUtc = DateTimeOffset.UtcNow;
+        ErrorMessage = null;
         Touch();
     }
 
@@ -82,12 +84,14 @@ public sealed class TestRun : WorkspaceScopedEntity
         if (Status != TestRunStatus.Running) throw new InvalidOperationException("Only running runs can complete.");
         Status = passed ? TestRunStatus.Passed : TestRunStatus.Failed;
         CompletedAtUtc = DateTimeOffset.UtcNow;
+        ErrorMessage = null;
         Touch();
     }
 
-    public void FailInfrastructure()
+    public void FailInfrastructure(string? error)
     {
         Status = TestRunStatus.Error;
+        ErrorMessage = Truncate(error, 4000);
         CompletedAtUtc = DateTimeOffset.UtcNow;
         Touch();
     }
@@ -100,6 +104,13 @@ public sealed class TestRun : WorkspaceScopedEntity
         CancelledAtUtc = DateTimeOffset.UtcNow;
         CancelledByUserId = userId;
         Touch();
+    }
+
+    private static string? Truncate(string? value, int maxLength)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)) return null;
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
 }
 
