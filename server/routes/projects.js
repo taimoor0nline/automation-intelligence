@@ -110,4 +110,6 @@ router.patch('/api/defects/:id/resolve', requireAuth, requireRole('DEV','QA','MA
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
+router.use(require('./restApi'));
+
 module.exports = router;
