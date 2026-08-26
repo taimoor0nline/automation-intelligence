@@ -7,13 +7,20 @@ async function persistSession(sessionId, session, context = {}) {
   const projectId = context.projectId || session.projectId || null;
   const userId = context.userId || session.createdBy || null;
   const repositoryId = context.repositoryId || session.repositoryId || null;
+  const targetType = String(session.targetType || 'WEB').toUpperCase() === 'REST' ? 'REST' : 'WEB';
+  const apiTargetId = targetType === 'REST' ? (session.apiTargetId || null) : null;
+  const apiOperationIds = targetType === 'REST' && Array.isArray(session.apiOperationIds) ? session.apiOperationIds : [];
   const safeSession = {
     state: session.state,
+    targetType,
     story: session.story,
     targetUrl: session.targetUrl,
     environment: session.environment,
     additionalPaths: session.additionalPaths,
     aiModelTier: session.aiModelTier,
+    apiTargetId,
+    apiOperationIds,
+    apiOperations: targetType === 'REST' ? (session.apiOperations || []) : [],
     pageDiscoveries: session.pageDiscoveries,
     testCases: session.testCases,
     automationReadiness: session.automationReadiness,
@@ -27,13 +34,15 @@ async function persistSession(sessionId, session, context = {}) {
       deterministicFindings: session.lastResults.deterministicFindings || [],
     } : null,
   };
+  // Browser credentials and REST authentication secrets are deliberately excluded from safeSession.
   await db.query(
-    `insert into test_sessions(id,project_id,created_by,state,story,target_url,environment,ai_model_tier,repository_id,session_json)
-     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+    `insert into test_sessions(id,project_id,created_by,state,story,target_url,environment,ai_model_tier,repository_id,target_type,api_target_id,api_operation_ids,session_json)
+     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)
      on conflict(id) do update set project_id=excluded.project_id, state=excluded.state, story=excluded.story,
        target_url=excluded.target_url, environment=excluded.environment, ai_model_tier=excluded.ai_model_tier,
-       repository_id=excluded.repository_id, session_json=excluded.session_json, updated_at=now()`,
-    [sessionId, projectId, userId, session.state || 'IDLE', session.story, session.targetUrl, session.environment, session.aiModelTier, repositoryId, JSON.stringify(safeSession)]
+       repository_id=excluded.repository_id,target_type=excluded.target_type,api_target_id=excluded.api_target_id,
+       api_operation_ids=excluded.api_operation_ids,session_json=excluded.session_json,updated_at=now()`,
+    [sessionId, projectId, userId, session.state || 'IDLE', session.story, session.targetUrl, session.environment, session.aiModelTier, repositoryId, targetType, apiTargetId, JSON.stringify(apiOperationIds), JSON.stringify(safeSession)]
   );
   return true;
 }
@@ -55,12 +64,13 @@ async function persistTestCases(sessionId, testCases = []) {
 async function persistRun({ sessionId, session, runNumber, summary, approvedIds, userId }) {
   if (!enabled()) return null;
   return db.withTransaction(async (client) => {
+    const targetType = String(session.targetType || 'WEB').toUpperCase() === 'REST' ? 'REST' : 'WEB';
     const run = await client.query(
-      `insert into test_runs(session_id,project_id,repository_id,run_number,executed_by,approved_ids,total,passed,failed,duration_ms,browser,summary_json,completed_at)
-       values($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb,now())
-       on conflict(session_id,run_number) do update set approved_ids=excluded.approved_ids,total=excluded.total,passed=excluded.passed,failed=excluded.failed,duration_ms=excluded.duration_ms,browser=excluded.browser,summary_json=excluded.summary_json,completed_at=now()
+      `insert into test_runs(session_id,project_id,repository_id,run_number,executed_by,approved_ids,total,passed,failed,duration_ms,browser,summary_json,target_type,api_target_id,completed_at)
+       values($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,now())
+       on conflict(session_id,run_number) do update set approved_ids=excluded.approved_ids,total=excluded.total,passed=excluded.passed,failed=excluded.failed,duration_ms=excluded.duration_ms,browser=excluded.browser,summary_json=excluded.summary_json,target_type=excluded.target_type,api_target_id=excluded.api_target_id,completed_at=now()
        returning id`,
-      [sessionId, session.projectId || null, session.repositoryId || null, runNumber, userId || null, JSON.stringify(approvedIds || []), summary.total || 0, summary.passed || 0, summary.failed || 0, summary.durationMs || null, summary.browser || null, JSON.stringify(summary)]
+      [sessionId, session.projectId || null, session.repositoryId || null, runNumber, userId || null, JSON.stringify(approvedIds || []), summary.total || 0, summary.passed || 0, summary.failed || 0, summary.durationMs || null, summary.browser || null, JSON.stringify(summary), targetType, targetType === 'REST' ? (session.apiTargetId || null) : null]
     );
     const runId = run.rows[0].id;
     await client.query('delete from test_results where run_id=$1', [runId]);
@@ -115,9 +125,18 @@ async function latestRunId(sessionId, runNumber) {
 
 async function loadSession(sessionId) {
   if (!enabled()) return null;
-  const result = await db.query('select session_json,project_id,repository_id,created_by from test_sessions where id=$1', [sessionId]);
+  const result = await db.query('select session_json,project_id,repository_id,created_by,target_type,api_target_id,api_operation_ids from test_sessions where id=$1', [sessionId]);
   if (!result.rows[0]) return null;
-  return { ...(result.rows[0].session_json || {}), projectId: result.rows[0].project_id, repositoryId: result.rows[0].repository_id, createdBy: result.rows[0].created_by };
+  const row = result.rows[0];
+  return {
+    ...(row.session_json || {}),
+    projectId: row.project_id,
+    repositoryId: row.repository_id,
+    createdBy: row.created_by,
+    targetType: row.target_type || row.session_json?.targetType || 'WEB',
+    apiTargetId: row.api_target_id || row.session_json?.apiTargetId || null,
+    apiOperationIds: row.api_operation_ids || row.session_json?.apiOperationIds || [],
+  };
 }
 
 module.exports = { enabled, persistSession, persistTestCases, persistRun, persistAnalyses, latestRunId, loadSession };
