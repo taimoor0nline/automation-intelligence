@@ -37,6 +37,14 @@ function emitAssertion(assertion) {
       return `    cy.url().should('include', ${jsString(assertion.path)});`;
     case "ASSERT_URL_NOT_INCLUDES":
       return `    cy.url().should('not.include', ${jsString(assertion.path)});`;
+    case "ASSERT_URL_CONTAINS":
+      return `    cy.url().should('include', ${jsString(assertion.fragment)});`;
+    case "ASSERT_PATH_EQUALS":
+      return `    cy.location('pathname').should('eq', ${jsString(assertion.path)});`;
+    case "ASSERT_VALUE_LENGTH_EQUALS":
+      return `    cy.get(${jsString(assertion.selector)}).invoke('val').then((value) => { expect(String(value ?? '').length).to.eq(${Number(assertion.length)}); });`;
+    case "ASSERT_VALUE_LENGTH_AT_MOST":
+      return `    cy.get(${jsString(assertion.selector)}).invoke('val').then((value) => { expect(String(value ?? '').length).to.be.at.most(${Number(assertion.length)}); });`;
     default:
       throw new Error(`Unsupported deterministic assertion: ${assertion.operation}`);
   }
@@ -44,7 +52,6 @@ function emitAssertion(assertion) {
 
 function generateDeterministicAutomation(approvedTestCases = []) {
   if (!approvedTestCases.length) throw new Error("No approved test cases were supplied for deterministic generation.");
-
   const lines = ["describe('AI TestPilot Approved Test Suite', () => {"];
   for (const testCase of approvedTestCases) {
     const plan = testCase?.automationReadiness?.automationPlan;
@@ -56,14 +63,7 @@ function generateDeterministicAutomation(approvedTestCases = []) {
     lines.push("  });", "");
   }
   lines.push("});", "");
-
-  return {
-    fileName: "ai-generated.cy.js",
-    framework: "browser-automation",
-    language: "javascript",
-    generationMode: "deterministic-dsl",
-    script: lines.join("\n"),
-  };
+  return { fileName: "ai-generated.cy.js", framework: "browser-automation", language: "javascript", generationMode: "deterministic-dsl", script: lines.join("\n") };
 }
 
 module.exports = { generateDeterministicAutomation };
