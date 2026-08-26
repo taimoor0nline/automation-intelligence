@@ -4,6 +4,7 @@ const HTTP_METHODS = new Set(['get','post','put','patch','delete','head','option
 const MAX_SPEC_BYTES = Math.max(256000, Math.min(Number(process.env.REST_OPENAPI_MAX_BYTES || 5_000_000), 20_000_000));
 const FETCH_TIMEOUT_MS = Math.max(3000, Math.min(Number(process.env.REST_OPENAPI_TIMEOUT_MS || 15000), 60000));
 const MAX_SCHEMA_DEPTH = 4;
+const SENSITIVE_HEADER = /^(authorization|proxy-authorization|x-api-key|api-key)$/i;
 
 function normalizeHttpUrl(value, label = 'URL') {
   let url;
@@ -198,6 +199,28 @@ async function discoverOpenApi(specificationUrl) {
   }
 }
 
+function plainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function manualParameterExamples(input) {
+  const out = [];
+  const add = (location, values) => {
+    for (const [name, value] of Object.entries(plainObject(values)).slice(0, 50)) {
+      const parameterName = String(name || '').trim();
+      if (!parameterName) continue;
+      if (location === 'header' && SENSITIVE_HEADER.test(parameterName)) {
+        throw new Error(`${parameterName} is authentication-sensitive. Configure it through REST runtime authentication instead of a saved endpoint template.`);
+      }
+      out.push({ name: parameterName, in: location, required: location === 'path', description: 'Manual request template value', schema: {}, example: value });
+    }
+  };
+  add('header', input.headers);
+  add('query', input.query);
+  add('path', input.pathParams);
+  return out;
+}
+
 function normalizeManualOperation(input = {}) {
   const method = String(input.method || 'GET').toUpperCase();
   if (!HTTP_METHODS.has(method.toLowerCase())) throw new Error('Unsupported HTTP method.');
@@ -209,6 +232,18 @@ function normalizeManualOperation(input = {}) {
   }
   if (!apiPath.startsWith('/')) apiPath = `/${apiPath}`;
   const responses = input.responses && typeof input.responses === 'object' && !Array.isArray(input.responses) ? input.responses : {};
+  const suppliedParameters = Array.isArray(input.parameters) ? input.parameters.slice(0, 50) : [];
+  const templateParameters = manualParameterExamples(input);
+  const parameterMap = new Map();
+  for (const p of [...suppliedParameters, ...templateParameters]) {
+    if (!p || !p.name || !p.in) continue;
+    const location = String(p.in).toLowerCase();
+    if (location === 'header' && SENSITIVE_HEADER.test(String(p.name))) {
+      throw new Error(`${p.name} is authentication-sensitive. Configure it through REST runtime authentication instead of a saved endpoint template.`);
+    }
+    parameterMap.set(`${location}:${String(p.name).toLowerCase()}`, { ...p, in: location });
+  }
+  const hasBody = Object.prototype.hasOwnProperty.call(input, 'body');
   return {
     source: 'MANUAL',
     operationKey: `${method} ${apiPath}`,
@@ -217,9 +252,9 @@ function normalizeManualOperation(input = {}) {
     path: apiPath,
     summary: String(input.summary || '').trim() || `${method} ${apiPath}`,
     description: String(input.description || '').trim(),
-    parameters: Array.isArray(input.parameters) ? input.parameters.slice(0, 50) : [],
+    parameters: [...parameterMap.values()],
     requestSchema: input.requestSchema && typeof input.requestSchema === 'object' ? input.requestSchema : {},
-    requestExample: input.requestExample ?? null,
+    requestExample: hasBody ? input.body : (input.requestExample ?? null),
     responses,
     contentTypes: Array.isArray(input.contentTypes) ? input.contentTypes.slice(0, 10) : ['application/json'],
   };
