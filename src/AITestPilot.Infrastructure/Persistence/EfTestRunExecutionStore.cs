@@ -108,7 +108,7 @@ public sealed class EfTestRunExecutionStore(AITestPilotDbContext dbContext) : IT
                         result.TestRunId,
                         domainResult.Id,
                         browserEvent.OccurredAtUtc,
-                        BrowserEvent(browserEvent.Type),
+                        ParseBrowserEvent(browserEvent.Type),
                         browserEvent.Message,
                         browserEvent.Level,
                         browserEvent.Url),
@@ -149,20 +149,14 @@ public sealed class EfTestRunExecutionStore(AITestPilotDbContext dbContext) : IT
         CancellationToken cancellationToken)
     {
         var run = await RequiredRunAsync(workspaceId, testRunId, cancellationToken);
-        run.FailInfrastructure();
-        await dbContext.AuditEvents.AddAsync(
-            new Domain.Auditing.AuditEvent(
-                workspaceId,
-                null,
-                "TestRun",
-                run.Id,
-                "InfrastructureError",
-                string.IsNullOrWhiteSpace(error) ? "Execution infrastructure error." : error),
-            cancellationToken);
+        run.FailInfrastructure(error);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task<TestRun> RequiredRunAsync(Guid workspaceId, Guid testRunId, CancellationToken cancellationToken) =>
+    private async Task<TestRun> RequiredRunAsync(
+        Guid workspaceId,
+        Guid testRunId,
+        CancellationToken cancellationToken) =>
         await dbContext.TestRuns.SingleOrDefaultAsync(
             value => value.WorkspaceId == workspaceId && value.Id == testRunId,
             cancellationToken)
@@ -192,7 +186,7 @@ public sealed class EfTestRunExecutionStore(AITestPilotDbContext dbContext) : IT
             cancellationToken);
     }
 
-    private static BrowserEventType BrowserEvent(string type) =>
+    private static BrowserEventType ParseBrowserEvent(string type) =>
         Enum.TryParse<BrowserEventType>(type, true, out var parsed)
             ? parsed
             : BrowserEventType.Console;
