@@ -10,10 +10,12 @@ Hard rules:
 - Test only selected API operations supplied in API OPERATIONS.
 - Never invent an HTTP method, path, parameter, request field, response status, header, enum, validation rule or business rule not present in the requirement or operation evidence.
 - A Swagger/OpenAPI operation is contract evidence; the BUSINESS REQUIREMENT determines which behavior is in scope.
+- Manual operations may include requestTemplate values. Treat those as grounded baseline request values for headers, query, path parameters and body.
+- You may vary a requestTemplate value only when the business requirement or supplied schema explicitly requires a positive, negative, boundary, or alternative-value scenario.
 - Manual operations may have less schema evidence. When evidence is insufficient, generate only assertions supported by the requirement and manually supplied operation data.
 - Never put passwords, bearer tokens, API keys or other secrets into generated test cases.
 - Use relative operation paths exactly as provided.
-- Path parameters must be represented in pathParams. Query parameters go in query. Request JSON goes in body.
+- Path parameters must be represented in pathParams. Query parameters go in query. Request JSON goes in body. Ordinary non-secret headers go in headers.
 - Prefer status assertions and explicit JSON assertions that can be proven from supplied evidence.
 - Do not assume a 200 response when the contract declares another success status.
 - Negative/boundary tests are allowed only when the business requirement or supplied schema explicitly supports that rule.
@@ -90,6 +92,18 @@ async function callProvider(payload, modelTier) {
   } finally { clearTimeout(timeout); }
 }
 
+function requestTemplate(op) {
+  const template = { headers: {}, query: {}, pathParams: {}, body: op.request_example ?? op.requestExample ?? null };
+  for (const parameter of op.parameters || []) {
+    if (parameter?.example === undefined || parameter?.example === null || !parameter?.name) continue;
+    const location = String(parameter.in || '').toLowerCase();
+    if (location === 'header') template.headers[parameter.name] = parameter.example;
+    else if (location === 'query') template.query[parameter.name] = parameter.example;
+    else if (location === 'path') template.pathParams[parameter.name] = parameter.example;
+  }
+  return template;
+}
+
 function compactOperation(op) {
   return {
     id: op.id,
@@ -102,9 +116,22 @@ function compactOperation(op) {
     parameters: op.parameters || [],
     requestSchema: op.request_schema || op.requestSchema || {},
     requestExample: op.request_example ?? op.requestExample ?? null,
+    requestTemplate: requestTemplate(op),
     responses: op.responses || {},
     contentTypes: op.content_types || op.contentTypes || [],
   };
+}
+
+function objectOrEmpty(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
+
+function mergeGroundedRequest(tc, operation) {
+  const defaults = operation.requestTemplate || { headers: {}, query: {}, pathParams: {}, body: null };
+  const request = tc.apiRequest || {};
+  request.pathParams = { ...objectOrEmpty(defaults.pathParams), ...objectOrEmpty(request.pathParams) };
+  request.query = { ...objectOrEmpty(defaults.query), ...objectOrEmpty(request.query) };
+  request.headers = { ...objectOrEmpty(defaults.headers), ...objectOrEmpty(request.headers) };
+  if (!Object.prototype.hasOwnProperty.call(request, 'body') || request.body === undefined) request.body = defaults.body;
+  return request;
 }
 
 function validate(result, operations) {
@@ -118,11 +145,10 @@ function validate(result, operations) {
     tc.apiRequest.method = String(tc.apiRequest.method || '').toUpperCase();
     tc.apiRequest.path = String(tc.apiRequest.path || '');
     const key = `${tc.apiRequest.method} ${tc.apiRequest.path}`;
-    if (!allowed.has(key)) throw new Error(`${tc.id} uses an operation that was not selected/discovered: ${key}.`);
+    const operation = allowed.get(key);
+    if (!operation) throw new Error(`${tc.id} uses an operation that was not selected/discovered: ${key}.`);
+    tc.apiRequest = mergeGroundedRequest(tc, operation);
     tc.apiRequest.operationKey = key;
-    tc.apiRequest.pathParams = tc.apiRequest.pathParams && typeof tc.apiRequest.pathParams === 'object' ? tc.apiRequest.pathParams : {};
-    tc.apiRequest.query = tc.apiRequest.query && typeof tc.apiRequest.query === 'object' ? tc.apiRequest.query : {};
-    tc.apiRequest.headers = tc.apiRequest.headers && typeof tc.apiRequest.headers === 'object' ? tc.apiRequest.headers : {};
     tc.apiAssertions = Array.isArray(tc.apiAssertions) ? tc.apiAssertions.filter((a) => assertions.has(String(a?.operation || '').toUpperCase())).map((a) => ({ ...a, operation: String(a.operation).toUpperCase() })) : [];
     if (!tc.apiAssertions.length) throw new Error(`${tc.id} has no supported deterministic REST assertion.`);
     tc.steps = Array.isArray(tc.steps) && tc.steps.length ? tc.steps : [{ action: `Send ${tc.apiRequest.method} request`, target: tc.apiRequest.path, value: null }];
