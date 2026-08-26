@@ -81,10 +81,27 @@ async function persistAnalyses(runId, analyses = []) {
   await db.withTransaction(async (client) => {
     for (const a of analyses) {
       await client.query(
-        `insert into defect_analyses(run_id,external_case_id,classification,severity,confidence,summary,probable_cause,resolution_comment,recommended_fix,recommended_owner,developer_review_area,developer_implementation_hint,developer_example_fix,source_context,verification_steps,regression_checks)
-         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16::jsonb)
-         on conflict(run_id,external_case_id) do update set classification=excluded.classification,severity=excluded.severity,confidence=excluded.confidence,summary=excluded.summary,probable_cause=excluded.probable_cause,resolution_comment=excluded.resolution_comment,recommended_fix=excluded.recommended_fix,recommended_owner=excluded.recommended_owner,developer_review_area=excluded.developer_review_area,developer_implementation_hint=excluded.developer_implementation_hint,developer_example_fix=excluded.developer_example_fix,source_context=excluded.source_context,verification_steps=excluded.verification_steps,regression_checks=excluded.regression_checks`,
-        [runId, a.testCase || null, a.classification || 'UNKNOWN', a.severity || null, a.confidence ?? null, a.summary || null, a.probableCause || null, a.resolutionComment || null, a.recommendedFix || null, a.recommendedOwner || null, a.developerReviewArea || null, a.developerImplementationHint || null, a.developerExampleFix || null, JSON.stringify(a.sourceContext || {}), JSON.stringify(a.verificationSteps || []), JSON.stringify(a.regressionChecks || [])]
+        `insert into defect_analyses(
+           run_id,external_case_id,classification,severity,confidence,summary,probable_cause,
+           resolution_comment,recommended_fix,recommended_owner,developer_review_area,
+           developer_implementation_hint,developer_example_fix,source_context,source_guidance_level,
+           source_candidate_files,verification_steps,regression_checks)
+         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16::jsonb,$17::jsonb,$18::jsonb)
+         on conflict(run_id,external_case_id) do update set
+           classification=excluded.classification,severity=excluded.severity,confidence=excluded.confidence,
+           summary=excluded.summary,probable_cause=excluded.probable_cause,resolution_comment=excluded.resolution_comment,
+           recommended_fix=excluded.recommended_fix,recommended_owner=excluded.recommended_owner,
+           developer_review_area=excluded.developer_review_area,developer_implementation_hint=excluded.developer_implementation_hint,
+           developer_example_fix=excluded.developer_example_fix,source_context=excluded.source_context,
+           source_guidance_level=excluded.source_guidance_level,source_candidate_files=excluded.source_candidate_files,
+           verification_steps=excluded.verification_steps,regression_checks=excluded.regression_checks`,
+        [
+          runId, a.testCase || null, a.classification || 'UNKNOWN', a.severity || null, a.confidence ?? null,
+          a.summary || null, a.probableCause || null, a.resolutionComment || null, a.recommendedFix || null,
+          a.recommendedOwner || null, a.developerReviewArea || null, a.developerImplementationHint || null,
+          a.developerExampleFix || null, JSON.stringify(a.sourceContext || {}), a.sourceGuidanceLevel || 'BLACK_BOX',
+          JSON.stringify(a.sourceCandidateFiles || []), JSON.stringify(a.verificationSteps || []), JSON.stringify(a.regressionChecks || [])
+        ]
       );
     }
   });
