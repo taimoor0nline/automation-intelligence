@@ -7,6 +7,7 @@ const path = require("path");
 const chatRoutes = require("./routes/chat");
 const runRoutes = require("./routes/run");
 const testCaseLifecycleRoutes = require("./routes/testCaseLifecycle");
+const liveBrowserRoutes = require("./routes/liveBrowser");
 const qwen = require("./services/qwenClient");
 const { REPORT_DIR, reportFileName } = require("./services/reportGenerator");
 
@@ -72,12 +73,17 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
   return res.sendFile(filePath);
 });
 
+app.use(liveBrowserRoutes);
 app.use(testCaseLifecycleRoutes);
 app.use(runRoutes);
 app.use(chatRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, aiConnected: qwen.isConfigured(), defaultAiProfile: process.env.AI_MODEL_DEFAULT || "strong" });
+});
+
+app.get("/live", (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "testpilot-ui", "live.html"));
 });
 
 const READINESS_CSS = `
@@ -135,6 +141,7 @@ app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 app.listen(PORT, HOST, () => {
   console.log(`[ai-testpilot] Backend listening on ${HOST}:${PORT}`);
   console.log(`[ai-testpilot] UI available locally at http://localhost:${PORT}/`);
+  console.log(`[ai-testpilot] Experimental live browser viewer: http://localhost:${PORT}/live`);
   if (qwen.isConfigured()) console.log(`[ai-testpilot] ✅ AI provider connected · default profile ${(process.env.AI_MODEL_DEFAULT || "strong").toLowerCase()}`);
   else console.log("[ai-testpilot] ❌ AI provider is not configured. Check the server-side AI configuration in .env.");
 });
