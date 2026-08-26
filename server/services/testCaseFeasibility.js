@@ -148,8 +148,8 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
     automatable: true,
     reasonCode: suggestions.length ? "SUPPORTED_WITH_ASSERTION_SUGGESTIONS" : "SUPPORTED_GROUNDED_AND_COMPILED",
     reason: suggestions.length
-      ? "The test has deterministic assertions and can run. Some narrative expectations also have optional assertion-capability suggestions for stronger coverage."
-      : "The test case is grounded and has compiled successfully into the deterministic automation contract.",
+      ? "The test has deterministic assertions and can run. Some narrative expectations also have optional assertion-capability suggestions for stronger coverage. Execution PASS/FAIL is determined only when the browser runs the test."
+      : "The test case is grounded and compiled successfully into the deterministic Cypress contract. Automation Ready means executable; it does not predict PASS/FAIL. The execution outcome is determined only when the browser runs the test.",
     resolutionType: RESOLUTION_NONE,
     automationPlan: compiled.plan,
     assertionSuggestions: suggestions,
