@@ -21,6 +21,11 @@ async function persistSession(sessionId, session, context = {}) {
     approvedIds: session.approvedIds,
     runHistory: session.runHistory,
     failureAnalyses: session.failureAnalyses,
+    lastResults: session.lastResults ? {
+      summary: session.lastResults.summary || null,
+      runNumber: session.lastResults.runNumber || null,
+      deterministicFindings: session.lastResults.deterministicFindings || [],
+    } : null,
   };
   await db.query(
     `insert into test_sessions(id,project_id,created_by,state,story,target_url,environment,ai_model_tier,repository_id,session_json)
