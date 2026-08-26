@@ -17,8 +17,8 @@ function repoParts(fullName) {
   return { owner, repo };
 }
 
-function ext(path) {
-  const match = String(path || '').toLowerCase().match(/(\.[a-z0-9]+)$/);
+function ext(filePath) {
+  const match = String(filePath || '').toLowerCase().match(/(\.[a-z0-9]+)$/);
   return match?.[1] || '';
 }
 
@@ -35,12 +35,6 @@ async function fetchJson(url) {
   return res.json();
 }
 
-async function fetchText(url) {
-  const res = await fetch(url, { headers: githubHeaders() });
-  if (!res.ok) throw new Error(`GitHub source file request failed (${res.status}).`);
-  return (await res.text()).slice(0, MAX_FILE_BYTES);
-}
-
 async function getRepository(repositoryId) {
   if (!repositoryId || !db.isConfigured()) return null;
   const result = await db.query(
@@ -52,15 +46,27 @@ async function getRepository(repositoryId) {
 
 async function listTree(repository) {
   const { owner, repo } = repoParts(repository.repo_full_name);
-  const branch = encodeURIComponent(repository.default_branch || 'main');
-  const data = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${branch}?recursive=1`);
+  const branch = repository.default_branch || 'main';
+  const ref = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`);
+  const commit = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits/${encodeURIComponent(ref.object.sha)}`);
+  const data = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(commit.tree.sha)}?recursive=1`);
   return (data.tree || [])
     .filter((item) => item.type === 'blob' && ALLOWED_EXTENSIONS.has(ext(item.path)))
     .slice(0, MAX_TREE_FILES);
 }
 
-function scorePath(path, tokens) {
-  const lower = String(path || '').toLowerCase();
+async function fetchRepositoryFile(repository, filePath) {
+  const { owner, repo } = repoParts(repository.repo_full_name);
+  const branch = repository.default_branch || 'main';
+  const encodedPath = String(filePath).split('/').map(encodeURIComponent).join('/');
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`;
+  const data = await fetchJson(url);
+  if (!data || data.type !== 'file' || data.encoding !== 'base64' || !data.content) throw new Error('GitHub did not return a readable source file.');
+  return Buffer.from(String(data.content).replace(/\s/g, ''), 'base64').toString('utf8').slice(0, MAX_FILE_BYTES);
+}
+
+function scorePath(filePath, tokens) {
+  const lower = String(filePath || '').toLowerCase();
   let score = 0;
   for (const token of tokens) if (lower.includes(token)) score += token.length >= 6 ? 4 : 2;
   if (/server|api|service|controller|validator|validation|form|feedback|auth|login/i.test(lower)) score += 1;
@@ -71,10 +77,7 @@ function scorePath(path, tokens) {
 function scoreContent(content, tokens) {
   const lower = String(content || '').toLowerCase();
   let score = 0;
-  for (const token of tokens) {
-    const first = lower.indexOf(token);
-    if (first >= 0) score += token.length >= 6 ? 4 : 2;
-  }
+  for (const token of tokens) if (lower.includes(token)) score += token.length >= 6 ? 4 : 2;
   return score;
 }
 
@@ -86,9 +89,8 @@ function snippets(content, tokens) {
     if (tokens.some((t) => lower.includes(t))) indexes.push(i);
     if (indexes.length >= 3) break;
   }
-  if (!indexes.length) return [];
   return indexes.map((idx) => ({
-    startLine: Math.max(1, idx - 2 + 1),
+    startLine: Math.max(1, idx - 1),
     endLine: Math.min(lines.length, idx + 3),
     text: lines.slice(Math.max(0, idx - 2), Math.min(lines.length, idx + 3)).join('\n'),
   }));
@@ -104,13 +106,10 @@ async function buildSourceContext({ repositoryId, testCase, expected, actual, an
     .sort((a, b) => b.pathScore - a.pathScore)
     .slice(0, Math.max(MAX_CANDIDATES * 2, 10));
 
-  const { owner, repo } = repoParts(repository.repo_full_name);
-  const branch = repository.default_branch || 'main';
   const inspected = [];
   for (const item of pathCandidates) {
     try {
-      const url = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch).replace(/%2F/g,'/')}/${item.path.split('/').map(encodeURIComponent).join('/')}`;
-      const content = await fetchText(url);
+      const content = await fetchRepositoryFile(repository, item.path);
       const contentScore = scoreContent(content, tokens);
       inspected.push({
         path: item.path,
@@ -128,7 +127,7 @@ async function buildSourceContext({ repositoryId, testCase, expected, actual, an
     mode: 'SOURCE_AWARE',
     repositoryId: repository.id,
     repoFullName: repository.repo_full_name,
-    branch,
+    branch: repository.default_branch || 'main',
     searchTokens: tokens,
     candidateFiles: files,
     sourceVerified: files.some((file) => file.snippets.length > 0),
