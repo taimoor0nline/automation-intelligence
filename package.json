@@ -1,6 +1,6 @@
 {
   "name": "ai-testpilot-poc",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "AI TestPilot — persistent source-aware Cypress automation platform",
   "scripts": {
@@ -19,7 +19,8 @@
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.1",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "yaml": "^2.5.1"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
