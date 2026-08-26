@@ -6,6 +6,7 @@ const path = require("path");
 
 const chatRoutes = require("./routes/chat");
 const runRoutes = require("./routes/run");
+const restApiRoutes = require("./routes/restApi");
 const testCaseLifecycleRoutes = require("./routes/testCaseLifecycle");
 const liveBrowserRoutes = require("./routes/liveBrowser");
 const authRoutes = require("./routes/auth");
@@ -49,7 +50,7 @@ qwen.analyzeFailure = async (args) => {
     const hasSourceGuidance = analysis.sourceGuidanceLevel && analysis.sourceGuidanceLevel !== "BLACK_BOX";
     const blackBoxReviewArea = tc.id === "TC004"
       ? "Inspect the feedback submission age validation in both the browser-side form validation and the server/API validation path. The rule should have one consistent lower boundary: age >= 18."
-      : "Inspect the feedback website-field validation in both the browser-side form validation and the server/API validation path. A supplied value should be accepted only when it is a valid HTTP/HTTPS URL.";
+      : "Inspect the feedback website-field validation in both browser-side and server/API validation. A supplied value should be accepted only when it is a valid HTTP/HTTPS URL.";
     const blackBoxHint = tc.id === "TC004"
       ? "The rejection condition should treat every numeric age below 18 as invalid, preserve the upper boundary, return a validation error, and keep the form editable. Make the same rule authoritative on the server even if the browser also validates it."
       : "Do not gate URL validation on whether the value contains a dot. If the optional website field is non-empty, parse/validate the complete URL and allow only the approved protocols; otherwise return the website validation error and keep the form editable.";
@@ -105,7 +106,7 @@ app.use((req, res, next) => {
   if (req.path === '/api/auth/login' || req.path === '/api/auth/bootstrap' || req.path === '/health') return next();
   if (!req.user) return res.status(401).json({ reply: 'Authentication is required for this platform.' });
   const role = String(req.user.role || '').toUpperCase();
-  const qaOnly = req.path === '/api/chat' || req.path.startsWith('/api/test-cases') || req.path.startsWith('/api/live-browser') || req.path === '/api/reset';
+  const qaOnly = req.path === '/api/chat' || req.path.startsWith('/api/test-cases') || req.path.startsWith('/api/live-browser') || req.path.startsWith('/api/rest') || req.path === '/api/reset';
   if (qaOnly && !['QA','MANAGER'].includes(role)) return res.status(403).json({ reply: 'QA or MANAGER role is required for test design/execution.' });
   next();
 });
@@ -142,6 +143,7 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
 app.use(authRoutes);
 app.use(projectRoutes);
 app.use(sessionContextRoutes);
+app.use(restApiRoutes);
 app.use(liveBrowserRoutes);
 app.use(testCaseLifecycleRoutes);
 app.use(runRoutes);
@@ -212,7 +214,17 @@ function serveUi(req, res, next) {
   });
 }
 
+function serveRestUi(req, res, next) {
+  const uiFile = path.join(__dirname, "..", "testpilot-ui", "rest.html");
+  fs.readFile(uiFile, "utf8", (err, html) => {
+    if (err) return next(err);
+    const adjusted = html.replace("</body>", '<script src="/rest-request-template.js"></script></body>');
+    res.type("html").send(adjusted);
+  });
+}
+
 app.get(["/", "/index.html"], serveUi);
+app.get("/rest.html", serveRestUi);
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
 app.listen(PORT, HOST, async () => {
