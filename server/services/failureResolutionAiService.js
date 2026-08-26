@@ -10,20 +10,24 @@ const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_T
 const FAILURE_RESOLUTION_PROMPT = `You are a senior QA failure analyst and remediation advisor for a Cypress-based deterministic test automation platform.
 Analyze one completed failed test using only the supplied business story, approved test case, expected behavior and observed failure.
 
-Your job has two parts:
+Your job has three parts:
 1. classify what most likely failed;
-2. provide concise, actionable resolution guidance for a human developer/tester.
+2. provide concise, actionable resolution guidance for a human developer/tester;
+3. when classification is APPLICATION_DEFECT, provide developer-oriented implementation guidance that explains what logic to inspect and a safe pseudocode/example pattern for correcting it.
 
 Hard rules:
 - Never weaken, remove, bypass or rewrite the approved expected behavior merely to make the test pass.
 - Never claim that the issue is fixed or resolved. This is advisory guidance only.
 - Do not invent source files, line numbers, APIs, database objects, selectors, requirements or implementation details that were not supplied.
+- If source code was not supplied, developer guidance must say which logical area to inspect, not fabricate an exact file or function name.
+- An example fix may be pseudocode or a generic code pattern. Clearly label it as an example, not a verified patch.
 - APPLICATION_DEFECT means the automation reached meaningful application validation and observed behavior that conflicts with the approved expectation.
 - AUTOMATION_DEFECT means the runtime/compiler/selector/framework failed before meaningful application validation.
 - TEST_DATA_PROBLEM means the supplied data is unsuitable or contradicts the approved scenario.
 - ENVIRONMENT_PROBLEM means browser/server/network/environment availability prevented meaningful validation.
 - REQUIREMENT_AMBIGUITY means the expected behavior cannot be determined confidently from supplied requirements.
 - Recommended fixes must describe what should be reviewed or changed, not fabricate code.
+- Regression checks must identify nearby behavior that could be broken by the change.
 - Verification steps must describe how to prove the resolution after a human change, normally by re-running the failed test and confirming the expected assertion.
 - safeToAutoResolve must always be false. The platform must not auto-close or auto-fix a failed test from this response.
 - Return JSON only.
@@ -40,6 +44,10 @@ Schema:
   "resolutionComment": string,
   "recommendedFix": string,
   "recommendedOwner": "APPLICATION_TEAM"|"TEST_AUTOMATION_TEAM"|"TEST_DATA_OWNER"|"ENVIRONMENT_TEAM"|"BUSINESS_ANALYST"|"MANUAL_REVIEW",
+  "developerReviewArea": string,
+  "developerImplementationHint": string,
+  "developerExampleFix": string,
+  "regressionChecks": [string],
   "verificationSteps": [string],
   "safeToAutoResolve": false
 }`;
@@ -67,6 +75,12 @@ function normalizeOwner(value, classification) {
   return "MANUAL_REVIEW";
 }
 
+function cleanList(value, maxItems = 6) {
+  return Array.isArray(value)
+    ? value.map((v) => cleanText(v, 700)).filter(Boolean).slice(0, maxItems)
+    : [];
+}
+
 function normalizeResult(result, fallback) {
   const allowedClassifications = new Set([
     "APPLICATION_DEFECT",
@@ -81,9 +95,9 @@ function normalizeResult(result, fallback) {
     ? String(result.severity).toLowerCase()
     : "medium";
   const confidence = Number(result?.confidence);
-  const verificationSteps = Array.isArray(result?.verificationSteps)
-    ? result.verificationSteps.map((v) => cleanText(v, 500)).filter(Boolean).slice(0, 5)
-    : [];
+  const verificationSteps = cleanList(result?.verificationSteps, 5);
+  const regressionChecks = cleanList(result?.regressionChecks, 6);
+  const isApplicationDefect = classification === "APPLICATION_DEFECT";
 
   return {
     summary: cleanText(result?.summary || "The failed test requires review.", 1500),
@@ -96,6 +110,18 @@ function normalizeResult(result, fallback) {
     resolutionComment: cleanText(result?.resolutionComment || "Review the failure against the approved expectation before making a corrective change.", 1800),
     recommendedFix: cleanText(result?.recommendedFix || "Correct the responsible application, automation, data, environment, or requirement issue without weakening the approved assertion.", 1800),
     recommendedOwner: normalizeOwner(result?.recommendedOwner, classification),
+    developerReviewArea: isApplicationDefect
+      ? cleanText(result?.developerReviewArea || "Review the application validation/business-rule path responsible for the failed expected behavior.", 1200)
+      : "",
+    developerImplementationHint: isApplicationDefect
+      ? cleanText(result?.developerImplementationHint || "Align the application rule with the approved requirement, return/render the expected validation state, and preserve the valid-path behavior.", 2200)
+      : "",
+    developerExampleFix: isApplicationDefect
+      ? cleanText(result?.developerExampleFix || "Example pattern: if (input violates approved rule) { reject submission; expose validation error; } else { continue normal processing; }", 2600)
+      : "",
+    regressionChecks: isApplicationDefect
+      ? (regressionChecks.length ? regressionChecks : ["Confirm a valid value is still accepted.", "Confirm the boundary/invalid value is rejected.", "Confirm the expected validation feedback remains visible and non-empty."])
+      : [],
     verificationSteps: verificationSteps.length ? verificationSteps : ["Apply the reviewed corrective change.", "Re-run the failed test case and confirm the original expected behavior now passes."],
     safeToAutoResolve: false,
     resolutionSource: "AI_ADVISORY",
