@@ -21,7 +21,19 @@ const CAPABILITY_RULES = [
   { pattern: /\b(camera\s+permission|microphone\s+permission|system\s+permission\s+prompt)\b/i, status: REQUIRES_FRAMEWORK_CAPABILITY, reasonCode: "SYSTEM_PERMISSION_PROMPT_REQUIRED", resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED, reason: "The scenario depends on a browser or operating-system permission prompt outside the current deterministic interaction contract." },
 ];
 
-function result({ status, automatable, reasonCode, reason, reasons = [], resolutionType, requiredInputs = [], evidence = [], automationPlan = null }) {
+function result({
+  status,
+  automatable,
+  reasonCode,
+  reason,
+  reasons = [],
+  resolutionType,
+  requiredInputs = [],
+  evidence = [],
+  automationPlan = null,
+  assertionSuggestions = [],
+  uncompiledExpectations = [],
+}) {
   return {
     status,
     automatable,
@@ -33,6 +45,9 @@ function result({ status, automatable, reasonCode, reason, reasons = [], resolut
     requiredInputs,
     evidence,
     automationPlan,
+    assertionSuggestions: Array.isArray(assertionSuggestions) ? assertionSuggestions : [],
+    uncompiledExpectations: Array.isArray(uncompiledExpectations) ? uncompiledExpectations : [],
+    canSuggestAssertion: Boolean((assertionSuggestions || []).length || (uncompiledExpectations || []).length || resolutionType === RESOLUTION_FRAMEWORK_CHANGE_REQUIRED),
     validationSource: "deterministic",
   };
 }
@@ -106,30 +121,39 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   if (selectorProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_SELECTOR", reason: `The test references a selector that was not verified during page discovery: ${selectorProblems[0]}`, reasons: selectorProblems.map((selector) => `Undiscovered selector: ${selector}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...discovery.selectors].slice(0, 50) });
   if (pathProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_PATH", reason: `The test references a navigation path that was not verified during page discovery: ${pathProblems[0]}`, reasons: pathProblems.map((path) => `Undiscovered navigation path: ${path}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...discovery.paths].slice(0, 30) });
 
-  // A case is READY only if it compiles into the strict deterministic automation DSL.
-  // This prevents natural-language ambiguity from being mislabeled as executable readiness.
   const compiled = compileTestCase(testCase, { pageDiscoveries, hasCredentials });
   if (!compiled.ok) {
     const userInput = compiled.reasonCode === "MISSING_CREDENTIALS";
+    const assertionGap = compiled.reasonCode === "ASSERTION_CAPABILITY_MISSING";
     return result({
-      status: INSUFFICIENT_EVIDENCE,
+      status: assertionGap ? REQUIRES_FRAMEWORK_CAPABILITY : INSUFFICIENT_EVIDENCE,
       automatable: false,
       reasonCode: compiled.reasonCode || "AUTOMATION_CONTRACT_INCOMPLETE",
-      reason: compiled.reason || "The test case could not be compiled into the supported automation contract.",
+      reason: assertionGap
+        ? "The expected behavior is valid, but the deterministic Cypress assertion registry does not yet contain a matching assertion capability."
+        : compiled.reason || "The test case could not be compiled into the supported automation contract.",
       reasons: compiled.errors || [],
-      resolutionType: userInput ? RESOLUTION_USER_INPUT_REQUIRED : RESOLUTION_AI_REPAIRABLE,
+      resolutionType: userInput ? RESOLUTION_USER_INPUT_REQUIRED : assertionGap ? RESOLUTION_FRAMEWORK_CHANGE_REQUIRED : RESOLUTION_AI_REPAIRABLE,
       requiredInputs: userInput ? ["username", "password"] : [],
-      evidence: compiled.supportedOperations || [],
+      evidence: compiled.supportedAssertions || compiled.supportedOperations || [],
+      assertionSuggestions: compiled.assertionSuggestions || [],
+      uncompiledExpectations: compiled.uncompiledExpectations || [],
     });
   }
 
+  const suggestions = compiled.plan.assertionSuggestions || [];
+  const narratives = compiled.plan.narrativeExpectations || [];
   return result({
     status: READY,
     automatable: true,
-    reasonCode: "SUPPORTED_GROUNDED_AND_COMPILED",
-    reason: "The test case is grounded and has compiled successfully into the deterministic automation contract.",
+    reasonCode: suggestions.length ? "SUPPORTED_WITH_ASSERTION_SUGGESTIONS" : "SUPPORTED_GROUNDED_AND_COMPILED",
+    reason: suggestions.length
+      ? "The test has deterministic assertions and can run. Some narrative expectations also have optional assertion-capability suggestions for stronger coverage."
+      : "The test case is grounded and has compiled successfully into the deterministic automation contract.",
     resolutionType: RESOLUTION_NONE,
     automationPlan: compiled.plan,
+    assertionSuggestions: suggestions,
+    uncompiledExpectations: narratives,
     evidence: [
       `${compiled.plan.actions.length} deterministic action(s) compiled`,
       `${compiled.plan.assertions.length} deterministic assertion(s) compiled`,
@@ -145,7 +169,7 @@ function assessTestCases(testCases = [], context = {}) {
 }
 
 function readinessSummary(testCases = []) {
-  const summary = { total: testCases.length, ready: 0, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0 };
+  const summary = { total: testCases.length, ready: 0, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0, assertionSuggestions: 0 };
   for (const tc of testCases) {
     const readiness = tc?.automationReadiness || {};
     if (readiness.status === READY) summary.ready += 1;
@@ -155,6 +179,7 @@ function readinessSummary(testCases = []) {
     if (readiness.resolutionType === RESOLUTION_USER_INPUT_REQUIRED) summary.userInputRequired += 1;
     if (readiness.resolutionType === RESOLUTION_AI_REPAIRABLE) summary.aiRepairable += 1;
     if (readiness.resolutionType === RESOLUTION_FRAMEWORK_CHANGE_REQUIRED) summary.frameworkChangeRequired += 1;
+    if (readiness.canSuggestAssertion) summary.assertionSuggestions += 1;
   }
   return summary;
 }
