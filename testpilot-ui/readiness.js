@@ -115,8 +115,9 @@
       const checked = isReady ? 'checked' : '';
       const disabled = isReady ? '' : 'disabled';
       let actions = '';
-      if (resolution === 'AI_REPAIRABLE') actions = '<button class="btn ghost" type="button" onclick="repairCaseWithAI(' + i + ')">Fix with AI</button>';
-      else if (resolution === 'USER_INPUT_REQUIRED') actions = '<button class="btn ghost" type="button" onclick="focusRequiredInput(' + i + ')">Provide required input</button>';
+      if (resolution === 'AI_REPAIRABLE') actions += '<button class="btn ghost" type="button" onclick="repairCaseWithAI(' + i + ')">Fix with AI</button>';
+      else if (resolution === 'USER_INPUT_REQUIRED') actions += '<button class="btn ghost" type="button" onclick="focusRequiredInput(' + i + ')">Provide required input</button>';
+      if (readiness?.canSuggestAssertion) actions += '<button class="btn ghost" type="button" onclick="suggestAssertionWithAI(' + i + ')">Suggest assertion with AI</button>';
       const sourceLabel = source === 'human' ? 'Human' : source === 'ai-on-demand' ? 'AI · On-demand' : source === 'ai-repaired' ? 'AI · Repaired' : 'AI / Reviewed';
 
       return '<div class="case ' + typeClass + '">' +
@@ -142,8 +143,6 @@
         const cacheText = lastGenerationMeta?.discoveryCacheBypassed ? ' · fresh discovery' : lastGenerationMeta?.discoveryCacheHit ? ' · discovery cache used' : '';
         $('caseSubtitle').textContent = 'AI test cases generated · applying automation readiness checks…' + cacheText;
       }, 0);
-      // Keep the pending phase visible so the reviewer can clearly see generation
-      // and deterministic readiness as separate gates.
       scheduleReadiness(1500);
     } else if (!readinessRefreshInFlight) {
       setTimeout(() => {
@@ -178,6 +177,30 @@
       if (!r.ok) throw new Error(data.reply || 'The test case could not be repaired safely.');
       if (data.testCase) { testCases[index] = data.testCase; renderCases(); }
     } catch (err) { showError(err.message); renderCases(); }
+  };
+
+  window.suggestAssertionWithAI = async function (index) {
+    const tc = testCases[index];
+    if (!tc) return;
+    clearError();
+    const buttons = document.querySelectorAll('.case:nth-child(' + (index + 1) + ') .readiness-actions button');
+    const button = Array.from(buttons).find((item) => item.textContent.includes('Suggest assertion'));
+    if (button) { button.disabled = true; button.textContent = 'Thinking…'; }
+    try {
+      const r = await fetch('/api/test-cases/assertion-suggestion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, testCase: tc, credentials: credentialsPayload() })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.reply || 'AI could not suggest an assertion capability.');
+      const s = data.suggestion || {};
+      const dependency = s.dependency ? ' Dependency: ' + s.dependency + '.' : '';
+      showError('AI assertion suggestion — ' + (s.kind || 'REVIEW') + (s.operation ? ' · ' + s.operation : '') + ': ' + (s.rationale || '') + ' Cypress approach: ' + (s.cypressStrategy || '') + dependency);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      if (button) { button.disabled = false; button.textContent = 'Suggest assertion with AI'; }
+    }
   };
 
   ['username', 'password'].forEach((id) => $(id).addEventListener('input', () => {
@@ -215,7 +238,8 @@
       return;
     }
     const historyHtml = history.length ? '<div class="history"><b>Repair history</b><br>' + history.map((x) => 'Attempt ' + escapeHtml(x.attempt) + ': ' + escapeHtml(x.reasonCode || x.originalStatus) + ' → ' + escapeHtml(x.result || 'review')).join('<br>') + '</div>' : '';
-    box.innerHTML = '<strong>' + escapeHtml(readinessLabel(r.status)) + '</strong><div><b>Reason code:</b> ' + escapeHtml(r.reasonCode || '—') + '</div><div><b>Reason:</b> ' + escapeHtml(r.reason || '—') + '</div><div><b>Resolution:</b> ' + escapeHtml(r.resolutionType || 'NONE') + '</div><div><b>Validation:</b> Deterministic automation-system check</div>' + historyHtml;
+    const suggestionHtml = r.canSuggestAssertion ? '<div><b>Assertion coverage:</b> One or more expectations can be strengthened through an AI assertion suggestion.</div>' : '';
+    box.innerHTML = '<strong>' + escapeHtml(readinessLabel(r.status)) + '</strong><div><b>Reason code:</b> ' + escapeHtml(r.reasonCode || '—') + '</div><div><b>Reason:</b> ' + escapeHtml(r.reason || '—') + '</div><div><b>Resolution:</b> ' + escapeHtml(r.resolutionType || 'NONE') + '</div><div><b>Validation:</b> Deterministic automation-system check</div>' + suggestionHtml + historyHtml;
   }
 
   function fillEditorFromCandidate(tc) {
