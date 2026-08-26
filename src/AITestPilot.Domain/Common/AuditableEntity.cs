@@ -9,9 +9,9 @@ public abstract class AuditableEntity
 {
     public Guid Id { get; protected set; }
     public DateTimeOffset CreatedAtUtc { get; protected set; }
-    public Guid? CreatedByUserId { get; protected set; }
+    public Guid CreatedByUserId { get; protected set; }
     public DateTimeOffset UpdatedAtUtc { get; protected set; }
-    public Guid? UpdatedByUserId { get; protected set; }
+    public Guid UpdatedByUserId { get; protected set; }
 
     protected AuditableEntity()
     {
