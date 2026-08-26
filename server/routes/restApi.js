@@ -28,14 +28,14 @@ function safeAuthConfig(type, body = {}) {
   }
   return {};
 }
-function runtimeAuth(input, target) {
+function runtimeAuth(input, target, { requireSecret = true } = {}) {
   const type = authType(input?.type || target.auth_type || 'NONE');
   const runtime = { type, username: '', secret: '', headerName: '' };
   if (type === 'BASIC') { runtime.username = clean(input?.username, 300); runtime.secret = String(input?.secret || ''); }
   if (type === 'BEARER') runtime.secret = String(input?.secret || '');
   if (type === 'API_KEY_HEADER') { runtime.headerName = clean(input?.headerName || target.auth_config?.headerName, 100); runtime.secret = String(input?.secret || ''); }
-  if (type !== 'NONE' && !runtime.secret) throw new Error('REST authentication secret is required for this run and is kept only in runtime memory.');
-  if (type === 'BASIC' && !runtime.username) throw new Error('REST basic-auth username is required.');
+  if (requireSecret && type !== 'NONE' && !runtime.secret) throw new Error('REST authentication secret is required for execution and is kept only in runtime memory.');
+  if (requireSecret && type === 'BASIC' && !runtime.username) throw new Error('REST basic-auth username is required for execution.');
   if (type === 'API_KEY_HEADER' && !runtime.headerName) throw new Error('REST API-key header name is required.');
   return runtime;
 }
@@ -47,6 +47,11 @@ async function assertProjectAccess(req, projectId, allowedRoles = ['QA','MANAGER
   if (!membership.rowCount) { const err = new Error('You do not have access to this project.'); err.statusCode = 403; throw err; }
 }
 
+async function targetById(targetId) {
+  const result = await db.query('select * from api_targets where id=$1', [targetId]);
+  return result.rows[0] || null;
+}
+
 async function insertOperations(client, targetId, operations, replaceOpenApi = false) {
   if (replaceOpenApi) await client.query(`delete from api_operations where api_target_id=$1 and source='OPENAPI'`, [targetId]);
   for (const op of operations) {
@@ -54,7 +59,7 @@ async function insertOperations(client, targetId, operations, replaceOpenApi = f
       `insert into api_operations(api_target_id,source,operation_key,operation_id,method,path,summary,description,parameters,request_schema,request_example,responses,content_types)
        values($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb)
        on conflict(api_target_id,operation_key) do update set source=excluded.source,operation_id=excluded.operation_id,method=excluded.method,path=excluded.path,summary=excluded.summary,description=excluded.description,parameters=excluded.parameters,request_schema=excluded.request_schema,request_example=excluded.request_example,responses=excluded.responses,content_types=excluded.content_types,enabled=true,updated_at=now()`,
-      [targetId, op.source, op.operationKey, op.operationId, op.method, op.path, op.summary, op.description, JSON.stringify(op.parameters || []), JSON.stringify(op.requestSchema || {}), op.requestExample === undefined ? null : JSON.stringify(op.requestExample), JSON.stringify(op.responses || {}), JSON.stringify(op.contentTypes || [])]
+      [targetId, op.source, op.operationKey, op.operationId, op.method, op.path, op.summary, op.description, JSON.stringify(op.parameters || []), JSON.stringify(op.requestSchema || {}), JSON.stringify(op.requestExample ?? null), JSON.stringify(op.responses || {}), JSON.stringify(op.contentTypes || [])]
     );
   }
 }
@@ -69,6 +74,8 @@ router.get('/api/projects/:projectId/rest-targets', requireAuth, async (req, res
 
 router.post('/api/projects/:projectId/rest-targets', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
   try {
+    const project = await db.query('select id from projects where id=$1', [req.params.projectId]);
+    if (!project.rowCount) return res.status(404).json({ reply: 'Project not found.' });
     const mode = String(req.body?.discoveryMode || req.body?.mode || 'MANUAL').toUpperCase();
     if (!['MANUAL','OPENAPI'].includes(mode)) return res.status(400).json({ reply: 'discoveryMode must be MANUAL or OPENAPI.' });
     const type = authType(req.body?.authType || 'NONE');
@@ -105,13 +112,12 @@ router.post('/api/projects/:projectId/rest-targets', requireAuth, requireRole('Q
 
 router.post('/api/rest-targets/:targetId/refresh', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
   try {
-    const found = await db.query('select * from api_targets where id=$1', [req.params.targetId]);
-    const target = found.rows[0];
+    const target = await targetById(req.params.targetId);
     if (!target) return res.status(404).json({ reply: 'REST target not found.' });
     if (target.discovery_mode !== 'OPENAPI' || !target.specification_url) return res.status(409).json({ reply: 'Only OpenAPI/Swagger targets can be refreshed.' });
     const imported = await discoverOpenApi(target.specification_url);
     await db.withTransaction(async (client) => {
-      await client.query('update api_targets set base_url=$1,updated_at=now() where id=$2', [imported.baseUrl, target.id]);
+      await client.query('update api_targets set base_url=$1,specification_url=$2,updated_at=now() where id=$3', [imported.baseUrl, imported.specificationUrl, target.id]);
       await insertOperations(client, target.id, imported.operations, true);
     });
     res.json({ ok: true, format: imported.format, operationCount: imported.operations.length, baseUrl: imported.baseUrl });
@@ -120,15 +126,18 @@ router.post('/api/rest-targets/:targetId/refresh', requireAuth, requireRole('QA'
 
 router.get('/api/rest-targets/:targetId/operations', requireAuth, async (req, res) => {
   try {
+    const target = await targetById(req.params.targetId);
+    if (!target) return res.status(404).json({ reply: 'REST target not found.' });
+    await assertProjectAccess(req, target.project_id, ['QA','MANAGER']);
     const result = await db.query(`select * from api_operations where api_target_id=$1 and enabled=true order by path,method`, [req.params.targetId]);
     res.json({ ok: true, operations: result.rows });
-  } catch (err) { res.status(500).json({ reply: err.message }); }
+  } catch (err) { res.status(err.statusCode || 500).json({ reply: err.message }); }
 });
 
 router.post('/api/rest-targets/:targetId/operations', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
   try {
-    const target = await db.query('select id,discovery_mode from api_targets where id=$1', [req.params.targetId]);
-    if (!target.rowCount) return res.status(404).json({ reply: 'REST target not found.' });
+    const target = await targetById(req.params.targetId);
+    if (!target) return res.status(404).json({ reply: 'REST target not found.' });
     const operation = normalizeManualOperation(req.body || {});
     await db.withTransaction(async (client) => insertOperations(client, req.params.targetId, [operation]));
     const saved = await db.query('select * from api_operations where api_target_id=$1 and operation_key=$2', [req.params.targetId, operation.operationKey]);
@@ -160,8 +169,7 @@ function normalizeReviewedRestCases(input, fallback) {
 }
 
 async function loadRestTarget(targetId, operationIds) {
-  const targetResult = await db.query('select * from api_targets where id=$1', [targetId]);
-  const target = targetResult.rows[0];
+  const target = await targetById(targetId);
   if (!target) throw new Error('REST target not found.');
   const ids = Array.isArray(operationIds) ? operationIds.filter(Boolean).slice(0, 100) : [];
   const operationsResult = ids.length
@@ -194,14 +202,14 @@ router.post('/api/rest/sessions/:sessionId/generate', requireAuth, requireRole('
     session.apiTargetId = target.id;
     session.apiOperationIds = operations.map((op) => op.id);
     session.apiOperations = operations;
-    session.apiAuth = runtimeAuth(req.body?.apiAuth || { type: target.auth_type }, target);
+    session.apiAuth = runtimeAuth(req.body?.apiAuth || { type: target.auth_type }, target, { requireSecret: false });
     session.aiModelTier = modelTier;
     session.pageDiscoveries = [];
     session.testCases = assessRestTestCases(generated.testCases.map((tc) => ({ ...tc, source: 'ai' })), operations);
     session.automationReadiness = readinessSummary(session.testCases);
     session.readinessValidated = true;
     session.failureAnalyses = [];
-    res.json({ ok: true, feature: generated.feature || target.name, targetType: 'REST', target: { id: target.id, name: target.name, baseUrl: target.base_url, discoveryMode: target.discovery_mode }, operationCount: operations.length, testCases: session.testCases, automationReadiness: session.automationReadiness, readinessPending: false });
+    res.json({ ok: true, feature: generated.feature || target.name, targetType: 'REST', target: { id: target.id, name: target.name, baseUrl: target.base_url, discoveryMode: target.discovery_mode, authType: target.auth_type }, operationCount: operations.length, testCases: session.testCases, automationReadiness: session.automationReadiness, readinessPending: false });
   } catch (err) { res.status(400).json({ reply: err.message }); }
 });
 
@@ -209,11 +217,9 @@ router.post('/api/rest/sessions/:sessionId/run', requireAuth, requireRole('QA','
   const session = getSession(req.params.sessionId);
   try {
     if (session.targetType !== 'REST') return res.status(409).json({ reply: 'This session is not a REST API test session.' });
-    const operations = Array.isArray(session.apiOperations) && session.apiOperations.length ? session.apiOperations : (await loadRestTarget(session.apiTargetId, session.apiOperationIds)).operations;
-    if (req.body?.apiAuth) {
-      const target = (await loadRestTarget(session.apiTargetId, session.apiOperationIds)).target;
-      session.apiAuth = runtimeAuth(req.body.apiAuth, target);
-    }
+    const loaded = await loadRestTarget(session.apiTargetId, session.apiOperationIds);
+    const operations = Array.isArray(session.apiOperations) && session.apiOperations.length ? session.apiOperations : loaded.operations;
+    session.apiAuth = runtimeAuth(req.body?.apiAuth || session.apiAuth || { type: loaded.target.auth_type }, loaded.target, { requireSecret: true });
     session.testCases = assessRestTestCases(normalizeReviewedRestCases(req.body?.reviewedTestCases, session.testCases), operations);
     session.automationReadiness = readinessSummary(session.testCases);
     session.readinessValidated = true;
@@ -228,7 +234,7 @@ router.post('/api/rest/sessions/:sessionId/run', requireAuth, requireRole('QA','
     session.approvedIds = approved;
     session.failureAnalyses = [];
     session.state = 'RUNNING';
-    const execResult = await executeSingleGeneratedSpec(generated, { targetType: 'REST', baseUrl: session.targetUrl, apiAuth: session.apiAuth || { type: 'NONE' } });
+    const execResult = await executeSingleGeneratedSpec(generated, { targetType: 'REST', baseUrl: session.targetUrl, apiAuth: session.apiAuth });
     if (!execResult.ok || !execResult.summary) { session.state = 'AWAITING_APPROVAL'; return res.status(500).json({ reply: `REST automation execution could not complete: ${execResult.error || 'unknown error'}` }); }
     const summary = execResult.summary;
     const runNumber = (session.runHistory?.length || 0) + 1;
