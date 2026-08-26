@@ -22,6 +22,7 @@ module.exports = defineConfig({
     supportFile: "tests/support/e2e.js",
     videosFolder: "artifacts/videos",
     screenshotsFolder: "artifacts/screenshots",
+    downloadsFolder: "artifacts/downloads",
     video: boolEnv(process.env.AUTOMATION_VIDEO, false),
     screenshotOnRunFailure: boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true),
     env: {
