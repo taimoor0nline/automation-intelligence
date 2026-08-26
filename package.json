@@ -1,12 +1,13 @@
 {
   "name": "ai-testpilot-poc",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "AI TestPilot demo — User Story -> Qwen Test Cases -> Human Approval -> Browser Automation -> AI Failure Analysis -> HTML Analytics",
   "scripts": {
     "start:demo-app": "node demo-app/server.js",
     "start:server": "node server/index.js",
-    "start": "concurrently -n demo-app,server -c blue,green \"npm:start:demo-app\" \"npm:start:server\""
+    "start": "concurrently -n demo-app,server -c blue,green \"npm:start:demo-app\" \"npm:start:server\"",
+    "test:capabilities": "node scripts/capability-smoke.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
