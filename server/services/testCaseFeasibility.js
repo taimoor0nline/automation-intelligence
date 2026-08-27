@@ -47,7 +47,9 @@ function result({
     automationPlan,
     assertionSuggestions: Array.isArray(assertionSuggestions) ? assertionSuggestions : [],
     uncompiledExpectations: Array.isArray(uncompiledExpectations) ? uncompiledExpectations : [],
-    canSuggestAssertion: Boolean((assertionSuggestions || []).length || (uncompiledExpectations || []).length || resolutionType === RESOLUTION_FRAMEWORK_CHANGE_REQUIRED),
+    // A READY test is already executable. Optional narrative-strengthening ideas remain
+    // available in metadata, but they should not be presented as another repair action.
+    canSuggestAssertion: status !== READY && Boolean((assertionSuggestions || []).length || (uncompiledExpectations || []).length || resolutionType === RESOLUTION_FRAMEWORK_CHANGE_REQUIRED),
     validationSource: "deterministic",
   };
 }
