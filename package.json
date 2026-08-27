@@ -4,6 +4,8 @@
   "private": true,
   "description": "AI TestPilot — persistent source-aware Cypress automation platform",
   "scripts": {
+    "postinstall": "npm run automation:install",
+    "automation:install": "npm install --prefix automation-system --include=dev",
     "start:demo-app": "node demo-app/server.js",
     "start:server": "node server/index.js",
     "start": "concurrently -n demo-app,server -c blue,green \"npm:start:demo-app\" \"npm:start:server\"",
