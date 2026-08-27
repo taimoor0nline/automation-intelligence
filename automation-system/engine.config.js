@@ -43,22 +43,34 @@ module.exports = defineConfig({
         const streamingEnabled = boolEnv(process.env.AUTOMATION_LIVE_STREAM, false);
         if (!streamingEnabled || browser.family !== "chromium") return launchOptions;
 
-        const preferredPort = Math.max(1024, Math.min(numberEnv(process.env.AUTOMATION_LIVE_STREAM_PORT, 9223), 65535));
+        const fallbackPort = Math.max(1024, Math.min(numberEnv(process.env.AUTOMATION_LIVE_STREAM_PORT, 9223), 65535));
         const existingIndex = launchOptions.args.findIndex((arg) => String(arg).startsWith("--remote-debugging-port="));
-        const debugArg = `--remote-debugging-port=${preferredPort}`;
-        if (existingIndex >= 0) launchOptions.args[existingIndex] = debugArg;
-        else launchOptions.args.push(debugArg);
-        launchOptions.args.push("--remote-debugging-address=127.0.0.1");
+        let debugPort = null;
+
+        if (existingIndex >= 0) {
+          const existingArg = String(launchOptions.args[existingIndex]);
+          const parsed = Number(existingArg.split("=")[1]);
+          if (Number.isFinite(parsed) && parsed > 0) debugPort = parsed;
+        }
+
+        if (!debugPort) {
+          debugPort = fallbackPort;
+          launchOptions.args.push(`--remote-debugging-port=${debugPort}`);
+        }
+
+        if (!launchOptions.args.some((arg) => String(arg).startsWith("--remote-debugging-address="))) {
+          launchOptions.args.push("--remote-debugging-address=127.0.0.1");
+        }
 
         const infoFile = process.env.AUTOMATION_CDP_INFO_FILE || path.join(__dirname, "artifacts", "live-browser-cdp.json");
         try {
           fs.mkdirSync(path.dirname(infoFile), { recursive: true });
-          fs.writeFileSync(infoFile, JSON.stringify({ port: preferredPort, browser: browser.name, at: new Date().toISOString() }), "utf8");
+          fs.writeFileSync(infoFile, JSON.stringify({ port: debugPort, browser: browser.name, at: new Date().toISOString() }), "utf8");
         } catch (err) {
           console.warn(`[automation-engine] Could not publish live-stream debugger info: ${err.message}`);
         }
 
-        console.log(`[automation-engine] Live browser stream enabled on Chrome DevTools port ${preferredPort}.`);
+        console.log(`[automation-engine] Live browser stream attached to Cypress Chrome DevTools port ${debugPort}.`);
         return launchOptions;
       });
 
