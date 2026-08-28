@@ -35,6 +35,7 @@ const jsFiles = [
   'testpilot-ui/test-case-export.js',
   'testpilot-ui/report-excel.js',
   'testpilot-ui/generation-experience.js',
+  'testpilot-ui/readiness-batch.js',
 ];
 
 const errors = [];
@@ -131,6 +132,11 @@ for (const marker of ['Generating AI Test Cases', 'body.ai-generation-active #ca
 }
 for (const forbidden of ['window.fetch =', 'response.json =', 'generationElapsed', 'updateElapsed', 'isReadinessValidation', '/api/test-cases/revalidate']) {
   if (generationUi.includes(forbidden)) errors.push(`generation UI must not intercept response/timer/readiness lifecycle: ${forbidden}`);
+}
+
+const readinessBatch = fs.readFileSync(path.join(root, 'testpilot-ui/readiness-batch.js'), 'utf8');
+for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'ALLOWED_BATCH_SIZES = [1, 2, 3]', 'readinessBatchSize', 'sessionStorage', 'cases per deterministic validation request', 'BATCH_TIMEOUT_MS = 12000']) {
+  if (!readinessBatch.includes(marker)) errors.push(`readiness batching missing marker: ${marker}`);
 }
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
