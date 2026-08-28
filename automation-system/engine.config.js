@@ -12,6 +12,78 @@ function numberEnv(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+const RESULT_FILE = process.env.AUTOMATION_RESULT_FILE || path.join(__dirname, "artifacts", "latest-run-result.json");
+const LIVE_INFO_FILE = process.env.AUTOMATION_CDP_INFO_FILE || path.join(__dirname, "artifacts", "live-browser-cdp.json");
+const LIVE_STATE_FILE = process.env.AUTOMATION_LIVE_STATE_FILE || path.join(__dirname, "artifacts", "live-browser-state.json");
+
+function writeJsonAtomic(filePath, payload) {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const tempFile = `${filePath}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(payload, null, 2), "utf8");
+    fs.renameSync(tempFile, filePath);
+    return true;
+  } catch (err) {
+    console.warn(`[automation-engine] Could not write ${path.basename(filePath)}: ${err.message}`);
+    return false;
+  }
+}
+
+function publishLiveState(status, details = {}) {
+  if (!boolEnv(process.env.AUTOMATION_LIVE_STREAM, false)) return;
+  writeJsonAtomic(LIVE_STATE_FILE, {
+    status,
+    at: new Date().toISOString(),
+    ...details,
+  });
+}
+
+function errorFromAttempt(test, attempt) {
+  const error = attempt?.error || null;
+  const message = error?.message || test?.displayError || null;
+  if (!message && !error?.stack) return null;
+  return {
+    message: String(message || error?.stack || "Test failed."),
+    stack: error?.stack ? String(error.stack) : null,
+  };
+}
+
+function normalizeCypressTest(test) {
+  const attempts = Array.isArray(test?.attempts) ? test.attempts : [];
+  const attempt = attempts.length ? attempts[attempts.length - 1] : {};
+  const rawState = String(test?.state || attempt?.state || "").toLowerCase();
+  const state = ["passed", "failed", "pending", "skipped"].includes(rawState) ? rawState : "pending";
+  const title = Array.isArray(test?.title)
+    ? test.title.filter(Boolean).join(" ")
+    : String(test?.title || "");
+  const duration = Number(attempt?.duration ?? test?.duration);
+  return {
+    title,
+    state,
+    durationMs: Number.isFinite(duration) ? Math.round(duration) : null,
+    err: state === "failed" ? errorFromAttempt(test, attempt) : null,
+  };
+}
+
+function finalSpecPayload(results) {
+  const tests = (Array.isArray(results?.tests) ? results.tests : []).map(normalizeCypressTest);
+  const stats = results?.stats || {};
+  const passed = Number.isFinite(Number(stats.passes)) ? Number(stats.passes) : tests.filter((test) => test.state === "passed").length;
+  const failed = Number.isFinite(Number(stats.failures)) ? Number(stats.failures) : tests.filter((test) => test.state === "failed").length;
+  const pending = Number.isFinite(Number(stats.pending)) ? Number(stats.pending) : tests.filter((test) => test.state === "pending").length;
+  const skipped = Number.isFinite(Number(stats.skipped)) ? Number(stats.skipped) : tests.filter((test) => test.state === "skipped").length;
+  return {
+    source: "cypress-after-spec-final",
+    total: Number.isFinite(Number(stats.tests)) ? Number(stats.tests) : tests.length,
+    passed,
+    failed,
+    pending,
+    skipped,
+    durationMs: Number.isFinite(Number(stats.duration)) ? Math.round(Number(stats.duration)) : null,
+    tests,
+  };
+}
+
 module.exports = defineConfig({
   allowCypressEnv: true,
   experimentalMemoryManagement: true,
@@ -62,23 +134,34 @@ module.exports = defineConfig({
           launchOptions.args.push("--remote-debugging-address=127.0.0.1");
         }
 
-        const infoFile = process.env.AUTOMATION_CDP_INFO_FILE || path.join(__dirname, "artifacts", "live-browser-cdp.json");
-        try {
-          fs.mkdirSync(path.dirname(infoFile), { recursive: true });
-          fs.writeFileSync(infoFile, JSON.stringify({ port: debugPort, browser: browser.name, at: new Date().toISOString() }), "utf8");
-        } catch (err) {
-          console.warn(`[automation-engine] Could not publish live-stream debugger info: ${err.message}`);
-        }
+        writeJsonAtomic(LIVE_INFO_FILE, { port: debugPort, browser: browser.name, at: new Date().toISOString() });
+        publishLiveState("running", { browser: browser.name, port: debugPort, passed: 0, failed: 0, total: 0 });
 
         console.log(`[automation-engine] Live browser stream attached to Cypress Chrome DevTools port ${debugPort}.`);
         return launchOptions;
       });
 
       on("after:spec", (_spec, results) => {
-        if (results) console.log(`[automation-engine] Spec teardown finished: ${results.stats?.passes || 0} passed, ${results.stats?.failures || 0} failed`);
+        if (!results) return;
+        const payload = finalSpecPayload(results);
+        if (writeJsonAtomic(RESULT_FILE, payload)) {
+          console.log(`[automation-result] Final spec results captured: ${payload.passed} passed, ${payload.failed} failed.`);
+        }
+        publishLiveState("finalizing", {
+          passed: payload.passed,
+          failed: payload.failed,
+          total: payload.total,
+        });
+        console.log(`[automation-engine] Spec teardown finished: ${payload.passed} passed, ${payload.failed} failed`);
       });
+
       on("after:run", (results) => {
-        console.log(`[automation-engine] Run teardown finished: ${results?.totalPassed || 0} passed, ${results?.totalFailed || 0} failed`);
+        const passed = Number(results?.totalPassed || 0);
+        const failed = Number(results?.totalFailed || 0);
+        const total = Number(results?.totalTests || (passed + failed + Number(results?.totalPending || 0)));
+        publishLiveState("finished", { passed, failed, total });
+        try { fs.rmSync(LIVE_INFO_FILE, { force: true }); } catch {}
+        console.log(`[automation-engine] Run teardown finished: ${passed} passed, ${failed} failed`);
       });
       return config;
     },
