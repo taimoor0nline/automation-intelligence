@@ -75,7 +75,7 @@ router.post("/api/chat", async (req, res) => {
     targetUrl: explicitTargetUrl,
     additionalPaths = [],
     credentials = null,
-    aiModelTier = process.env.AI_MODEL_DEFAULT || "strong",
+    aiModelTier = "fast",
     bypassDiscoveryCache = false,
   } = req.body || {};
 
