@@ -19,9 +19,18 @@ function clean(value, max = 200) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+function normalizeInstant(value, { endOfDay = false } = {}) {
+  const raw = clean(value, 50);
+  if (!raw) return '';
+  if (DATE_RE.test(raw)) return `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`;
+  const millis = Date.parse(raw);
+  if (!Number.isFinite(millis)) throw new Error('Date/time filters must be valid ISO date-time values.');
+  return new Date(millis).toISOString();
+}
+
 function normalizedFilters(query = {}) {
-  const from = clean(query.from, 10);
-  const to = clean(query.to, 10);
+  const from = normalizeInstant(query.from);
+  const to = normalizeInstant(query.to, { endOfDay: true });
   const projectId = clean(query.projectId, 50);
   const userId = clean(query.userId, 50);
   const role = clean(query.role, 20).toUpperCase();
@@ -30,9 +39,7 @@ function normalizedFilters(query = {}) {
   const environment = clean(query.environment, 120);
   const targetType = clean(query.targetType, 20).toUpperCase();
 
-  if (from && !DATE_RE.test(from)) throw new Error('from must use YYYY-MM-DD.');
-  if (to && !DATE_RE.test(to)) throw new Error('to must use YYYY-MM-DD.');
-  if (from && to && from > to) throw new Error('from cannot be later than to.');
+  if (from && to && Date.parse(from) > Date.parse(to)) throw new Error('from cannot be later than to.');
   if (projectId && !UUID_RE.test(projectId)) throw new Error('projectId is invalid.');
   if (userId && !UUID_RE.test(userId)) throw new Error('userId is invalid.');
   if (role && !ROLE_SET.has(role)) throw new Error('role must be DEV, QA, or MANAGER.');
@@ -77,8 +84,8 @@ function buildRunScope(req, filters = {}, { includeFilters = true } = {}) {
   }
 
   if (includeFilters) {
-    if (filters.from) where.push(`tr.completed_at >= ${addParam(params, filters.from)}::date`);
-    if (filters.to) where.push(`tr.completed_at < (${addParam(params, filters.to)}::date + interval '1 day')`);
+    if (filters.from) where.push(`tr.completed_at >= ${addParam(params, filters.from)}::timestamptz`);
+    if (filters.to) where.push(`tr.completed_at <= ${addParam(params, filters.to)}::timestamptz`);
     if (filters.projectId) where.push(`tr.project_id=${addParam(params, filters.projectId)}::uuid`);
     if (filters.userId) where.push(`tr.executed_by=${addParam(params, filters.userId)}::uuid`);
     if (filters.role) where.push(`coalesce(tr.executed_by_role, runner.role::text)=${addParam(params, filters.role)}`);
