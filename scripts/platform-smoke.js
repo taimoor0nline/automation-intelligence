@@ -13,6 +13,7 @@ const jsFiles = [
   'server/routes/projects.js',
   'server/routes/restApi.js',
   'server/routes/sessionContext.js',
+  'server/routes/reporting.js',
   'server/services/authService.js',
   'server/services/persistenceService.js',
   'server/services/requestContext.js',
@@ -22,9 +23,13 @@ const jsFiles = [
   'server/services/restTestCaseAiService.js',
   'server/services/restAutomationService.js',
   'server/services/reportGenerator.js',
+  'server/services/testCategories.js',
   'testpilot-ui/platform-ui.js',
   'testpilot-ui/defect-assignment.js',
   'testpilot-ui/results-analysis.js',
+  'testpilot-ui/reporting.js',
+  'testpilot-ui/reporting-entry.js',
+  'testpilot-ui/test-case-export.js',
 ];
 
 const errors = [];
@@ -49,7 +54,13 @@ try {
   errors.push(`package.json: ${err.message}`);
 }
 
-for (const migration of ['server/db/001_platform.sql', 'server/db/002_source_guidance.sql', 'server/db/003_quality_attribution.sql', 'server/db/004_rest_api_testing.sql']) {
+for (const migration of [
+  'server/db/001_platform.sql',
+  'server/db/002_source_guidance.sql',
+  'server/db/003_quality_attribution.sql',
+  'server/db/004_rest_api_testing.sql',
+  'server/db/005_reporting_categories.sql',
+]) {
   if (!fs.existsSync(path.join(root, migration))) errors.push(`missing migration ${migration}`);
 }
 
@@ -64,6 +75,35 @@ for (const table of ['api_targets', 'api_operations']) {
 }
 for (const marker of ['target_type', 'api_target_id', 'api_operation_ids']) {
   if (!restSchema.includes(marker)) errors.push(`REST schema missing ${marker}`);
+}
+
+const reportingSchema = fs.readFileSync(path.join(root, 'server/db/005_reporting_categories.sql'), 'utf8');
+for (const marker of ['test_category', 'executed_by_role', 'idx_test_results_category_outcome', 'idx_test_runs_user_completed', 'idx_test_runs_role_completed']) {
+  if (!reportingSchema.includes(marker)) errors.push(`reporting schema missing ${marker}`);
+}
+
+const persistence = fs.readFileSync(path.join(root, 'server/services/persistenceService.js'), 'utf8');
+for (const marker of ['test_category', 'executed_by_role', 'categoryByCaseId', 'normalizeTestCategory']) {
+  if (!persistence.includes(marker)) errors.push(`persistence missing reporting marker ${marker}`);
+}
+
+const reportingRoute = fs.readFileSync(path.join(root, 'server/routes/reporting.js'), 'utf8');
+for (const marker of ['/api/reporting/filters', '/api/reporting/summary', "viewerRole === 'QA'", "viewerRole === 'DEV'", "viewerRole !== 'MANAGER'", 'filters.from', 'filters.to', 'filters.category', 'filters.userId']) {
+  if (!reportingRoute.includes(marker)) errors.push(`reporting route missing marker ${marker}`);
+}
+
+const reportsUi = path.join(root, 'testpilot-ui/reports.html');
+if (!fs.existsSync(reportsUi)) errors.push('missing reporting dashboard UI');
+else {
+  const html = fs.readFileSync(reportsUi, 'utf8');
+  for (const marker of ['From date', 'To date', 'Test category', 'User breakdown', 'Role breakdown', 'Run history']) {
+    if (!html.includes(marker)) errors.push(`reporting UI missing marker: ${marker}`);
+  }
+}
+
+const excelExport = fs.readFileSync(path.join(root, 'testpilot-ui/test-case-export.js'), 'utf8');
+for (const marker of ['.xlsx', '[Content_Types].xml', 'Test Category', 'Automation Readiness', 'Expected Results']) {
+  if (!excelExport.includes(marker)) errors.push(`Excel export missing marker ${marker}`);
 }
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
