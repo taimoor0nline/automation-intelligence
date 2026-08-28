@@ -28,11 +28,21 @@
     const style = document.createElement('style');
     style.id = 'generationExperienceStyles';
     style.textContent = `
-      .generation-progress{display:none;margin-top:12px;padding:12px 13px;border:1px solid #bfdbfe;border-radius:10px;background:#f8fbff;color:#1e3a8a}
-      .generation-progress.show{display:block}.generation-progress-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11.5px;font-weight:800}
-      .generation-progress-stage{margin-top:5px;color:#475569;font-size:10.8px;line-height:1.45}.generation-progress-note{margin-top:6px;color:#64748b;font-size:10px;line-height:1.4}
-      .generation-spinner{display:inline-block;width:11px;height:11px;border:2px solid #bfdbfe;border-top-color:#2f5bff;border-radius:50%;animation:generationSpin .75s linear infinite;margin-right:6px;vertical-align:-2px}
+      .generation-progress{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:115;width:min(560px,calc(100vw - 36px));padding:22px 24px;border:2px solid #ef4444;border-radius:16px;background:rgba(254,242,242,.98);color:#991b1b;box-shadow:0 24px 70px rgba(127,29,29,.25);pointer-events:none;text-align:center}
+      .generation-progress.show{display:block;animation:generationAppear .18s ease-out}
+      .generation-progress.complete{border-color:#16a34a;background:rgba(240,253,244,.98);color:#166534}
+      .generation-progress.failed{border-color:#dc2626;background:rgba(254,226,226,.99);color:#991b1b}
+      .generation-progress-head{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:18px;font-weight:900;letter-spacing:.45px;text-transform:uppercase}
+      .generation-title{display:flex;align-items:center;justify-content:center;gap:8px}
+      .generation-elapsed{min-width:92px;padding:7px 12px;border-radius:999px;background:#dc2626;color:#fff;font-size:20px;font-weight:900;letter-spacing:0;text-transform:none;box-shadow:0 6px 16px rgba(220,38,38,.22)}
+      .generation-progress.complete .generation-elapsed{background:#16a34a}.generation-progress.failed .generation-elapsed{background:#b91c1c}
+      .generation-progress-stage{margin-top:13px;color:#7f1d1d;font-size:13px;font-weight:800;line-height:1.5}.generation-progress.complete .generation-progress-stage{color:#166534}.generation-progress.failed .generation-progress-stage{color:#991b1b}
+      .generation-progress-note{margin-top:9px;color:#991b1b;font-size:11px;line-height:1.45}.generation-progress.complete .generation-progress-note{color:#166534}
+      .generation-spinner{display:inline-block;width:18px;height:18px;border:3px solid #fecaca;border-top-color:#dc2626;border-radius:50%;animation:generationSpin .75s linear infinite}
+      .generation-progress.complete .generation-spinner{border-color:#bbf7d0;border-top-color:#16a34a;animation:none}.generation-progress.failed .generation-spinner{border-color:#fecaca;border-top-color:#b91c1c;animation:none}
       @keyframes generationSpin{to{transform:rotate(360deg)}}
+      @keyframes generationAppear{from{opacity:0;transform:translate(-50%,-46%) scale(.97)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+      @media(max-width:620px){.generation-progress{padding:18px}.generation-progress-head{font-size:15px}.generation-elapsed{font-size:18px}.generation-progress-stage{font-size:12px}}
     `;
     document.head.appendChild(style);
   }
@@ -40,13 +50,13 @@
   function ensurePanel() {
     let panel = document.getElementById('generationProgress');
     if (panel) return panel;
-    const button = document.getElementById('generateBtn');
-    if (!button) return null;
     panel = document.createElement('div');
     panel.id = 'generationProgress';
     panel.className = 'generation-progress';
-    panel.innerHTML = '<div class="generation-progress-head"><span><span class="generation-spinner"></span>Generating test cases</span><span id="generationElapsed">0s</span></div><div id="generationStage" class="generation-progress-stage">Preparing generation…</div><div class="generation-progress-note">The page remains usable while the server and AI model work. Initial case generation uses the Fast AI profile; stronger profiles remain available for repair and failure analysis.</div>';
-    button.insertAdjacentElement('afterend', panel);
+    panel.setAttribute('role', 'status');
+    panel.setAttribute('aria-live', 'polite');
+    panel.innerHTML = '<div class="generation-progress-head"><span class="generation-title"><span class="generation-spinner"></span>Generating AI Test Cases</span><span id="generationElapsed" class="generation-elapsed">0s</span></div><div id="generationStage" class="generation-progress-stage">Preparing generation…</div><div class="generation-progress-note">Please wait while AI prepares grounded test scenarios for human review.</div>';
+    document.body.appendChild(panel);
     return panel;
   }
 
@@ -64,9 +74,11 @@
     startedAt = Date.now();
     let stageIndex = 0;
     const panel = ensurePanel();
+    panel?.classList.remove('complete', 'failed');
     panel?.classList.add('show');
     const elapsed = document.getElementById('generationElapsed');
     const stage = document.getElementById('generationStage');
+    if (elapsed) elapsed.textContent = '0s';
     if (stage) stage.textContent = stages[0];
     timer = setInterval(() => {
       if (elapsed) elapsed.textContent = `${Math.max(0, Math.round((Date.now() - startedAt) / 1000))}s`;
@@ -85,13 +97,17 @@
     const panel = ensurePanel();
     const elapsed = document.getElementById('generationElapsed');
     const stage = document.getElementById('generationStage');
+    panel?.classList.toggle('complete', Boolean(ok));
+    panel?.classList.toggle('failed', !ok);
     if (elapsed) elapsed.textContent = `${(elapsedMs / 1000).toFixed(1)}s`;
     if (stage) {
       stage.textContent = ok
         ? `Generation complete${timing?.aiGenerationMs != null ? ` · AI ${(timing.aiGenerationMs / 1000).toFixed(1)}s` : ''}${timing?.discoveryMs != null ? ` · discovery ${(timing.discoveryMs / 1000).toFixed(1)}s` : ''}.`
         : 'Generation stopped before test cases were returned.';
     }
-    setTimeout(() => panel?.classList.remove('show'), ok ? 5000 : 8000);
+    setTimeout(() => {
+      panel?.classList.remove('show', 'complete', 'failed');
+    }, ok ? 3500 : 8000);
   }
 
   window.fetch = async function generationAwareFetch(input, init = {}) {
