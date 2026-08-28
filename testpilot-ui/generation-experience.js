@@ -7,12 +7,14 @@
   let startedAt = 0;
   let timer = null;
   let stageTimer = null;
+  let readinessWatch = null;
+  let generationTiming = null;
   const stages = [
     'Discovering the relevant page structure…',
     'Preparing compact UI evidence for the AI model…',
     'AI is drafting grounded test scenarios…',
     'Validating generated scenarios against discovered evidence…',
-    'Finalizing cases for human review…',
+    'Finalizing generated cases…',
   ];
 
   function isInitialGeneration(url, payload) {
@@ -55,7 +57,7 @@
     panel.className = 'generation-progress';
     panel.setAttribute('role', 'status');
     panel.setAttribute('aria-live', 'polite');
-    panel.innerHTML = '<div class="generation-progress-head"><span class="generation-title"><span class="generation-spinner"></span>Generating AI Test Cases</span><span id="generationElapsed" class="generation-elapsed">0s</span></div><div id="generationStage" class="generation-progress-stage">Preparing generation…</div><div class="generation-progress-note">Please wait while AI prepares grounded test scenarios for human review.</div>';
+    panel.innerHTML = '<div class="generation-progress-head"><span class="generation-title"><span class="generation-spinner"></span>Generating AI Test Cases</span><span id="generationElapsed" class="generation-elapsed">0s</span></div><div id="generationStage" class="generation-progress-stage">Preparing generation…</div><div class="generation-progress-note">Elapsed time is measured from generation start until automation-readiness validation finishes.</div>';
     document.body.appendChild(panel);
     return panel;
   }
@@ -68,10 +70,29 @@
     }
   }
 
+  function currentElapsedMs() {
+    return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+  }
+
+  function updateElapsed() {
+    const elapsed = document.getElementById('generationElapsed');
+    if (elapsed && active) elapsed.textContent = `${Math.floor(currentElapsedMs() / 1000)}s`;
+  }
+
+  function clearTimers() {
+    clearInterval(timer);
+    clearInterval(stageTimer);
+    clearInterval(readinessWatch);
+    timer = null;
+    stageTimer = null;
+    readinessWatch = null;
+  }
+
   function begin() {
     if (active) return;
     active = true;
     startedAt = Date.now();
+    generationTiming = null;
     let stageIndex = 0;
     const panel = ensurePanel();
     panel?.classList.remove('complete', 'failed');
@@ -80,20 +101,40 @@
     const stage = document.getElementById('generationStage');
     if (elapsed) elapsed.textContent = '0s';
     if (stage) stage.textContent = stages[0];
-    timer = setInterval(() => {
-      if (elapsed) elapsed.textContent = `${Math.max(0, Math.round((Date.now() - startedAt) / 1000))}s`;
-    }, 1000);
+    timer = setInterval(updateElapsed, 250);
     stageTimer = setInterval(() => {
       stageIndex = Math.min(stageIndex + 1, stages.length - 1);
       if (stage) stage.textContent = stages[stageIndex];
     }, 3000);
   }
 
-  function finish(ok, timing) {
+  function readinessFinished() {
+    const subtitle = String(document.getElementById('caseSubtitle')?.textContent || '').toLowerCase();
+    if (subtitle.includes('automation readiness completed')) return true;
+
+    const hint = String(document.getElementById('runHint')?.textContent || '').toLowerCase();
+    const hasCases = document.querySelectorAll('#cases .case').length > 0;
+    const stillChecking = /checking|locked|validation|readiness is being checked/.test(hint);
+    return hasCases && !stillChecking && /automation ready|action\/manual/.test(hint);
+  }
+
+  function waitForReadiness() {
+    if (!active || readinessWatch) return;
+    const stage = document.getElementById('generationStage');
+    if (stage) stage.textContent = 'AI test cases generated · checking automation readiness…';
+    readinessWatch = setInterval(() => {
+      updateElapsed();
+      if (readinessFinished()) finish(true);
+    }, 250);
+  }
+
+  function finish(ok) {
     if (!active) return;
+    updateElapsed();
+    const elapsedMs = currentElapsedMs();
     active = false;
-    clearInterval(timer); clearInterval(stageTimer); timer = null; stageTimer = null;
-    const elapsedMs = timing?.totalMs || (Date.now() - startedAt);
+    clearTimers();
+
     const panel = ensurePanel();
     const elapsed = document.getElementById('generationElapsed');
     const stage = document.getElementById('generationStage');
@@ -102,12 +143,10 @@
     if (elapsed) elapsed.textContent = `${(elapsedMs / 1000).toFixed(1)}s`;
     if (stage) {
       stage.textContent = ok
-        ? `Generation complete${timing?.aiGenerationMs != null ? ` · AI ${(timing.aiGenerationMs / 1000).toFixed(1)}s` : ''}${timing?.discoveryMs != null ? ` · discovery ${(timing.discoveryMs / 1000).toFixed(1)}s` : ''}.`
-        : 'Generation stopped before test cases were returned.';
+        ? `Ready for human review · total ${(elapsedMs / 1000).toFixed(1)}s${generationTiming?.aiGenerationMs != null ? ` · AI ${(generationTiming.aiGenerationMs / 1000).toFixed(1)}s` : ''}${generationTiming?.discoveryMs != null ? ` · discovery ${(generationTiming.discoveryMs / 1000).toFixed(1)}s` : ''}.`
+        : 'Generation stopped before the complete review-ready test set was returned.';
     }
-    setTimeout(() => {
-      panel?.classList.remove('show', 'complete', 'failed');
-    }, ok ? 3500 : 8000);
+    setTimeout(() => panel?.classList.remove('show', 'complete', 'failed'), ok ? 3500 : 8000);
   }
 
   window.fetch = async function generationAwareFetch(input, init = {}) {
@@ -132,7 +171,12 @@
       const originalJson = response.json.bind(response);
       response.json = async () => {
         const data = await originalJson();
-        finish(response.ok, data?.generationTiming);
+        if (!response.ok) {
+          finish(false);
+          return data;
+        }
+        generationTiming = data?.generationTiming || null;
+        waitForReadiness();
         return data;
       };
       return response;
