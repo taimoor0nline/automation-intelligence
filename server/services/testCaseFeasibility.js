@@ -1,4 +1,5 @@
 const { compileTestCase } = require("./automationDsl");
+const { normalizeTestCategory, requiresExternalLoadEngine } = require("./testCategories");
 
 const READY = "READY";
 const NOT_AUTOMATABLE = "NOT_AUTOMATABLE";
@@ -47,8 +48,6 @@ function result({
     automationPlan,
     assertionSuggestions: Array.isArray(assertionSuggestions) ? assertionSuggestions : [],
     uncompiledExpectations: Array.isArray(uncompiledExpectations) ? uncompiledExpectations : [],
-    // A READY test is already executable. Optional narrative-strengthening ideas remain
-    // available in metadata, but they should not be presented as another repair action.
     canSuggestAssertion: status !== READY && Boolean((assertionSuggestions || []).length || (uncompiledExpectations || []).length || resolutionType === RESOLUTION_FRAMEWORK_CHANGE_REQUIRED),
     validationSource: "deterministic",
   };
@@ -101,6 +100,22 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   if (!String(testCase.title || "").trim()) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_TITLE", reason: "A test-case title is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!Array.isArray(testCase.steps) || !testCase.steps.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_STEPS", reason: "At least one executable test step is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!Array.isArray(testCase.expectedResults) || !testCase.expectedResults.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_EXPECTED_RESULTS", reason: "At least one expected result is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
+
+  const testCategory = normalizeTestCategory(testCase.testCategory || testCase.category);
+  if (requiresExternalLoadEngine(testCategory)) {
+    return result({
+      status: REQUIRES_FRAMEWORK_CAPABILITY,
+      automatable: false,
+      reasonCode: "LOAD_ENGINE_REQUIRED",
+      reason: `${testCategory} testing requires a concurrent load-generation engine. Cypress browser execution is intentionally not used as a load/stress engine.`,
+      reasons: [
+        `${testCategory} cases remain valid planned/manual test cases.`,
+        "Use a dedicated load adapter such as k6 or Artillery for virtual users, request rates, ramp-up, sustained load and saturation testing.",
+      ],
+      resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED,
+      evidence: ["Recommended execution engine: k6 or Artillery", "Current browser engine: Cypress"],
+    });
+  }
 
   const fullText = JSON.stringify(testCase);
   for (const rule of CAPABILITY_RULES) if (rule.pattern.test(fullText)) return result({ ...rule, automatable: false });
@@ -157,6 +172,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
     assertionSuggestions: suggestions,
     uncompiledExpectations: narratives,
     evidence: [
+      `Test category: ${testCategory}`,
       `${compiled.plan.actions.length} deterministic action(s) compiled`,
       `${compiled.plan.assertions.length} deterministic assertion(s) compiled`,
       `${discovery.selectors.size} discovered selector(s) available`,
