@@ -163,6 +163,21 @@ router.post("/api/test-cases/repair", async (req, res) => {
 
     const repaired = normalizeTestCase({ ...repair.testCase, id: original.id }, original.id);
     repaired.automationReadiness = classifyTestCase(repaired, context(session));
+
+    // A proposal is not a successful repair until the same deterministic
+    // readiness classifier used by execution says it is actually READY using
+    // the current session inputs. Do not replace the session case otherwise.
+    if (repaired.automationReadiness.status !== READY) {
+      return res.status(422).json({
+        ok: false,
+        repaired: false,
+        reply: `The proposed repair did not become Automation Ready: ${repaired.automationReadiness.reason || repaired.automationReadiness.reasonCode || "deterministic readiness is still blocked"}`,
+        testCase: { ...original, automationReadiness: readiness },
+        proposedTestCase: repaired,
+        automationReadiness: repaired.automationReadiness,
+      });
+    }
+
     repaired.repairHistory = [
       ...(original.repairHistory || []),
       {
