@@ -7,6 +7,11 @@
   function role(){return String(document.getElementById('platformUserRole')?.textContent||'').trim().toUpperCase()}
   function projectId(){return document.getElementById('platformProject')?.value||''}
   function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
+  function insertBeforeIfChild(parent,node,before){
+    if(!parent||!node)return;
+    if(before&&before.parentNode===parent)parent.insertBefore(node,before);
+    else parent.appendChild(node);
+  }
 
   function addModeStyles(){
     if(document.getElementById('testModeStyles'))return;
@@ -32,12 +37,12 @@
   function ensureModeSwitch(){
     const header=document.querySelector('header');
     if(!header||document.getElementById('testModeSwitch'))return;
-    const status=header.querySelector('.status');
+    const directStatus=[...header.children].find((child)=>child.classList?.contains('status'))||null;
     const box=document.createElement('div');
     box.id='testModeSwitch';
     box.className='test-mode-switch';
     box.innerHTML='<span class="active">Web UI</span><a href="/rest.html">REST API</a><a href="/live" target="_blank" rel="noopener">Live Browser</a>';
-    if(status)header.insertBefore(box,status);else header.appendChild(box);
+    insertBeforeIfChild(header,box,directStatus);
   }
 
   function setupOptionalWebAuth(){
@@ -52,10 +57,10 @@
     const authField=document.createElement('div');
     authField.className='field';
     authField.innerHTML='<label>Application login</label><select id="webAuthMode"><option value="USERNAME_PASSWORD">Username / password</option><option value="NONE">No login required</option></select><div class="web-auth-note">Optional. Use “No login required” for public pages such as Google or any application journey that does not require authentication.</div>';
-    pair.parentElement.insertBefore(authField,pair);
+    insertBeforeIfChild(pair.parentElement,authField,pair);
     const select=authField.querySelector('select');
 
-    const headingSub=pair.parentElement.querySelector('.section-head .sub');
+    const headingSub=pair.parentElement?.querySelector('.section-head .sub');
     if(headingSub)headingSub.textContent='Application login is optional. Credentials stay in runtime memory, are used only when the approved test requires login, and are not sent to the AI model.';
 
     function apply(){
@@ -108,7 +113,9 @@
       button.className='btn ghost';
       button.textContent='REST API';
       button.onclick=()=>{window.location.href='/rest.html'};
-      actions.insertBefore(button,document.getElementById('platformDefects')||actions.firstChild);
+      const defects=document.getElementById('platformDefects');
+      const before=defects?.parentNode===actions?defects:actions.firstElementChild;
+      insertBeforeIfChild(actions,button,before);
     }
     button.style.display=['QA','MANAGER'].includes(role())?'':'none';
   }
