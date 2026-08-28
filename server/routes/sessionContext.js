@@ -35,4 +35,9 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
   }
 });
 
+// Historical reporting is mounted here because this router is already part of
+// the authenticated platform route stack. The reporting module performs its own
+// role-aware SQL scoping for MANAGER, QA and DEV viewers.
+router.use(require('./reporting'));
+
 module.exports = router;
