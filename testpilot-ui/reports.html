@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI TestPilot — Reports</title>
+<style>
+:root{--bg:#f6f8fb;--panel:#fff;--border:#e5e9f1;--text:#10141c;--muted:#6b7385;--blue:#2f5bff;--green:#15803d;--red:#b91c1c;--amber:#b45309;--shadow:0 1px 2px rgba(16,20,28,.04),0 8px 24px rgba(16,20,28,.04)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;font-size:14px}button,input,select{font:inherit}header{height:68px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 26px;position:sticky;top:0;z-index:5}.brand{display:flex;gap:11px;align-items:center}.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--blue),#7794ff);display:grid;place-items:center;color:#fff;font-weight:800}.brand strong{display:block;font-size:16px}.brand span{font-size:11px;color:var(--muted)}.actions{display:flex;gap:8px;align-items:center}.link{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fff;color:#374151;text-decoration:none;font-size:11px;font-weight:800}.scope{border:1px solid #c7d2fe;background:#eef2ff;color:#3730a3;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800}.wrap{max-width:1500px;margin:0 auto;padding:22px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}.pad{padding:18px}.title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.title-row h1,.title-row h2{margin:0}.title-row h1{font-size:20px}.title-row h2{font-size:15px}.sub{color:var(--muted);font-size:11px;line-height:1.5;margin-top:5px}.filters{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px;margin-top:16px}.field label{display:block;font-size:10.5px;font-weight:800;color:#475569;margin-bottom:5px}.field input,.field select{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 10px;background:#fff}.toolbar{display:flex;align-items:center;gap:8px;margin-top:13px}.btn{border:0;border-radius:8px;padding:9px 12px;font-weight:800;cursor:pointer;font-size:11px}.btn.primary{background:var(--blue);color:#fff}.btn.ghost{background:#f8fafc;border:1px solid var(--border);color:#475569}.btn:disabled{opacity:.55;cursor:not-allowed}.metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:18px}.metric{background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px}.metric .n{font-size:24px;font-weight:900}.metric .l{font-size:10.5px;color:var(--muted);margin-top:4px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}.table-wrap{overflow:auto;margin-top:12px;max-height:420px}.table{width:100%;border-collapse:collapse;font-size:11px}.table th{position:sticky;top:0;background:#f8fafc;text-align:left;color:#475569;font-size:10px;letter-spacing:.2px;text-transform:uppercase;border-bottom:1px solid var(--border);padding:9px}.table td{border-bottom:1px solid #eef1f6;padding:9px;vertical-align:top}.table tr:last-child td{border-bottom:0}.num{text-align:right}.good{color:var(--green);font-weight:800}.bad{color:var(--red);font-weight:800}.muted{color:var(--muted)}.empty{padding:34px;text-align:center;color:var(--muted);font-size:11px}.error{display:none;margin-top:14px;padding:11px;border-radius:9px;background:#fee2e2;color:#991b1b;font-size:11px}.error.show{display:block}.trend{display:flex;align-items:flex-end;gap:5px;min-height:160px;margin-top:14px;border-bottom:1px solid var(--border);padding:10px 4px 0}.trend-col{flex:1;min-width:12px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:140px}.trend-bar{width:100%;max-width:28px;background:#93c5fd;border-radius:5px 5px 0 0;min-height:2px}.trend-col span{font-size:8px;color:#94a3b8;transform:rotate(-45deg);white-space:nowrap;margin-bottom:-20px}.notice{margin-top:14px;padding:10px 12px;border-radius:9px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:11px;line-height:1.5}.hidden{display:none!important}@media(max-width:1150px){.filters{grid-template-columns:repeat(3,1fr)}.metrics{grid-template-columns:repeat(3,1fr)}}@media(max-width:760px){header{height:auto;min-height:68px;flex-wrap:wrap;padding:9px 14px}.actions{width:100%;justify-content:flex-end}.wrap{padding:14px}.filters{grid-template-columns:1fr 1fr}.metrics{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><div class="logo">AI</div><div><strong>AI TestPilot Reports</strong><span>Persistent test execution analytics</span></div></div>
+  <div class="actions"><span id="viewerScope" class="scope">Loading scope…</span><a class="link" href="/">Web UI</a><a class="link" href="/rest.html">REST API</a></div>
+</header>
+<div class="wrap">
+  <section class="panel pad">
+    <div class="title-row"><div><h1>Execution reporting</h1><div class="sub">Filter persisted runs by date, user, role, project, environment, category, outcome and target type. Server-side role visibility is enforced for every query.</div></div><div id="generatedAt" class="sub"></div></div>
+    <div id="dbNotice" class="notice hidden"></div>
+    <div class="filters">
+      <div class="field"><label>From date</label><input id="from" type="date"></div>
+      <div class="field"><label>To date</label><input id="to" type="date"></div>
+      <div class="field"><label>Project</label><select id="projectId"><option value="">All visible projects</option></select></div>
+      <div class="field"><label>User</label><select id="userId"><option value="">All visible users</option></select></div>
+      <div class="field"><label>Role</label><select id="role"><option value="">All roles</option></select></div>
+      <div class="field"><label>Test category</label><select id="category"><option value="">All categories</option></select></div>
+      <div class="field"><label>Outcome</label><select id="outcome"><option value="">PASS + FAIL</option></select></div>
+      <div class="field"><label>Environment</label><select id="environment"><option value="">All environments</option></select></div>
+      <div class="field"><label>Target type</label><select id="targetType"><option value="">Web + REST</option></select></div>
+    </div>
+    <div class="toolbar"><button id="applyBtn" class="btn primary">Apply filters</button><button id="resetBtn" class="btn ghost">Last 30 days</button><span id="loading" class="sub"></span></div>
+    <div id="error" class="error"></div>
+  </section>
+
+  <div class="metrics">
+    <div class="metric"><div id="mRuns" class="n">0</div><div class="l">Runs</div></div>
+    <div class="metric"><div id="mTests" class="n">0</div><div class="l">Tests</div></div>
+    <div class="metric"><div id="mPassed" class="n good">0</div><div class="l">Passed</div></div>
+    <div class="metric"><div id="mFailed" class="n bad">0</div><div class="l">Failed</div></div>
+    <div class="metric"><div id="mPassRate" class="n">0%</div><div class="l">Pass rate</div></div>
+    <div class="metric"><div id="mAvg" class="n">0</div><div class="l">Avg. test duration ms</div></div>
+  </div>
+
+  <div class="grid2">
+    <section class="panel pad"><div class="title-row"><div><h2>Category breakdown</h2><div class="sub">Normalized category reporting from executed test results.</div></div></div><div id="categoryTable" class="table-wrap"></div></section>
+    <section class="panel pad"><div class="title-row"><div><h2>Daily trend</h2><div class="sub">Executed test volume across the selected date range.</div></div></div><div id="trend" class="trend"></div></section>
+  </div>
+
+  <div class="grid2">
+    <section class="panel pad"><div class="title-row"><div><h2>User breakdown</h2><div class="sub">Only users visible to your reporting role are included.</div></div></div><div id="userTable" class="table-wrap"></div></section>
+    <section class="panel pad"><div class="title-row"><div><h2>Role breakdown</h2><div class="sub">Role captured at execution time where available.</div></div></div><div id="roleTable" class="table-wrap"></div></section>
+  </div>
+
+  <section class="panel pad" style="margin-top:18px"><div class="title-row"><div><h2>Run history</h2><div class="sub">Most recent matching persisted runs. Counts reflect category/outcome filters when those filters are applied.</div></div></div><div id="runTable" class="table-wrap"></div></section>
+</div>
+<script src="/reporting.js"></script>
+</body>
+</html>
