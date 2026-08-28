@@ -70,8 +70,26 @@ function upsertSessionCase(session, candidate) {
   else session.testCases = [candidate, ...(session.testCases || [])];
 }
 
+function mergeAssessedCases(sessionCases = [], assessed = []) {
+  const assessedById = new Map(assessed.map((tc) => [String(tc.id || "").toUpperCase(), tc]));
+  const merged = (sessionCases || []).map((current) => {
+    const replacement = assessedById.get(String(current?.id || "").toUpperCase());
+    if (!replacement) return current;
+    assessedById.delete(String(current?.id || "").toUpperCase());
+    return { ...current, ...replacement, automationReadiness: replacement.automationReadiness };
+  });
+  for (const remaining of assessedById.values()) merged.push(remaining);
+  return merged;
+}
+
 router.post("/api/test-cases/revalidate", async (req, res) => {
-  const { sessionId = "default", testCases = null, credentials = null } = req.body || {};
+  const {
+    sessionId = "default",
+    testCases = null,
+    credentials = null,
+    batchIndex = null,
+    batchCount = null,
+  } = req.body || {};
   const session = getSession(sessionId);
 
   try {
@@ -80,13 +98,30 @@ router.post("/api/test-cases/revalidate", async (req, res) => {
     updateCredentials(session, credentials);
 
     const sourceCases = Array.isArray(testCases) ? testCases : session.testCases;
+    if (!Array.isArray(sourceCases) || !sourceCases.length) throw new Error("At least one test case is required for readiness validation.");
     const normalized = sourceCases.map((tc, index) => normalizeTestCase(tc, `TC-H${String(index + 1).padStart(3, "0")}`));
     const assessed = assessTestCases(normalized, context(session));
-    session.testCases = assessed;
-    session.automationReadiness = readinessSummary(assessed);
-    session.readinessValidated = true;
 
-    return res.json({ ok: true, testCases: assessed, automationReadiness: session.automationReadiness, readinessPending: false });
+    session.testCases = mergeAssessedCases(session.testCases || [], assessed);
+    session.automationReadiness = readinessSummary(session.testCases);
+    session.readinessValidated = session.testCases.length > 0 && session.testCases.every((tc) => Boolean(tc?.automationReadiness));
+
+    const batchLabel = Number.isInteger(Number(batchIndex)) && Number.isInteger(Number(batchCount))
+      ? ` batch=${Number(batchIndex) + 1}/${Number(batchCount)}`
+      : "";
+    console.log(`[readiness] validated ${assessed.length} case(s)${batchLabel}; complete=${session.readinessValidated ? 'yes' : 'no'} ready=${session.automationReadiness.ready}/${session.automationReadiness.total}`);
+
+    return res.json({
+      ok: true,
+      testCases: assessed,
+      automationReadiness: session.automationReadiness,
+      readinessPending: !session.readinessValidated,
+      batch: {
+        index: Number.isInteger(Number(batchIndex)) ? Number(batchIndex) : null,
+        count: Number.isInteger(Number(batchCount)) ? Number(batchCount) : null,
+        size: assessed.length,
+      },
+    });
   } catch (err) {
     session.readinessValidated = false;
     return res.status(422).json({ ok: false, reply: err.message, readinessPending: true });
