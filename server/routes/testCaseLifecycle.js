@@ -11,8 +11,39 @@ const {
 } = require("../services/testCaseFeasibility");
 const { generateSingleTestCase, repairTestCase, suggestAssertionCapability } = require("../services/testCaseAiService");
 
+const DEFAULT_BATCH_SIZE = 2;
+const MAX_BATCH_SIZE = 50;
+
 function cleanString(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
+}
+
+function normalizeBatchSize(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_BATCH_SIZE;
+  return Math.max(1, Math.min(MAX_BATCH_SIZE, parsed));
+}
+
+function cookieValue(req, name) {
+  const raw = String(req.headers.cookie || "");
+  for (const part of raw.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
+function requestedBatchSize(req) {
+  return normalizeBatchSize(
+    req.body?.batchSize ??
+    cookieValue(req, "aiTestPilotReadinessBatchSize") ??
+    process.env.READINESS_BATCH_SIZE ??
+    DEFAULT_BATCH_SIZE
+  );
+}
+
+function yieldToEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function normalizeTestCase(raw, fallbackId = "TC-H001") {
@@ -22,6 +53,7 @@ function normalizeTestCase(raw, fallbackId = "TC-H001") {
     id,
     title: cleanString(testCase.title, 300),
     type: ["positive", "negative", "boundary", "functional", "custom"].includes(cleanString(testCase.type, 30).toLowerCase()) ? cleanString(testCase.type, 30).toLowerCase() : "functional",
+    testCategory: cleanString(testCase.testCategory || testCase.category, 40) || "FUNCTIONAL",
     priority: ["low", "medium", "high"].includes(cleanString(testCase.priority, 30).toLowerCase()) ? cleanString(testCase.priority, 30).toLowerCase() : "medium",
     preconditions: Array.isArray(testCase.preconditions) ? testCase.preconditions.map((value) => cleanString(value, 500)).filter(Boolean).slice(0, 20) : [],
     testData: testCase.testData && typeof testCase.testData === "object" && !Array.isArray(testCase.testData) ? testCase.testData : {},
@@ -78,13 +110,36 @@ router.post("/api/test-cases/revalidate", async (req, res) => {
     updateCredentials(session, credentials);
 
     const sourceCases = Array.isArray(testCases) ? testCases : session.testCases;
+    if (!Array.isArray(sourceCases) || !sourceCases.length) throw new Error("At least one test case is required for readiness validation.");
+
     const normalized = sourceCases.map((tc, index) => normalizeTestCase(tc, `TC-H${String(index + 1).padStart(3, "0")}`));
-    const assessed = assessTestCases(normalized, context(session));
+    const batchSize = requestedBatchSize(req);
+    const batchCount = Math.ceil(normalized.length / batchSize);
+    const assessed = [];
+
+    for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
+      const start = batchIndex * batchSize;
+      const batch = normalized.slice(start, start + batchSize);
+      const assessedBatch = assessTestCases(batch, context(session));
+      assessed.push(...assessedBatch);
+
+      console.log(`[readiness-batch] session=${sessionId} batch=${batchIndex + 1}/${batchCount} size=${batch.length}`);
+      if (batchIndex + 1 < batchCount) await yieldToEventLoop();
+    }
+
     session.testCases = assessed;
     session.automationReadiness = readinessSummary(assessed);
     session.readinessValidated = true;
 
-    return res.json({ ok: true, testCases: assessed, automationReadiness: session.automationReadiness, readinessPending: false });
+    console.log(`[readiness] validated ${assessed.length} case(s) in ${batchCount} batch(es) of up to ${batchSize}; ready=${session.automationReadiness.ready}/${session.automationReadiness.total}`);
+
+    return res.json({
+      ok: true,
+      testCases: assessed,
+      automationReadiness: session.automationReadiness,
+      readinessPending: false,
+      batching: { batchSize, batchCount, total: assessed.length },
+    });
   } catch (err) {
     session.readinessValidated = false;
     return res.status(422).json({ ok: false, reply: err.message, readinessPending: true });
@@ -164,9 +219,6 @@ router.post("/api/test-cases/repair", async (req, res) => {
     const repaired = normalizeTestCase({ ...repair.testCase, id: original.id }, original.id);
     repaired.automationReadiness = classifyTestCase(repaired, context(session));
 
-    // A proposal is not a successful repair until the same deterministic
-    // readiness classifier used by execution says it is actually READY using
-    // the current session inputs. Do not replace the session case otherwise.
     if (repaired.automationReadiness.status !== READY) {
       return res.status(422).json({
         ok: false,
