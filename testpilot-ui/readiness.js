@@ -1,323 +1,324 @@
 (function () {
-  if (window.__aiTestPilotStableReadiness) return;
-  window.__aiTestPilotStableReadiness = true;
-
-  let readinessInFlight = false;
+  let readinessRefreshInFlight = false;
   let readinessTimer = null;
-  let readinessPaused = false;
+  let pendingGeneratedCase = null;
   let lastGenerationMeta = null;
 
-  const DEFAULT_BATCH_SIZE = 2;
-  const MAX_BATCH_SIZE = 50;
-  const BATCH_SIZE_KEY = 'aiTestPilotReadinessBatchSize';
-  const BATCH_TIMEOUT_MS = 12000;
+  const credentialsPayload = () => ({ username: $('username').value, password: $('password').value });
+  const readinessLabel = (status) => status === 'READY' ? 'Automation Ready' : status === 'NEEDS_PREFLIGHT' ? 'Checking readiness' : String(status || 'NEEDS_PREFLIGHT').replaceAll('_', ' ');
+  const readinessClass = (status) => status === 'READY' ? 'ready' : status === 'NEEDS_PREFLIGHT' ? 'preflight' : 'blocked';
 
-  const credentialsPayload = () => ({
-    username: document.getElementById('username')?.value || '',
-    password: document.getElementById('password')?.value || '',
-  });
-
-  const readinessLabel = (status) => status === 'READY'
-    ? 'Automation Ready'
-    : status === 'NEEDS_PREFLIGHT'
-      ? 'Checking readiness'
-      : String(status || 'NEEDS_PREFLIGHT').replaceAll('_', ' ');
-
-  const readinessClass = (status) => status === 'READY'
-    ? 'ready'
-    : status === 'NEEDS_PREFLIGHT'
-      ? 'preflight'
-      : 'blocked';
-
-  function normalizeBatchSize(value) {
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return DEFAULT_BATCH_SIZE;
-    return Math.max(1, Math.min(MAX_BATCH_SIZE, parsed));
-  }
-
-  function storedBatchSize() {
-    try {
-      const stored = sessionStorage.getItem(BATCH_SIZE_KEY);
-      return stored == null ? DEFAULT_BATCH_SIZE : normalizeBatchSize(stored);
-    } catch {
-      return DEFAULT_BATCH_SIZE;
-    }
-  }
-
-  function currentBatchSize() {
-    return normalizeBatchSize(document.getElementById('readinessBatchSize')?.value || storedBatchSize());
-  }
-
-  function lockRun(message) {
-    const runBtn = document.getElementById('runBtn');
-    const runHint = document.getElementById('runHint');
+  function lockRunForReadiness(message = 'Automation readiness is being checked. Run Approved Tests will unlock after validation completes.') {
+    const runBtn = $('runBtn');
     if (runBtn) runBtn.disabled = true;
-    if (runHint && message) runHint.textContent = message;
+    const hint = $('runHint');
+    if (hint) hint.textContent = message;
   }
 
-  function ensureControls() {
-    const passwordField = document.getElementById('password')?.closest('.field');
-    if (!passwordField) return;
-
-    let anchor = passwordField;
-
-    if (!document.getElementById('aiModelTier')) {
-      const quality = document.createElement('div');
-      quality.className = 'field';
-      quality.innerHTML = '<label>AI quality profile</label><select id="aiModelTier"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="strong">Strong</option></select><small>Fast prioritizes response time. Balanced and Strong use progressively more capable server-side models configured on the server.</small>';
-      anchor.insertAdjacentElement('afterend', quality);
-      anchor = quality;
-      document.getElementById('aiModelTier').value = 'fast';
-    } else {
-      anchor = document.getElementById('aiModelTier').closest('.field') || anchor;
-    }
-
-    if (!document.getElementById('bypassDiscoveryCache')) {
-      const discovery = document.createElement('div');
-      discovery.className = 'field';
-      discovery.innerHTML = '<label style="font-weight:600"><input id="bypassDiscoveryCache" type="checkbox" style="width:auto;margin:0 6px 0 0">Fresh page discovery</label><small>Ignore cached discovery data for the next generation.</small>';
-      anchor.insertAdjacentElement('afterend', discovery);
-      anchor = discovery;
-    } else {
-      anchor = document.getElementById('bypassDiscoveryCache').closest('.field') || anchor;
-    }
-
-    if (!document.getElementById('readinessBatchSize')) {
-      const batch = document.createElement('div');
-      batch.className = 'field';
-      batch.innerHTML = '<label for="readinessBatchSize">Readiness validation batch size</label><input id="readinessBatchSize" type="number" min="1" max="50" step="1" value="2" inputmode="numeric"><small>Number of test cases processed by each deterministic readiness request. Default: 2.</small>';
-      anchor.insertAdjacentElement('afterend', batch);
-    }
-
-    const input = document.getElementById('readinessBatchSize');
-    if (input) {
-      input.value = String(storedBatchSize());
-      if (input.dataset.bound !== '1') {
-        input.dataset.bound = '1';
-        input.addEventListener('change', () => {
-          const value = normalizeBatchSize(input.value);
-          input.value = String(value);
-          try { sessionStorage.setItem(BATCH_SIZE_KEY, String(value)); } catch {}
-        });
-      }
-    }
+  // Add provider-neutral AI quality controls without exposing server-side model IDs.
+  const passwordField = $('password')?.closest('.field');
+  if (passwordField && !$('aiModelTier')) {
+    const controls = document.createElement('div');
+    controls.innerHTML = '<div class="field"><label>AI quality profile</label><select id="aiModelTier"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="strong">Strong</option></select><small>Fast prioritizes response time. Balanced and Strong use progressively more capable server-side models configured in .env.</small></div><div class="field" style="margin-top:9px"><label style="font-weight:600"><input id="bypassDiscoveryCache" type="checkbox" style="width:auto;margin:0 6px 0 0">Fresh page discovery</label><small>Enable this to ignore the in-memory discovery cache for this generation.</small></div>';
+    passwordField.insertAdjacentElement('afterend', controls);
+    if ($('aiModelTier')) $('aiModelTier').value = 'strong';
   }
 
-  async function withTimeout(promiseFactory) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), BATCH_TIMEOUT_MS);
-    try {
-      return await promiseFactory(controller.signal);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  function mergeCases(updatedCases) {
-    const byId = new Map((updatedCases || []).map((tc) => [String(tc?.id || '').toUpperCase(), tc]));
-    testCases = testCases.map((current) => {
-      const updated = byId.get(String(current?.id || '').toUpperCase());
-      return updated ? { ...current, ...updated } : current;
-    });
-  }
-
-  async function validateBatch(batch, batchIndex, batchCount) {
-    return withTimeout(async (signal) => {
-      const response = await fetch('/api/test-cases/revalidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal,
-        body: JSON.stringify({
-          sessionId,
-          testCases: batch,
-          credentials: credentialsPayload(),
-          batchIndex,
-          batchCount,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.reply || `Readiness batch ${batchIndex + 1}/${batchCount} failed.`);
-      if (!Array.isArray(data.testCases)) throw new Error('Readiness response did not contain test cases.');
-      return data.testCases;
-    });
-  }
-
-  async function refreshReadiness() {
-    if (!sessionId || !Array.isArray(testCases) || !testCases.length || readinessInFlight) return;
-
-    const pending = testCases.filter((tc) => !tc.automationReadiness);
-    if (!pending.length) {
-      renderCases();
-      return;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function (input, init) {
+    const url = typeof input === 'string' ? input : input?.url;
+    let nextInit = init;
+    let initialGeneration = false;
+    if (url === '/api/chat' && init?.method === 'POST' && typeof init.body === 'string') {
+      try {
+        const payload = JSON.parse(init.body);
+        initialGeneration = payload.message !== 'approve reviewed cases';
+        if (initialGeneration) {
+          payload.aiModelTier = $('aiModelTier')?.value || 'strong';
+          payload.bypassDiscoveryCache = Boolean($('bypassDiscoveryCache')?.checked);
+        }
+        nextInit = { ...init, body: JSON.stringify(payload) };
+      } catch {}
     }
 
-    readinessInFlight = true;
-    readinessPaused = false;
-    clearTimeout(readinessTimer);
-    readinessTimer = null;
-
-    const input = document.getElementById('readinessBatchSize');
-    if (input) input.disabled = true;
-
-    const batchSize = currentBatchSize();
-    const batches = [];
-    for (let i = 0; i < pending.length; i += batchSize) batches.push(pending.slice(i, i + batchSize));
-
-    let completed = 0;
-    try {
-      for (let i = 0; i < batches.length; i += 1) {
-        lockRun(`Checking automation readiness ${completed}/${pending.length} · batch ${i + 1}/${batches.length}`);
-        const assessed = await validateBatch(batches[i], i, batches.length);
-        mergeCases(assessed);
-        completed += assessed.length;
-        renderCases();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    } catch (err) {
-      readinessPaused = true;
-      const message = err?.name === 'AbortError'
-        ? `Readiness validation timed out after ${Math.round(BATCH_TIMEOUT_MS / 1000)} seconds for one batch. ${completed}/${pending.length} case(s) were validated.`
-        : `Readiness validation paused after ${completed}/${pending.length} case(s). ${err.message || ''}`;
-      console.warn('[readiness] validation paused', err);
-      lockRun(message);
-      if (typeof showError === 'function') showError(message);
-    } finally {
-      readinessInFlight = false;
-      if (input) input.disabled = false;
-      renderCases();
+    const response = await nativeFetch(input, nextInit);
+    if (initialGeneration) {
+      response.clone().json().then((data) => {
+        if (data?.generationTiming) lastGenerationMeta = data.generationTiming;
+      }).catch(() => {});
     }
-  }
-
-  function scheduleReadiness(delayMs = 500) {
-    if (readinessInFlight) return;
-    clearTimeout(readinessTimer);
-    readinessTimer = setTimeout(() => {
-      readinessTimer = null;
-      refreshReadiness();
-    }, delayMs);
-  }
-
-  window.refreshTestReadiness = function () {
-    readinessPaused = false;
-    testCases = testCases.map((tc) => ({ ...tc, automationReadiness: null }));
-    renderCases();
-    scheduleReadiness(50);
+    return response;
   };
 
-  const baseRenderCases = window.renderCases || renderCases;
+  async function refreshReadiness() {
+    if (!sessionId || !testCases.length || readinessRefreshInFlight) return;
+    readinessRefreshInFlight = true;
+    lockRunForReadiness('Checking automation readiness… Run Approved Tests is locked.');
+    try {
+      const r = await fetch('/api/test-cases/revalidate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, testCases, credentials: credentialsPayload() })
+      });
+      const data = await r.json();
+      if (r.ok && Array.isArray(data.testCases)) {
+        testCases = data.testCases;
+        renderCases();
+      } else if (!r.ok) {
+        lockRunForReadiness('Readiness validation did not complete. Resolve the error before running tests.');
+        showError(data.reply || 'Automation readiness validation failed.');
+      }
+    } catch (err) {
+      lockRunForReadiness('Readiness validation did not complete. Resolve the connection error before running tests.');
+      console.warn('[readiness] refresh failed', err);
+      showError('Automation readiness could not be checked. Run Approved Tests remains locked.');
+    } finally {
+      readinessRefreshInFlight = false;
+      if (testCases.every((tc) => tc.automationReadiness)) renderCases();
+    }
+  }
 
-  window.renderCases = renderCases = function () {
-    const count = document.getElementById('caseCount');
-    const addCaseBtn = document.getElementById('addCaseBtn');
-    const container = document.getElementById('cases');
-    const runBtn = document.getElementById('runBtn');
-    const runHint = document.getElementById('runHint');
+  function scheduleReadiness(delayMs = 180) {
+    clearTimeout(readinessTimer);
+    lockRunForReadiness();
+    readinessTimer = setTimeout(refreshReadiness, delayMs);
+  }
 
-    if (count) count.textContent = Array.isArray(testCases) ? testCases.length : 0;
-    if (addCaseBtn) addCaseBtn.disabled = !sessionId || readinessInFlight;
+  window.refreshTestReadiness = refreshReadiness;
 
-    if (!Array.isArray(testCases) || !testCases.length) {
-      if (container) container.innerHTML = '<div class="empty">No test cases returned.</div>';
-      if (runBtn) runBtn.disabled = true;
+  renderCases = function () {
+    $('caseCount').textContent = testCases.length;
+    $('addCaseBtn').disabled = !sessionId;
+    if (!testCases.length) {
+      $('cases').innerHTML = '<div class="empty">No test cases returned.</div>';
+      lockRunForReadiness('Generate test cases before running automation.');
       return;
     }
 
-    let ready = 0;
-    let blocked = 0;
-    let pending = 0;
-
-    container.innerHTML = testCases.map((tc, i) => {
+    let ready = 0, blocked = 0, preflight = 0, needsRefresh = false;
+    $('cases').innerHTML = testCases.map((tc, i) => {
       const expected = (tc.expectedResults || []).slice(0, 2).join(' · ');
-      const source = String(tc.source || 'ai').toLowerCase();
-      const type = String(tc.type || 'functional').toLowerCase();
+      const source = (tc.source || 'ai').toLowerCase();
+      const type = (tc.type || 'functional').toLowerCase();
       const allowedTypes = new Set(['negative', 'positive', 'functional', 'boundary', 'custom']);
-      const typeClass = allowedTypes.has(type) ? `type-${type}` : 'type-functional';
+      const typeClass = allowedTypes.has(type) ? 'type-' + type : 'type-functional';
       const readiness = tc.automationReadiness || null;
       const status = readiness?.status || 'NEEDS_PREFLIGHT';
+      if (!readiness) needsRefresh = true;
       const isReady = status === 'READY';
-      const isPending = !readiness || status === 'NEEDS_PREFLIGHT';
-      if (isReady) ready += 1;
-      else if (isPending) pending += 1;
-      else blocked += 1;
-
+      const isPreflight = status === 'NEEDS_PREFLIGHT';
+      if (isReady) ready++; else if (isPreflight) preflight++; else blocked++;
       const cls = readinessClass(status);
       const label = readinessLabel(status);
-      const reason = readiness?.reason || 'Waiting for deterministic readiness validation.';
+      const reason = readiness?.reason || (isPreflight ? 'The automation system is validating this test against discovered application evidence and compiling its deterministic automation plan.' : '');
       const reasonCode = readiness?.reasonCode || '';
       const resolution = readiness?.resolutionType || '';
-      const sourceLabel = source === 'human' ? 'Human' : source === 'ai-on-demand' ? 'AI · On-demand' : source === 'ai-repaired' ? 'AI · Repaired' : 'AI / Reviewed';
-      const selectable = isReady && !readinessInFlight;
-
+      const checked = isReady ? 'checked' : '';
+      const disabled = isReady ? '' : 'disabled';
       let actions = '';
-      if (resolution === 'AI_REPAIRABLE') actions += `<button class="btn ghost" type="button" onclick="repairCaseWithAI(${i})">Fix with AI</button>`;
-      if (resolution === 'USER_INPUT_REQUIRED') actions += `<button class="btn ghost" type="button" onclick="focusRequiredInput(${i})">Provide required input</button>`;
+      if (resolution === 'AI_REPAIRABLE') actions += '<button class="btn ghost" type="button" onclick="repairCaseWithAI(' + i + ')">Fix with AI</button>';
+      else if (resolution === 'USER_INPUT_REQUIRED') actions += '<button class="btn ghost" type="button" onclick="focusRequiredInput(' + i + ')">Provide required input</button>';
+      if (readiness?.canSuggestAssertion) actions += '<button class="btn ghost" type="button" onclick="suggestAssertionWithAI(' + i + ')">Suggest assertion with AI</button>';
+      const sourceLabel = source === 'human' ? 'Human' : source === 'ai-on-demand' ? 'AI · On-demand' : source === 'ai-repaired' ? 'AI · Repaired' : 'AI / Reviewed';
 
-      return `<div class="case ${typeClass}">
-        <input class="case-check" type="checkbox" value="${escapeHtml(tc.id)}" ${selectable ? 'checked' : ''} ${selectable ? '' : 'disabled'}>
-        <div>
-          <div class="case-title">${escapeHtml(tc.id)} — ${escapeHtml(tc.title)}</div>
-          <div class="case-meta">
-            <span class="tag ${typeClass}">${escapeHtml(type)}</span>
-            <span class="tag">${escapeHtml(tc.priority || 'medium')}</span>
-            <span class="tag ${source === 'human' ? 'human' : ''}">${escapeHtml(sourceLabel)}</span>
-            <span class="tag ${cls}">${escapeHtml(label)}</span>
-            <span>${(tc.steps || []).length} steps</span>
-          </div>
-          ${expected ? `<div class="expected">Expected: ${escapeHtml(expected)}</div>` : ''}
-          <div class="readiness ${cls}"><b>${escapeHtml(label)}</b> — ${escapeHtml(reason)}${reasonCode ? `<span class="readiness-code">Reason: ${escapeHtml(reasonCode)} · Resolution: ${escapeHtml(resolution || 'NONE')}</span>` : ''}${actions ? `<div class="readiness-actions">${actions}</div>` : ''}</div>
-        </div>
-        <div class="case-actions"><button class="btn ghost" ${readinessInFlight ? 'disabled' : ''} onclick="openEditor(${i})">Edit</button><button class="btn ghost danger" ${readinessInFlight ? 'disabled' : ''} onclick="deleteCase(${i})">Delete</button></div>
-      </div>`;
+      return '<div class="case ' + typeClass + '">' +
+        '<input class="case-check" type="checkbox" value="' + escapeHtml(tc.id) + '" ' + checked + ' ' + disabled + '>' +
+        '<div><div class="case-title">' + escapeHtml(tc.id) + ' — ' + escapeHtml(tc.title) + '</div>' +
+        '<div class="case-meta"><span class="tag ' + typeClass + '">' + escapeHtml(type) + '</span><span class="tag">' + escapeHtml(tc.priority || 'medium') + '</span><span class="tag ' + (source === 'human' ? 'human' : '') + '">' + escapeHtml(sourceLabel) + '</span><span class="tag ' + cls + '">' + escapeHtml(label) + '</span><span>' + ((tc.steps || []).length) + ' steps</span></div>' +
+        (expected ? '<div class="expected">Expected: ' + escapeHtml(expected) + '</div>' : '') +
+        '<div class="readiness ' + cls + '"><b>' + escapeHtml(label) + '</b> — ' + escapeHtml(reason) +
+        (reasonCode ? '<span class="readiness-code">Reason: ' + escapeHtml(reasonCode) + ' · Resolution: ' + escapeHtml(resolution || 'NONE') + '</span>' : '') +
+        (actions ? '<div class="readiness-actions">' + actions + '</div>' : '') + '</div></div>' +
+        '<div class="case-actions"><button class="btn ghost" onclick="openEditor(' + i + ')">Edit</button><button class="btn ghost danger" onclick="deleteCase(' + i + ')">Delete</button></div></div>';
     }).join('');
 
-    if (readinessInFlight) {
-      lockRun(`Checking automation readiness · ${ready}/${testCases.length} ready`);
-    } else if (pending > 0) {
-      lockRun(`${pending} case(s) checking readiness · Run Approved Tests locked`);
-      if (!readinessPaused) scheduleReadiness(500);
+    if (preflight > 0 || readinessRefreshInFlight || needsRefresh) {
+      lockRunForReadiness(preflight + ' case(s) checking readiness · Run Approved Tests locked');
     } else {
-      if (runHint) runHint.textContent = `${ready} Automation Ready · ${blocked} action/manual`;
-      if (runBtn) runBtn.disabled = ready === 0;
+      $('runHint').textContent = ready + ' Automation Ready · ' + blocked + ' action/manual';
+      $('runBtn').disabled = ready === 0;
+    }
+
+    if (needsRefresh) {
+      setTimeout(() => {
+        const cacheText = lastGenerationMeta?.discoveryCacheBypassed ? ' · fresh discovery' : lastGenerationMeta?.discoveryCacheHit ? ' · discovery cache used' : '';
+        $('caseSubtitle').textContent = 'AI test cases generated · applying automation readiness checks…' + cacheText;
+      }, 0);
+      scheduleReadiness(1500);
+    } else if (!readinessRefreshInFlight) {
+      setTimeout(() => {
+        const profile = $('aiModelTier')?.selectedOptions?.[0]?.textContent || 'Strong';
+        const timing = lastGenerationMeta?.totalMs ? ' · generated in ' + (lastGenerationMeta.totalMs / 1000).toFixed(1) + 's' : '';
+        $('caseSubtitle').textContent = profile + ' AI profile · automation readiness completed' + timing;
+      }, 0);
     }
   };
 
   window.focusRequiredInput = function (index) {
-    const readiness = testCases[index]?.automationReadiness;
-    const required = readiness?.requiredInputs || [];
-    if (required.includes('username')) document.getElementById('username')?.focus();
-    else if (required.includes('password')) document.getElementById('password')?.focus();
-    if (typeof showError === 'function') showError(readiness?.reason || 'Provide the required execution input.');
+    const r = testCases[index]?.automationReadiness;
+    const required = r?.requiredInputs || [];
+    if (required.includes('username')) $('username').focus();
+    else if (required.includes('password')) $('password').focus();
+    showError(r?.reason || 'Provide the required execution input and the test will be revalidated automatically.');
   };
 
   window.repairCaseWithAI = async function (index) {
     const tc = testCases[index];
-    if (!tc || readinessInFlight) return;
+    if (!tc) return;
+    clearError();
+    lockRunForReadiness('AI repair in progress. Readiness will be rechecked before execution.');
+    const button = document.querySelector('.case:nth-child(' + (index + 1) + ') .readiness-actions button');
+    if (button) { button.disabled = true; button.textContent = 'Repairing…'; }
     try {
-      const response = await fetch('/api/test-cases/repair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, testCase: tc, credentials: credentialsPayload() }),
+      const r = await fetch('/api/test-cases/repair', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, testCase: tc, credentials: credentialsPayload() })
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.reply || 'The test case could not be repaired safely.');
-      if (data.testCase) {
-        testCases[index] = data.testCase;
-        renderCases();
-      }
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.reply || 'The test case could not be repaired safely.');
+      if (data.testCase) { testCases[index] = data.testCase; renderCases(); }
+    } catch (err) { showError(err.message); renderCases(); }
+  };
+
+  window.suggestAssertionWithAI = async function (index) {
+    const tc = testCases[index];
+    if (!tc) return;
+    clearError();
+    const buttons = document.querySelectorAll('.case:nth-child(' + (index + 1) + ') .readiness-actions button');
+    const button = Array.from(buttons).find((item) => item.textContent.includes('Suggest assertion'));
+    if (button) { button.disabled = true; button.textContent = 'Thinking…'; }
+    try {
+      const r = await fetch('/api/test-cases/assertion-suggestion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, testCase: tc, credentials: credentialsPayload() })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.reply || 'AI could not suggest an assertion capability.');
+      const s = data.suggestion || {};
+      const dependency = s.dependency ? ' Dependency: ' + s.dependency + '.' : '';
+      showError('AI assertion suggestion — ' + (s.kind || 'REVIEW') + (s.operation ? ' · ' + s.operation : '') + ': ' + (s.rationale || '') + ' Cypress approach: ' + (s.cypressStrategy || '') + dependency);
     } catch (err) {
-      if (typeof showError === 'function') showError(err.message);
+      showError(err.message);
+    } finally {
+      if (button) { button.disabled = false; button.textContent = 'Suggest assertion with AI'; }
     }
   };
 
-  ['username', 'password'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('input', () => {
-      if (!sessionId || !Array.isArray(testCases) || !testCases.length || readinessInFlight) return;
-      readinessPaused = false;
-      testCases = testCases.map((tc) => ({ ...tc, automationReadiness: null }));
-      renderCases();
+  ['username', 'password'].forEach((id) => $(id).addEventListener('input', () => {
+    if (sessionId && testCases.length) {
+      lockRunForReadiness('Execution inputs changed · rechecking automation readiness…');
       scheduleReadiness(350);
-    });
+    }
+  }));
+
+  const modalCard = $('editorModal')?.querySelector('.modal-card');
+  if (modalCard && !$('editorReadiness')) {
+    const box = document.createElement('div');
+    box.id = 'editorReadiness';
+    box.className = 'editor-readiness';
+    box.innerHTML = '<strong>Automation readiness</strong><div>Save or validate this test case to see its deterministic readiness result.</div>';
+    modalCard.querySelector('.section-head')?.insertAdjacentElement('afterend', box);
+  }
+  if (modalCard && !$('editorAiGenerator')) {
+    const aiBox = document.createElement('div');
+    aiBox.id = 'editorAiGenerator';
+    aiBox.className = 'editor-ai-generator';
+    aiBox.style.display = 'none';
+    aiBox.innerHTML = '<div class="title">Generate this test case with AI</div><div class="note">Describe one specific scenario. AI will propose one grounded test case inside this editor; nothing is added until you review it and click Save Test Case.</div><textarea id="editorAiPrompt" placeholder="Example: Test login with an empty password and verify the required-field validation."></textarea><div class="actions"><button id="editorAiGenerateBtn" class="btn secondary" type="button">Generate</button><span id="editorAiStatus" class="status"></span></div>';
+    $('editorReadiness')?.insertAdjacentElement('afterend', aiBox);
+  }
+
+  function showEditorReadiness(index, candidate = null) {
+    const box = $('editorReadiness');
+    if (!box) return;
+    const tc = candidate || (index >= 0 ? testCases[index] : null);
+    const r = tc?.automationReadiness;
+    const history = tc?.repairHistory || [];
+    if (!r) {
+      box.innerHTML = '<strong>Checking required</strong><div>This new or edited test must pass deterministic automation readiness before it can be selected for execution.</div>';
+      return;
+    }
+    const historyHtml = history.length ? '<div class="history"><b>Repair history</b><br>' + history.map((x) => 'Attempt ' + escapeHtml(x.attempt) + ': ' + escapeHtml(x.reasonCode || x.originalStatus) + ' → ' + escapeHtml(x.result || 'review')).join('<br>') + '</div>' : '';
+    const suggestionHtml = r.canSuggestAssertion ? '<div><b>Assertion coverage:</b> One or more expectations can be strengthened through an AI assertion suggestion.</div>' : '';
+    box.innerHTML = '<strong>' + escapeHtml(readinessLabel(r.status)) + '</strong><div><b>Reason code:</b> ' + escapeHtml(r.reasonCode || '—') + '</div><div><b>Reason:</b> ' + escapeHtml(r.reason || '—') + '</div><div><b>Resolution:</b> ' + escapeHtml(r.resolutionType || 'NONE') + '</div><div><b>Validation:</b> Deterministic automation-system check</div>' + suggestionHtml + historyHtml;
+  }
+
+  function fillEditorFromCandidate(tc) {
+    $('editId').value = tc.id || $('editId').value;
+    $('editTitle').value = tc.title || '';
+    $('editType').value = tc.type || 'functional';
+    $('editPriority').value = tc.priority || 'medium';
+    $('editPreconditions').value = (tc.preconditions || []).join('\n');
+    $('editSteps').value = (tc.steps || []).map(stepToLine).join('\n');
+    $('editExpected').value = (tc.expectedResults || []).join('\n');
+    updateTypeHelp();
+    showEditorReadiness(-1, tc);
+  }
+
+  const originalOpenEditor = window.openEditor;
+  window.openEditor = function (index) {
+    originalOpenEditor(index);
+    pendingGeneratedCase = null;
+    showEditorReadiness(index);
+    const generator = $('editorAiGenerator');
+    if (generator) {
+      generator.style.display = index < 0 ? 'block' : 'none';
+      if (index < 0) {
+        $('editorAiPrompt').value = '';
+        $('editorAiStatus').textContent = '';
+        $('editorAiGenerateBtn').textContent = 'Generate';
+      }
+    }
+  };
+  openEditor = window.openEditor;
+
+  $('editorAiGenerateBtn')?.addEventListener('click', async () => {
+    const request = $('editorAiPrompt').value.trim();
+    if (!request) {
+      $('editorAiStatus').className = 'status bad';
+      $('editorAiStatus').textContent = 'Describe the test case first.';
+      return;
+    }
+    const btn = $('editorAiGenerateBtn');
+    btn.disabled = true;
+    btn.textContent = pendingGeneratedCase ? 'Regenerating…' : 'Generating…';
+    $('editorAiStatus').className = 'status';
+    $('editorAiStatus').textContent = 'Generating a candidate from the current story and discovered application…';
+    try {
+      const requestedId = $('editId').value || null;
+      const r = await fetch('/api/test-cases/generate-one', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, requestText: request, testCases, credentials: credentialsPayload(), requestedId })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.reply || 'The requested test case could not be generated.');
+      pendingGeneratedCase = data.testCase;
+      fillEditorFromCandidate(data.testCase);
+      $('editorAiStatus').className = 'status ok';
+      $('editorAiStatus').textContent = 'Candidate generated. Review or modify it, then click Save Test Case.';
+      btn.textContent = 'Regenerate';
+    } catch (err) {
+      $('editorAiStatus').className = 'status bad';
+      $('editorAiStatus').textContent = err.message;
+      btn.textContent = pendingGeneratedCase ? 'Regenerate' : 'Generate';
+    } finally { btn.disabled = false; }
   });
 
-  ensureControls();
+  $('saveEditorBtn').addEventListener('click', () => {
+    const generated = pendingGeneratedCase;
+    const savedId = $('editId').value;
+    lockRunForReadiness('Test case changed · rechecking automation readiness…');
+    setTimeout(() => {
+      if (generated) {
+        const index = testCases.findIndex((tc) => tc.id === savedId);
+        if (index >= 0) {
+          testCases[index].source = 'ai-on-demand';
+          testCases[index].createdBy = 'human-request';
+          testCases[index].repairHistory = generated.repairHistory || [];
+          testCases[index].automationReadiness = null;
+        }
+        pendingGeneratedCase = null;
+      }
+      scheduleReadiness(350);
+    }, 40);
+  });
 })();
