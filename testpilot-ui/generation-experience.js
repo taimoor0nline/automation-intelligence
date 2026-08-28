@@ -129,7 +129,6 @@
     if (cases) observer.observe(cases, { childList: true, subtree: true });
     if (errorBox) observer.observe(errorBox, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
 
-    // Safety only: never leave a stale overlay indefinitely. This does not control generation itself.
     safetyTimer = setTimeout(() => {
       if (!active) return;
       const rendered = document.querySelectorAll('#cases .case').length;
@@ -138,17 +137,25 @@
     }, 180000);
   }
 
+  function loadReadinessBatching() {
+    if (window.__aiTestPilotReadinessBatching || document.getElementById('readinessBatchScript')) return;
+    const script = document.createElement('script');
+    script.id = 'readinessBatchScript';
+    script.src = '/readiness-batch.js';
+    script.defer = true;
+    document.head.appendChild(script);
+  }
+
   function start() {
     ensureStyles();
     ensurePanel();
     setFastProfile();
+    loadReadinessBatching();
 
     const generateBtn = document.getElementById('generateBtn');
     if (!generateBtn || generateBtn.dataset.generationExperienceBound === '1') return;
     generateBtn.dataset.generationExperienceBound = '1';
 
-    // Capture phase runs before the original index.html click handler. We only show UI and select Fast;
-    // we never intercept fetch(), Response.json(), testCases, or renderCases().
     generateBtn.addEventListener('click', () => {
       const target = String(document.getElementById('targetUrl')?.value || '').trim();
       const story = String(document.getElementById('story')?.value || '').trim();
