@@ -1,4 +1,9 @@
 (function () {
+  // readiness.js keeps its own nativeFetch reference for deterministic readiness batching.
+  // Restore the browser's original fetch for the rest of the page so the original /api/chat
+  // generation handler is never routed through a later wrapper.
+  if (window.__aiTestPilotNativeFetch) window.fetch = window.__aiTestPilotNativeFetch;
+
   const modal = document.getElementById('editorModal');
   const card = modal?.querySelector('.modal-card');
   if (!card || document.getElementById('testCreationMode')) return;
@@ -137,9 +142,6 @@
     try { openEditor = window.openEditor; } catch {}
   }
 
-  // Small optional UI modules are loaded here because add-test-mode.js is already
-  // injected at the end of the main TestPilot page by the server. Keeping them as
-  // separate files avoids growing the core inline test-case editor further.
   ['/test-case-export.js', '/reporting-entry.js'].forEach((src) => {
     if (document.querySelector(`script[src="${src}"]`)) return;
     const script = document.createElement('script');
