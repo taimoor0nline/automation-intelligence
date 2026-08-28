@@ -62,3 +62,13 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
 Cypress.Commands.overwrite("visit", (originalFn, url, options) =>
   withDemoDelay(originalFn(url, options))
 );
+
+// When demo pacing is enabled, keep the page in its final post-test state long
+// enough for the CDP screencast to publish the last visible frame. This is a
+// presentation hold only; it does not change assertions, retries, or outcomes.
+afterEach(() => {
+  const delayMs = getDemoStepDelayMs();
+  if (!delayMs) return undefined;
+  const finalStateHoldMs = Math.max(500, Math.min(delayMs, 1800));
+  return Cypress.Promise.delay(finalStateHoldMs);
+});
