@@ -23,6 +23,9 @@ const jsFiles = [
   'server/services/restTestCaseAiService.js',
   'server/services/restAutomationService.js',
   'server/services/reportGenerator.js',
+  'server/services/browserProcessCleanup.js',
+  'server/services/singleSpecRunner.js',
+  'automation-system/engine.config.js',
   'testpilot-ui/platform-ui.js',
   'testpilot-ui/defect-assignment.js',
   'testpilot-ui/results-analysis.js',
@@ -30,6 +33,7 @@ const jsFiles = [
   'testpilot-ui/reporting-entry.js',
   'testpilot-ui/test-case-export.js',
   'testpilot-ui/report-excel.js',
+  'testpilot-ui/generation-experience.js',
 ];
 
 const errors = [];
@@ -95,6 +99,19 @@ for (const marker of ['exportAnalysisExcel', '/report-excel.js', 'AI TestPilot A
 const reportExcel = fs.readFileSync(path.join(root, 'testpilot-ui/report-excel.js'), 'utf8');
 for (const marker of ['AI-TestPilot-Analysis-', 'Failure Classification', 'AI Resolution Guidance', 'Developer Review Area', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']) {
   if (!reportExcel.includes(marker)) errors.push(`analytics Excel export missing marker: ${marker}`);
+}
+
+const browserCleanup = fs.readFileSync(path.join(root, 'server/services/browserProcessCleanup.js'), 'utf8');
+for (const marker of ['--ai-testpilot-run-id=', 'Get-CimInstance Win32_Process', 'taskkill', 'server startup stale cleanup', 'SIGINT', 'SIGTERM']) {
+  if (!browserCleanup.includes(marker)) errors.push(`browser cleanup missing marker: ${marker}`);
+}
+const runner = fs.readFileSync(path.join(root, 'server/services/singleSpecRunner.js'), 'utf8');
+for (const marker of ['AUTOMATION_RUN_ID', 'cleanupAutomationBrowsers', 'post-run', 'randomUUID']) {
+  if (!runner.includes(marker)) errors.push(`single spec runner cleanup missing marker: ${marker}`);
+}
+const engineConfig = fs.readFileSync(path.join(root, 'automation-system/engine.config.js'), 'utf8');
+for (const marker of ['AUTOMATION_RUN_ID', '--ai-testpilot-run-id=']) {
+  if (!engineConfig.includes(marker)) errors.push(`engine Chromium ownership marker missing: ${marker}`);
 }
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
