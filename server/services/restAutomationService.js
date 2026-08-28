@@ -1,4 +1,5 @@
-const { READY, INVALID_TEST_CASE, INSUFFICIENT_EVIDENCE, readinessSummary } = require('./testCaseFeasibility');
+const { READY, INVALID_TEST_CASE, INSUFFICIENT_EVIDENCE, REQUIRES_FRAMEWORK_CAPABILITY, readinessSummary } = require('./testCaseFeasibility');
+const { normalizeTestCategory, requiresExternalLoadEngine } = require('./testCategories');
 
 const ALLOWED_ASSERTIONS = new Set(['STATUS_EQUALS','HEADER_EXISTS','HEADER_EQUALS','JSON_PATH_EXISTS','JSON_PATH_EQUALS','JSON_PATH_NOT_NULL','BODY_CONTAINS','RESPONSE_TIME_AT_MOST']);
 const SENSITIVE_HEADER = /^(authorization|proxy-authorization|x-api-key|api-key)$/i;
@@ -50,6 +51,24 @@ function validateAssertions(testCase) {
 
 function readinessResult(testCase, operations) {
   if (!testCase || !String(testCase.title || '').trim()) return { status: INVALID_TEST_CASE, automatable: false, reasonCode: 'REST_CASE_MALFORMED', reason: 'REST test case title is required.', reasons: ['REST test case title is required.'], resolutionType: 'AI_REPAIRABLE', repairable: true, requiredInputs: [], evidence: [], automationPlan: null, validationSource: 'deterministic-rest' };
+
+  const testCategory = normalizeTestCategory(testCase.testCategory || testCase.category || testCase.testData?.__testCategory);
+  if (requiresExternalLoadEngine(testCategory)) {
+    return {
+      status: REQUIRES_FRAMEWORK_CAPABILITY,
+      automatable: false,
+      reasonCode: 'LOAD_ENGINE_REQUIRED',
+      reason: `${testCategory} testing requires a concurrent load-generation engine rather than Cypress cy.request().`,
+      reasons: [`${testCategory} cases remain valid planned/manual tests.`, 'Use a dedicated load adapter such as k6 or Artillery for virtual users, ramp-up, sustained rate and saturation testing.'],
+      resolutionType: 'FRAMEWORK_CHANGE_REQUIRED',
+      repairable: false,
+      requiredInputs: [],
+      evidence: ['Recommended engine: k6 or Artillery', 'Current REST engine: Cypress cy.request()'],
+      automationPlan: null,
+      validationSource: 'deterministic-rest',
+    };
+  }
+
   const operationMap = availableOperationMap(operations);
   const request = validateRequest(testCase, operationMap);
   if (!request.ok) return { status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: request.code, reason: request.reason, reasons: [request.reason], resolutionType: request.code === 'REST_PATH_PARAMETER_MISSING' ? 'USER_INPUT_REQUIRED' : 'AI_REPAIRABLE', repairable: request.code !== 'REST_PATH_PARAMETER_MISSING', requiredInputs: [], evidence: [], automationPlan: null, validationSource: 'deterministic-rest' };
@@ -64,7 +83,7 @@ function readinessResult(testCase, operations) {
     resolutionType: 'NONE',
     repairable: false,
     requiredInputs: [],
-    evidence: [{ type: 'api-operation', method: request.operation.method, path: request.operation.path, source: request.operation.source }],
+    evidence: [{ type: 'test-category', value: testCategory }, { type: 'api-operation', method: request.operation.method, path: request.operation.path, source: request.operation.source }],
     automationPlan: { targetType: 'REST', request: testCase.apiRequest, assertions: testCase.apiAssertions },
     validationSource: 'deterministic-rest',
   };
