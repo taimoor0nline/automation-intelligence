@@ -2,10 +2,49 @@
   if (window.__aiTestPilotReadinessBatching) return;
   window.__aiTestPilotReadinessBatching = true;
 
-  const BATCH_SIZE = 10;
+  const DEFAULT_BATCH_SIZE = 2;
+  const ALLOWED_BATCH_SIZES = [1, 2, 3];
+  const BATCH_SIZE_KEY = 'aiTestPilotReadinessBatchSize';
   const BATCH_TIMEOUT_MS = 12000;
   const previousFetch = window.fetch.bind(window);
   let batchActive = false;
+
+  function normalizeBatchSize(value) {
+    const parsed = Number(value);
+    return ALLOWED_BATCH_SIZES.includes(parsed) ? parsed : DEFAULT_BATCH_SIZE;
+  }
+
+  function storedBatchSize() {
+    try {
+      return normalizeBatchSize(sessionStorage.getItem(BATCH_SIZE_KEY));
+    } catch {
+      return DEFAULT_BATCH_SIZE;
+    }
+  }
+
+  function currentBatchSize() {
+    return normalizeBatchSize(document.getElementById('readinessBatchSize')?.value || storedBatchSize());
+  }
+
+  function ensureBatchSizeControl() {
+    if (document.getElementById('readinessBatchSizeWrap')) return;
+    const subtitle = document.getElementById('caseSubtitle');
+    if (!subtitle?.parentElement) return;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'readinessBatchSizeWrap';
+    wrap.style.cssText = 'display:flex;align-items:center;gap:7px;margin-top:7px;font-size:10.5px;color:#64748b;';
+    wrap.innerHTML = '<label for="readinessBatchSize" style="font-weight:700;color:#475569">Readiness batch size</label><select id="readinessBatchSize" style="width:58px;padding:4px 7px;border:1px solid #dbe3ef;border-radius:7px;background:#fff;font-size:10.5px"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select><span>cases per deterministic validation request</span>';
+    subtitle.insertAdjacentElement('afterend', wrap);
+
+    const select = document.getElementById('readinessBatchSize');
+    select.value = String(storedBatchSize());
+    select.addEventListener('change', () => {
+      const value = normalizeBatchSize(select.value);
+      select.value = String(value);
+      try { sessionStorage.setItem(BATCH_SIZE_KEY, String(value)); } catch {}
+    });
+  }
 
   function pathOf(input) {
     try {
@@ -16,7 +55,7 @@
     }
   }
 
-  function setProgress(completed, total, batch, batches) {
+  function setProgress(completed, total, batch, batches, batchSize) {
     const hint = document.getElementById('runHint');
     if (hint) {
       hint.textContent = total
@@ -24,7 +63,7 @@
         : 'Checking automation readiness · review controls locked';
     }
     const subtitle = document.getElementById('caseSubtitle');
-    if (subtitle && total) subtitle.textContent = `All test cases are visible · validating readiness in batches of ${BATCH_SIZE} · ${Math.min(completed, total)}/${total} checked`;
+    if (subtitle && total) subtitle.textContent = `All test cases are visible · validating ${batchSize} at a time · ${Math.min(completed, total)}/${total} checked`;
   }
 
   function lockReviewControls() {
@@ -37,6 +76,13 @@
     if (runBtn) runBtn.disabled = true;
     const addBtn = document.getElementById('addCaseBtn');
     if (addBtn) addBtn.disabled = true;
+    const batchSelect = document.getElementById('readinessBatchSize');
+    if (batchSelect) batchSelect.disabled = true;
+  }
+
+  function unlockBatchControl() {
+    const batchSelect = document.getElementById('readinessBatchSize');
+    if (batchSelect) batchSelect.disabled = false;
   }
 
   const casesRoot = document.getElementById('cases');
@@ -117,14 +163,15 @@
 
     const hasPending = payload.testCases.some((tc) => !tc?.automationReadiness);
     const candidates = hasPending ? payload.testCases.filter((tc) => !tc?.automationReadiness) : payload.testCases;
+    const batchSize = currentBatchSize();
     const batches = [];
-    for (let i = 0; i < candidates.length; i += BATCH_SIZE) batches.push(candidates.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < candidates.length; i += batchSize) batches.push(candidates.slice(i, i + batchSize));
     if (!batches.length) return previousFetch(input, init);
 
     batchActive = true;
     document.body.classList.add('readiness-batch-active');
     document.getElementById('retryReadinessBtn')?.remove();
-    setProgress(0, candidates.length, 0, batches.length);
+    setProgress(0, candidates.length, 0, batches.length, batchSize);
     lockReviewControls();
 
     let completed = 0;
@@ -132,32 +179,33 @@
     try {
       for (let index = 0; index < batches.length; index += 1) {
         const batch = batches[index];
-        setProgress(completed, candidates.length, index, batches.length);
+        setProgress(completed, candidates.length, index, batches.length, batchSize);
         const response = await fetchBatch(input, init, payload, batch, index, batches.length);
         const data = await response.json();
         if (!response.ok || !Array.isArray(data?.testCases)) throw new Error(data?.reply || `Readiness batch ${index + 1}/${batches.length} failed.`);
         mergeBatchIntoVisibleCases(data.testCases);
         completed += data.testCases.length;
         lastAutomationReadiness = data.automationReadiness || lastAutomationReadiness;
-        setProgress(completed, candidates.length, index, batches.length);
+        setProgress(completed, candidates.length, index, batches.length, batchSize);
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
       batchActive = false;
       document.body.classList.remove('readiness-batch-active');
+      unlockBatchControl();
       const ready = testCases.filter((tc) => tc?.automationReadiness?.status === 'READY').length;
       const blocked = testCases.length - ready;
       const hint = document.getElementById('runHint');
       if (hint) hint.textContent = `${ready} Automation Ready · ${blocked} action/manual`;
       const subtitle = document.getElementById('caseSubtitle');
-      if (subtitle) subtitle.textContent = `Automation readiness completed in ${batches.length} batch${batches.length === 1 ? '' : 'es'} · ${testCases.length} case(s) reviewed`;
+      if (subtitle) subtitle.textContent = `Automation readiness completed · ${testCases.length} case(s) reviewed · batch size ${batchSize}`;
 
       return new Response(JSON.stringify({
         ok: true,
         testCases,
         automationReadiness: lastAutomationReadiness,
         readinessPending: false,
-        batching: { batchSize: BATCH_SIZE, batches: batches.length, validated: completed },
+        batching: { batchSize, batches: batches.length, validated: completed },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (err) {
       const message = err?.name === 'AbortError'
@@ -166,6 +214,7 @@
       markRemainingForRetry(candidates, message);
       batchActive = false;
       document.body.classList.remove('readiness-batch-active');
+      unlockBatchControl();
       renderCases();
       const hint = document.getElementById('runHint');
       if (hint) hint.textContent = `Readiness paused · ${completed}/${candidates.length} validated`;
@@ -177,4 +226,11 @@
       });
     }
   };
+
+  function start() {
+    ensureBatchSizeControl();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
 })();
