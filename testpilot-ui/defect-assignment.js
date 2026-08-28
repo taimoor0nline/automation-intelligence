@@ -1,42 +1,9 @@
 (function(){
   let decorating=false;
   const MODE_KEY='aiTestPilotDemoTestMode';
-  const CATEGORIES=['FUNCTIONAL','SMOKE','REGRESSION','SECURITY','PERFORMANCE','ACCESSIBILITY','LOAD','STRESS'];
-  const categoryById=new Map();
-  const nativeFetch=window.fetch.bind(window);
   function token(){return sessionStorage.getItem('aiTestPilotToken')||''}
   function headers(extra={}){return token()?{...extra,Authorization:`Bearer ${token()}`} : extra}
-  function normalizeCategory(value){const v=String(value||'FUNCTIONAL').trim().toUpperCase().replace(/[\s-]+/g,'_');return CATEGORIES.includes(v)?v:'FUNCTIONAL'}
-  function categoryOf(tc){return normalizeCategory(tc?.testCategory||tc?.category||tc?.testData?.__testCategory||categoryById.get(String(tc?.id||'').toUpperCase()))}
-  function rememberCase(tc){const id=String(tc?.id||'').toUpperCase();if(id)categoryById.set(id,categoryOf(tc))}
-  function rememberCases(cases){(cases||[]).forEach(rememberCase)}
-  function enrichCase(tc){if(!tc||typeof tc!=='object')return tc;const id=String(tc.id||'').toUpperCase();const testCategory=categoryOf(tc);if(id)categoryById.set(id,testCategory);return{...tc,testCategory,testData:{...(tc.testData&&typeof tc.testData==='object'?tc.testData:{}),__testCategory:testCategory}}}
-  function enrichPayload(payload){
-    if(!payload||typeof payload!=='object')return payload;
-    const next={...payload};
-    if(Array.isArray(next.reviewedTestCases))next.reviewedTestCases=next.reviewedTestCases.map(enrichCase);
-    if(Array.isArray(next.testCases))next.testCases=next.testCases.map(enrichCase);
-    if(next.testCase&&typeof next.testCase==='object')next.testCase=enrichCase(next.testCase);
-    return next;
-  }
-  function wrapResponse(response){
-    const originalJson=response.json.bind(response);
-    response.json=async()=>{
-      const data=await originalJson();
-      if(Array.isArray(data?.testCases)){rememberCases(data.testCases);data.testCases=data.testCases.map(enrichCase)}
-      if(data?.testCase&&typeof data.testCase==='object'){rememberCase(data.testCase);data.testCase=enrichCase(data.testCase)}
-      return data;
-    };
-    return response;
-  }
-  window.fetch=async function(input,init={}){
-    let nextInit=init;
-    if(typeof init?.body==='string'&&/application\/json/i.test(String(init?.headers?.['Content-Type']||init?.headers?.['content-type']||''))){
-      try{nextInit={...init,body:JSON.stringify(enrichPayload(JSON.parse(init.body)))}}catch{}
-    }
-    return wrapResponse(await nativeFetch(input,nextInit));
-  };
-  async function api(url,init={}){const r=await window.fetch(url,{...init,headers:headers(init.headers||{})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.reply||`Request failed (${r.status})`);return d}
+  async function api(url,init={}){const r=await fetch(url,{...init,headers:headers(init.headers||{})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.reply||`Request failed (${r.status})`);return d}
   function role(){return String(document.getElementById('platformUserRole')?.textContent||'').trim().toUpperCase()}
   function projectId(){return document.getElementById('platformProject')?.value||''}
   function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
@@ -61,8 +28,7 @@
       .test-mode-option{border:1px solid #dbe3ff;border-radius:14px;background:#f8faff;padding:18px;text-align:left;cursor:pointer}
       .test-mode-option:hover{border-color:#8098ff;box-shadow:0 8px 24px rgba(47,91,255,.10)}
       .test-mode-option strong{display:block;font-size:15px;color:#1e3a8a}.test-mode-option span{display:block;font-size:11px;color:#64748b;line-height:1.5;margin-top:6px}
-      .web-auth-note,.test-category-note{font-size:10.5px;color:#64748b;line-height:1.45;margin-top:5px}
-      .test-category-tag{background:#ede9fe!important;color:#5b21b6!important;font-weight:800}.test-category-tag.external{background:#ffedd5!important;color:#9a3412!important}
+      .web-auth-note{font-size:10.5px;color:#64748b;line-height:1.45;margin-top:5px}
       @media(max-width:760px){.test-mode-options{grid-template-columns:1fr}.test-mode-switch{width:100%;margin:6px 0 0}.test-mode-switch a,.test-mode-switch button,.test-mode-switch span{flex:1;text-align:center}header{height:auto;min-height:68px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}}
     `;
     document.head.appendChild(style);
@@ -115,53 +81,6 @@
     apply();
   }
 
-  function syncCategoryEditor(defaultCategory='FUNCTIONAL'){
-    const id=String(document.getElementById('editId')?.value||'').toUpperCase();
-    const select=document.getElementById('editTestCategory');
-    if(select)select.value=categoryById.get(id)||defaultCategory;
-  }
-
-  function decorateCaseCategories(){
-    document.querySelectorAll('#cases .case').forEach(card=>{
-      const title=String(card.querySelector('.case-title')?.textContent||'');
-      const id=title.match(/TC(?:\d{3}|-H\d{3})/i)?.[0]?.toUpperCase();
-      if(!id)return;
-      const meta=card.querySelector('.case-meta');
-      if(!meta)return;
-      let tag=meta.querySelector('[data-test-category]');
-      if(!tag){tag=document.createElement('span');tag.dataset.testCategory='1';tag.className='tag test-category-tag';meta.insertBefore(tag,meta.firstChild)}
-      const category=categoryById.get(id)||'FUNCTIONAL';
-      tag.textContent=category;
-      tag.classList.toggle('external',category==='LOAD'||category==='STRESS');
-      tag.title=(category==='LOAD'||category==='STRESS')?'Requires a dedicated load-test engine such as k6 or Artillery.':'Test category';
-    });
-  }
-
-  function setupTestCategoryEditor(){
-    const editType=document.getElementById('editType');
-    if(!editType||document.getElementById('editTestCategory'))return;
-    const pair=editType.closest('.two');
-    if(!pair?.parentElement)return;
-    const field=document.createElement('div');
-    field.className='field';
-    field.innerHTML=`<label>Test category</label><select id="editTestCategory">${CATEGORIES.map(c=>`<option value="${c}">${c.charAt(0)+c.slice(1).toLowerCase()}</option>`).join('')}</select><div class="test-category-note">Scenario type remains separate. Load/Stress cases can be planned and reviewed here, but require a dedicated load engine rather than Cypress browser execution.</div>`;
-    insertBeforeIfChild(pair.parentElement,field,pair.nextSibling);
-
-    if(typeof window.openEditor==='function'&&!window.openEditor.__categoryWrapped){
-      const original=window.openEditor;
-      const wrapped=function(index){const value=original(index);setTimeout(()=>syncCategoryEditor('FUNCTIONAL'),0);return value};
-      wrapped.__categoryWrapped=true;
-      window.openEditor=wrapped;
-    }
-    document.getElementById('addCaseBtn')?.addEventListener('click',()=>setTimeout(()=>syncCategoryEditor('FUNCTIONAL'),0));
-    document.getElementById('saveEditorBtn')?.addEventListener('click',()=>{
-      const id=String(document.getElementById('editId')?.value||'').toUpperCase();
-      const category=normalizeCategory(document.getElementById('editTestCategory')?.value);
-      if(id)categoryById.set(id,category);
-      setTimeout(decorateCaseCategories,0);
-    });
-  }
-
   function showDemoModeChooser(){
     if(document.getElementById('testModeChooser'))return;
     const modal=document.createElement('div');
@@ -177,10 +96,8 @@
     addModeStyles();
     ensureModeSwitch();
     setupOptionalWebAuth();
-    setupTestCategoryEditor();
-    decorateCaseCategories();
     try{
-      const health=await window.fetch('/health').then(r=>r.json());
+      const health=await fetch('/health').then(r=>r.json());
       if(!health.database?.configured&&!sessionStorage.getItem(MODE_KEY))showDemoModeChooser();
     }catch{}
   }
@@ -238,7 +155,7 @@
     }catch(err){console.warn('[defect-assignment]',err.message)}finally{decorating=false}
   }
 
-  const observer=new MutationObserver(()=>{decorate();setupTestCategoryEditor();decorateCaseCategories()});
+  const observer=new MutationObserver(()=>decorate());
   function start(){
     setupTestModeExperience();
     ensureRestEntry();
