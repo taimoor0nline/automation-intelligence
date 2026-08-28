@@ -10,11 +10,11 @@
   let readinessWatch = null;
   let generationTiming = null;
   const stages = [
-    'Discovering the relevant page structure…',
+    'Browser-free HTTP/DOM discovery is reading the relevant page structure…',
     'Preparing compact UI evidence for the AI model…',
     'AI is drafting grounded test scenarios…',
     'Validating generated scenarios against discovered evidence…',
-    'Finalizing generated cases…',
+    'Finalizing generated cases without launching Chrome…',
   ];
 
   function isInitialGeneration(url, payload) {
@@ -30,13 +30,15 @@
     const style = document.createElement('style');
     style.id = 'generationExperienceStyles';
     style.textContent = `
-      .generation-progress{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:115;width:min(560px,calc(100vw - 36px));padding:22px 24px;border:2px solid #ef4444;border-radius:16px;background:rgba(254,242,242,.98);color:#991b1b;box-shadow:0 24px 70px rgba(127,29,29,.25);pointer-events:none;text-align:center}
+      .generation-progress{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:115;width:min(590px,calc(100vw - 36px));padding:22px 24px;border:2px solid #ef4444;border-radius:16px;background:rgba(254,242,242,.98);color:#991b1b;box-shadow:0 24px 70px rgba(127,29,29,.25);pointer-events:none;text-align:center}
       .generation-progress.show{display:block;animation:generationAppear .18s ease-out}
       .generation-progress.complete{border-color:#16a34a;background:rgba(240,253,244,.98);color:#166534}
       .generation-progress.failed{border-color:#dc2626;background:rgba(254,226,226,.99);color:#991b1b}
       .generation-progress-head{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:18px;font-weight:900;letter-spacing:.45px;text-transform:uppercase}
       .generation-title{display:flex;align-items:center;justify-content:center;gap:8px}
       .generation-elapsed{min-width:92px;padding:7px 12px;border-radius:999px;background:#dc2626;color:#fff;font-size:20px;font-weight:900;letter-spacing:0;text-transform:none;box-shadow:0 6px 16px rgba(220,38,38,.22)}
+      .generation-browser-free{display:inline-flex;align-items:center;justify-content:center;margin-top:11px;padding:5px 9px;border-radius:999px;background:#fff;border:1px solid #fecaca;color:#991b1b;font-size:10.5px;font-weight:900;letter-spacing:.25px;text-transform:uppercase}
+      .generation-progress.complete .generation-browser-free{border-color:#bbf7d0;color:#166534;background:#fff}
       .generation-progress.complete .generation-elapsed{background:#16a34a}.generation-progress.failed .generation-elapsed{background:#b91c1c}
       .generation-progress-stage{margin-top:13px;color:#7f1d1d;font-size:13px;font-weight:800;line-height:1.5}.generation-progress.complete .generation-progress-stage{color:#166534}.generation-progress.failed .generation-progress-stage{color:#991b1b}
       .generation-progress-note{margin-top:9px;color:#991b1b;font-size:11px;line-height:1.45}.generation-progress.complete .generation-progress-note{color:#166534}
@@ -57,7 +59,7 @@
     panel.className = 'generation-progress';
     panel.setAttribute('role', 'status');
     panel.setAttribute('aria-live', 'polite');
-    panel.innerHTML = '<div class="generation-progress-head"><span class="generation-title"><span class="generation-spinner"></span>Generating AI Test Cases</span><span id="generationElapsed" class="generation-elapsed">0s</span></div><div id="generationStage" class="generation-progress-stage">Preparing generation…</div><div class="generation-progress-note">Elapsed time is measured from generation start until automation-readiness validation finishes.</div>';
+    panel.innerHTML = '<div class="generation-progress-head"><span class="generation-title"><span class="generation-spinner"></span>Generating AI Test Cases</span><span id="generationElapsed" class="generation-elapsed">0s</span></div><div class="generation-browser-free">Browser-free generation · Chrome not launched</div><div id="generationStage" class="generation-progress-stage">Preparing generation…</div><div class="generation-progress-note">Elapsed time runs until automation-readiness validation finishes. Chrome starts only after you click <b>Run Approved Tests</b>.</div>';
     document.body.appendChild(panel);
     return panel;
   }
@@ -121,7 +123,7 @@
   function waitForReadiness() {
     if (!active || readinessWatch) return;
     const stage = document.getElementById('generationStage');
-    if (stage) stage.textContent = 'AI test cases generated · checking automation readiness…';
+    if (stage) stage.textContent = 'AI test cases generated · browser-free automation readiness is being checked…';
     readinessWatch = setInterval(() => {
       updateElapsed();
       if (readinessFinished()) finish(true);
@@ -143,7 +145,7 @@
     if (elapsed) elapsed.textContent = `${(elapsedMs / 1000).toFixed(1)}s`;
     if (stage) {
       stage.textContent = ok
-        ? `Ready for human review · total ${(elapsedMs / 1000).toFixed(1)}s${generationTiming?.aiGenerationMs != null ? ` · AI ${(generationTiming.aiGenerationMs / 1000).toFixed(1)}s` : ''}${generationTiming?.discoveryMs != null ? ` · discovery ${(generationTiming.discoveryMs / 1000).toFixed(1)}s` : ''}.`
+        ? `Ready for human review · Chrome was not launched · total ${(elapsedMs / 1000).toFixed(1)}s${generationTiming?.aiGenerationMs != null ? ` · AI ${(generationTiming.aiGenerationMs / 1000).toFixed(1)}s` : ''}${generationTiming?.discoveryMs != null ? ` · discovery ${(generationTiming.discoveryMs / 1000).toFixed(1)}s` : ''}.`
         : 'Generation stopped before the complete review-ready test set was returned.';
     }
     setTimeout(() => panel?.classList.remove('show', 'complete', 'failed'), ok ? 3500 : 8000);
