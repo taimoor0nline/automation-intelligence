@@ -60,18 +60,21 @@ module.exports = function ResultFileReporter(runner) {
     });
   }
 
-  // Mocha can emit fail/pass before the final duration has been attached to the test.
-  // Remember the outcome first and capture it at "test end", when timing metadata is final.
   runner.on("pass", (test) => remember(test, "passed"));
   runner.on("fail", (test, err) => remember(test, "failed", err));
   runner.on("pending", (test) => remember(test, "pending"));
   runner.on("test end", (test) => pushAtTestEnd(test));
 
   runner.once("end", () => {
-    const outputFile = process.env.AUTOMATION_RESULT_FILE;
-    if (!outputFile) return;
+    const authoritativeFile = process.env.AUTOMATION_RESULT_FILE;
+    if (!authoritativeFile) return;
 
+    // This file is diagnostic only. Cypress after:spec owns the authoritative
+    // result file because it includes failures that can occur after Mocha's
+    // per-test reporter lifecycle (for example Cypress command/hook failures).
+    const outputFile = `${authoritativeFile}.mocha-partial`;
     const payload = {
+      source: "mocha-diagnostic-partial",
       total: tests.length,
       passed: tests.filter((t) => t.state === "passed").length,
       failed: tests.filter((t) => t.state === "failed").length,
@@ -81,13 +84,16 @@ module.exports = function ResultFileReporter(runner) {
       tests,
     };
 
-    fs.mkdirSync(path.dirname(outputFile), { recursive: true });
-    const tempFile = `${outputFile}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(payload, null, 2), "utf8");
-    fs.renameSync(tempFile, outputFile);
-
-    console.log(
-      `[automation-reporter] Results captured: ${payload.passed} passed, ${payload.failed} failed`
-    );
+    try {
+      fs.mkdirSync(path.dirname(outputFile), { recursive: true });
+      const tempFile = `${outputFile}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(payload, null, 2), "utf8");
+      fs.renameSync(tempFile, outputFile);
+      console.log(
+        `[automation-reporter] Mocha diagnostic snapshot: ${payload.passed} passed, ${payload.failed} failed; waiting for Cypress final spec results.`
+      );
+    } catch (err) {
+      console.warn(`[automation-reporter] Could not write diagnostic snapshot: ${err.message}`);
+    }
   });
 };
