@@ -53,23 +53,66 @@ function ensureStartNavigation(compiled, pageDiscoveries = []) {
 }
 
 function stripQuotedText(value) {
-  return String(value || "").replace(/["'`][^"'`]*["'`]/g, "");
+  return String(value || "").replace(/["'`][^"'`]*["'`]/g, " ");
 }
 
-function explicitlyAssertsRequiredAttribute(value) {
-  const text = stripQuotedText(value).toLowerCase();
-  return /\bnot required\b|\boptional\b|\brequired\s+attribute\b|\bhas\s+(?:the\s+)?required\b|\b(?:is|be|remains?|should be|must be)\s+required\b/.test(text);
+function semanticAssertionText(value, selector) {
+  let text = stripQuotedText(value);
+  if (selector) text = text.split(String(selector)).join(" ");
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function removeFalseRequiredAssertions(compiled, normalizedTestCase) {
+function hasStructuralIntent(operation, value, selector) {
+  const text = semanticAssertionText(value, selector);
+  switch (operation) {
+    case "ASSERT_HIDDEN_OR_ABSENT": return /hidden\s+or\s+absent|absent\s+or\s+hidden|not\s+present\s+or\s+hidden/.test(text);
+    case "ASSERT_NOT_EXISTS": return /does not exist|doesn't exist|not exist|\bis absent\b|\bis removed\b|\bnot present\b/.test(text);
+    case "ASSERT_HIDDEN": return /\bhidden\b|\bnot visible\b|\binvisible\b/.test(text);
+    case "ASSERT_VISIBLE": return /\bvisible\b|\bshown\b|\bdisplayed\b|\bappears?\b/.test(text);
+    case "ASSERT_EXISTS": return /\bexists?\b|present in (?:the )?dom/.test(text);
+    case "ASSERT_UNCHECKED": return /\bnot checked\b|\bunchecked\b|unselected checkbox|unselected radio/.test(text);
+    case "ASSERT_CHECKED": return /\bchecked\b/.test(text) && !/\bnot checked\b|\bunchecked\b/.test(text);
+    case "ASSERT_DISABLED": return /\bdisabled\b/.test(text);
+    case "ASSERT_ENABLED": return /\benabled\b/.test(text);
+    case "ASSERT_FOCUSED": return /\bfocused\b|has focus/.test(text);
+    case "ASSERT_NOT_READONLY": return /not read.?only|\beditable\b/.test(text);
+    case "ASSERT_READONLY": return /read.?only/.test(text) && !/not read.?only/.test(text);
+    case "ASSERT_OPTIONAL": return /\bnot required\b|\boptional\b/.test(text);
+    case "ASSERT_REQUIRED": return /\brequired\s+attribute\b|\bhas\s+(?:the\s+)?required\b|\b(?:is|be|remains?|should be|must be)\s+required\b/.test(text);
+    case "ASSERT_INVALID": return /\binvalid\b|fails? browser validation|validation state is invalid/.test(text);
+    case "ASSERT_VALID": return /\bvalid\b|passes? browser validation|validation state is valid/.test(text) && !/\binvalid\b/.test(text);
+    default: return true;
+  }
+}
+
+const STRUCTURAL_STATE_ASSERTIONS = new Set([
+  "ASSERT_HIDDEN_OR_ABSENT",
+  "ASSERT_NOT_EXISTS",
+  "ASSERT_HIDDEN",
+  "ASSERT_VISIBLE",
+  "ASSERT_EXISTS",
+  "ASSERT_UNCHECKED",
+  "ASSERT_CHECKED",
+  "ASSERT_DISABLED",
+  "ASSERT_ENABLED",
+  "ASSERT_FOCUSED",
+  "ASSERT_NOT_READONLY",
+  "ASSERT_READONLY",
+  "ASSERT_OPTIONAL",
+  "ASSERT_REQUIRED",
+  "ASSERT_INVALID",
+  "ASSERT_VALID",
+]);
+
+function removeFalseStructuralAssertions(compiled, normalizedTestCase) {
   if (!compiled?.ok || !compiled.plan?.assertions?.length) return compiled;
   const expectedResults = Array.isArray(normalizedTestCase?.expectedResults) ? normalizedTestCase.expectedResults : [];
   const assertions = compiled.plan.assertions.filter((assertion) => {
-    if (assertion.operation !== "ASSERT_REQUIRED" && assertion.operation !== "ASSERT_OPTIONAL") return true;
+    if (!STRUCTURAL_STATE_ASSERTIONS.has(assertion.operation)) return true;
     const selector = String(assertion.selector || "");
     const matching = expectedResults.filter((item) => selector && String(item).includes(selector));
     if (!matching.length) return true;
-    return matching.some(explicitlyAssertsRequiredAttribute);
+    return matching.some((item) => hasStructuralIntent(assertion.operation, item, selector));
   });
   return { ...compiled, plan: { ...compiled.plan, assertions } };
 }
@@ -77,7 +120,7 @@ function removeFalseRequiredAssertions(compiled, normalizedTestCase) {
 function compileTestCase(testCase, context = {}) {
   const normalized = normalizeTestCase(testCase);
   let compiled = v4.compileTestCase(normalized, context);
-  compiled = removeFalseRequiredAssertions(compiled, normalized);
+  compiled = removeFalseStructuralAssertions(compiled, normalized);
   return ensureStartNavigation(compiled, context.pageDiscoveries || []);
 }
 
@@ -85,4 +128,7 @@ module.exports = {
   ...v4,
   compileTestCase,
   normalizeTestCase,
+  semanticAssertionText,
+  hasStructuralIntent,
+  removeFalseStructuralAssertions,
 };
