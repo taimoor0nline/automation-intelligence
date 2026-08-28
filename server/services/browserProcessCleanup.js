@@ -86,10 +86,37 @@ async function cleanupAutomationBrowsers({ runId = '', reason = 'cleanup', log =
   return { found: pids.length, killed, pids, remaining };
 }
 
+function installBrowserCleanupLifecycle() {
+  if (global.__aiTestPilotBrowserCleanupLifecycleInstalled) return;
+  global.__aiTestPilotBrowserCleanupLifecycleInstalled = true;
+
+  setImmediate(() => {
+    cleanupAutomationBrowsers({ reason: 'server startup stale cleanup', log: true }).catch(() => {});
+  });
+
+  let shuttingDown = false;
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[browser-cleanup] ${signal} received; cleaning AI TestPilot browser processes before exit.`);
+    const hardExit = setTimeout(() => process.exit(1), 5000);
+    hardExit.unref?.();
+    cleanupAutomationBrowsers({ reason: `server ${signal}`, log: true })
+      .catch(() => {})
+      .finally(() => process.exit(0));
+  };
+
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+installBrowserCleanupLifecycle();
+
 module.exports = {
   RUN_MARKER_PREFIX,
   safeRunId,
   markerForRun,
   ownedBrowserPids,
   cleanupAutomationBrowsers,
+  installBrowserCleanupLifecycle,
 };
