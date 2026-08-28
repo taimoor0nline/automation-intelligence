@@ -7,7 +7,6 @@ const { discoverPages } = require("../services/pageDiscovery");
 const { compactDiscoveriesForModel } = require("../services/modelDiscoveryView");
 const { normalizeProfile } = require("../services/aiModelProfiles");
 const { inferTestCategory } = require("../services/testCategories");
-const { ownedBrowserPids } = require("../services/browserProcessCleanup");
 const qwen = require("../services/qwenClient");
 const { readinessSummary } = require("../services/testCaseFeasibility");
 const { MAX_GENERATED_CASES, pruneGeneratedTestCases } = require("../services/testCaseScopeFilter");
@@ -94,11 +93,6 @@ router.post("/api/chat", async (req, res) => {
       const story = String(message || "").trim();
       if (!story) throw new Error("Please enter a business user story.");
 
-      const ownedBefore = await ownedBrowserPids();
-      if (ownedBefore.length) {
-        console.warn(`[generation-browser-audit] ${ownedBefore.length} AI TestPilot-owned Chromium process(es) already existed before generation. Generation will not launch another browser.`);
-      }
-
       session.story = story;
       session.targetUrl = targetUrl;
       session.environment = FIXED_ENVIRONMENT;
@@ -110,7 +104,7 @@ router.post("/api/chat", async (req, res) => {
       session.browserExecution = {
         status: "NOT_LAUNCHED",
         phase: "TEST_GENERATION",
-        reason: "Generation and readiness use server-side HTTP/DOM evidence only. Chrome launches only for approved test execution.",
+        reason: "Generation uses server-side HTTP/DOM discovery and AI only. Browser management is not invoked in this route.",
       };
 
       console.log(`[generation-runtime] session=${sessionId} browser=not-launched discovery=http+cheerio readiness=deterministic-server-side`);
@@ -149,31 +143,12 @@ router.post("/api/chat", async (req, res) => {
       session.readinessValidated = false;
       session.state = "AWAITING_APPROVAL";
 
-      const ownedAfter = await ownedBrowserPids();
-      const beforeSet = new Set(ownedBefore);
-      const newlyOwned = ownedAfter.filter((pid) => !beforeSet.has(pid));
-      const generationBrowserAudit = {
-        ownedBefore: ownedBefore.length,
-        ownedAfter: ownedAfter.length,
-        newOwnedProcesses: newlyOwned.length,
-        browserLaunchedByGeneration: newlyOwned.length > 0,
-      };
-      console.log(`[generation-browser-audit] before=${ownedBefore.length} after=${ownedAfter.length} new=${newlyOwned.length}`);
-      if (newlyOwned.length) {
-        console.error(`[generation-browser-audit] Unexpected AI TestPilot-owned Chromium process(es) appeared during browser-free generation: ${newlyOwned.join(', ')}.`);
-        session.browserExecution = {
-          status: "UNEXPECTED_BROWSER_DETECTED",
-          phase: "TEST_GENERATION",
-          reason: "An AI TestPilot-owned Chromium process appeared during browser-free generation and requires investigation.",
-        };
-      }
-
       const totalMs = Date.now() - requestStartedAt;
       const cacheLabel = discoveryResult.cacheHit ? " cache-hit" : discoveryResult.bypassed ? " cache-bypassed" : " fresh";
-      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length} cases=${session.testCases.length} browser=${newlyOwned.length ? 'unexpected-detected' : 'not-launched'}`);
+      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length} cases=${session.testCases.length} browser=not-launched`);
 
       return res.json({
-        reply: `AI generated ${session.testCases.length} story-driven test case(s), up to a maximum of ${MAX_GENERATED_CASES}, from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately. No automation browser was launched by generation.\n\n${formatTestCaseList(session.testCases)}`,
+        reply: `AI generated ${session.testCases.length} story-driven test case(s), up to a maximum of ${MAX_GENERATED_CASES}, from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately.\n\n${formatTestCaseList(session.testCases)}`,
         feature: generated.feature || null,
         testCases: session.testCases,
         pageDiscoveries: session.pageDiscoveries,
@@ -181,7 +156,6 @@ router.post("/api/chat", async (req, res) => {
         readinessPending: true,
         aiModelTier: session.aiModelTier,
         browserExecution: session.browserExecution,
-        generationBrowserAudit,
         generationTiming: { discoveryMs, discoveryCacheHit: discoveryResult.cacheHit, discoveryCacheBypassed: discoveryResult.bypassed, aiGenerationMs, totalMs },
       });
     }
