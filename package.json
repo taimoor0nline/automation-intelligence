@@ -7,7 +7,7 @@
     "postinstall": "npm run automation:install",
     "automation:install": "npm install --prefix automation-system --include=dev",
     "start:demo-app": "node demo-app/server.js",
-    "start:server": "node -r ./server/services/aiFetchRetryBootstrap.js server/index.js",
+    "start:server": "node server/index.js",
     "start": "concurrently -n demo-app,server -c blue,green \"npm:start:demo-app\" \"npm:start:server\"",
     "db:migrate": "node server/db/migrate.js",
     "test:platform": "node scripts/platform-smoke.js",
