@@ -103,8 +103,11 @@ for (const marker of ['AI-TestPilot-Analysis-', 'Failure Classification', 'AI Re
 }
 
 const browserCleanup = fs.readFileSync(path.join(root, 'server/services/browserProcessCleanup.js'), 'utf8');
-for (const marker of ['--ai-testpilot-run-id=', 'Get-CimInstance Win32_Process', 'taskkill', 'server startup stale cleanup', 'SIGINT', 'SIGTERM']) {
+for (const marker of ['--ai-testpilot-run-id=', 'Get-CimInstance Win32_Process', 'taskkill', 'server startup stale cleanup', 'SIGINT', 'SIGTERM', 'AUTOMATION_BROWSER_CLEANUP_INCOMPLETE', 'Test results remain valid']) {
   if (!browserCleanup.includes(marker)) errors.push(`browser cleanup missing marker: ${marker}`);
+}
+if (/throw error;/.test(browserCleanup) && /AUTOMATION_BROWSER_CLEANUP_FAILED/.test(browserCleanup)) {
+  errors.push('browser cleanup must not throw away captured PASS/FAIL results');
 }
 const runner = fs.readFileSync(path.join(root, 'server/services/singleSpecRunner.js'), 'utf8');
 for (const marker of ['AUTOMATION_RUN_ID', 'cleanupAutomationBrowsers', 'post-run', 'randomUUID']) {
@@ -116,8 +119,11 @@ for (const marker of ['AUTOMATION_RUN_ID', '--ai-testpilot-run-id=']) {
 }
 
 const chatRoute = fs.readFileSync(path.join(root, 'server/routes/chat.js'), 'utf8');
-for (const marker of ['browser=not-launched', 'discovery=http+cheerio', 'status: "NOT_LAUNCHED"', 'Chrome launches only for approved test execution', 'generation-browser-audit', 'ownedBrowserPids', 'newOwnedProcesses']) {
+for (const marker of ['browser=not-launched', 'discovery=http+cheerio', 'status: "NOT_LAUNCHED"', 'Browser management is not invoked in this route']) {
   if (!chatRoute.includes(marker)) errors.push(`browser-free generation contract missing marker: ${marker}`);
+}
+for (const forbidden of ['ownedBrowserPids', 'generation-browser-audit', 'cleanupAutomationBrowsers', 'executeSingleGeneratedSpec']) {
+  if (chatRoute.includes(forbidden)) errors.push(`generation route must not invoke browser lifecycle code: ${forbidden}`);
 }
 const generationUi = fs.readFileSync(path.join(root, 'testpilot-ui/generation-experience.js'), 'utf8');
 for (const marker of ['No automation browser launched', 'Chrome opens only when', 'body.ai-generation-active #cases>.activity-alert', 'isReadinessValidation', '/api/test-cases/revalidate', 'setInterval(updateElapsed, 1000)']) {
