@@ -9,19 +9,33 @@
       .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
   }
 
-  function localDateValue(date) {
+  function localDateTimeValue(date) {
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
     const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${d}T${h}:${min}`;
+  }
+
+  function configureDateTimeInputs() {
+    for (const id of ['from','to']) {
+      const input = $(id);
+      if (!input) continue;
+      input.type = 'datetime-local';
+      input.step = '60';
+      const label = input.closest('.field')?.querySelector('label');
+      if (label) label.textContent = id === 'from' ? 'From date / time' : 'To date / time';
+    }
   }
 
   function setDefaultDates() {
     const now = new Date();
     const from = new Date(now);
     from.setDate(from.getDate() - 29);
-    $('from').value = localDateValue(from);
-    $('to').value = localDateValue(now);
+    from.setHours(0, 0, 0, 0);
+    $('from').value = localDateTimeValue(from);
+    $('to').value = localDateTimeValue(now);
   }
 
   function showError(message) {
@@ -105,7 +119,14 @@
     const params = new URLSearchParams();
     filterIds.forEach((id) => {
       const value = $(id)?.value?.trim();
-      if (value) params.set(id, value);
+      if (!value) return;
+      if (id === 'from' || id === 'to') {
+        const instant = new Date(value);
+        if (Number.isNaN(instant.getTime())) throw new Error(`${id} date/time is invalid.`);
+        params.set(id, instant.toISOString());
+      } else {
+        params.set(id, value);
+      }
     });
     params.set('limit', '200');
     return params.toString();
@@ -137,6 +158,7 @@
   }
 
   async function init() {
+    configureDateTimeInputs();
     setDefaultDates();
     if (!token) {
       showNotice('Historical reports require a signed-in platform user. Return to AI TestPilot, sign in, then reopen Reports.');
@@ -147,7 +169,7 @@
     try {
       const health = await fetch('/health').then((r) => r.json());
       if (!health.database?.configured) {
-        showNotice('PostgreSQL is disabled. Test execution can continue in demo mode, but historical role/user/date reporting requires DATABASE_ENABLED=true and a configured DATABASE_URL.');
+        showNotice('PostgreSQL is disabled. Test execution can continue in demo mode, but historical role/user/date-time reporting requires DATABASE_ENABLED=true and a configured DATABASE_URL.');
         $('applyBtn').disabled = true;
         return;
       }
