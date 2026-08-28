@@ -3,15 +3,17 @@
   window.__aiTestPilotReadinessBatching = true;
 
   const DEFAULT_BATCH_SIZE = 2;
-  const ALLOWED_BATCH_SIZES = [1, 2, 3];
+  const MIN_BATCH_SIZE = 1;
+  const MAX_BATCH_SIZE = 50;
   const BATCH_SIZE_KEY = 'aiTestPilotReadinessBatchSize';
   const BATCH_TIMEOUT_MS = 12000;
   const previousFetch = window.fetch.bind(window);
   let batchActive = false;
 
   function normalizeBatchSize(value) {
-    const parsed = Number(value);
-    return ALLOWED_BATCH_SIZES.includes(parsed) ? parsed : DEFAULT_BATCH_SIZE;
+    const parsed = Math.floor(Number(value));
+    if (!Number.isFinite(parsed)) return DEFAULT_BATCH_SIZE;
+    return Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, parsed));
   }
 
   function storedBatchSize() {
@@ -34,16 +36,19 @@
     const wrap = document.createElement('div');
     wrap.id = 'readinessBatchSizeWrap';
     wrap.style.cssText = 'display:flex;align-items:center;gap:7px;margin-top:7px;font-size:10.5px;color:#64748b;';
-    wrap.innerHTML = '<label for="readinessBatchSize" style="font-weight:700;color:#475569">Readiness batch size</label><select id="readinessBatchSize" style="width:58px;padding:4px 7px;border:1px solid #dbe3ef;border-radius:7px;background:#fff;font-size:10.5px"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select><span>cases per deterministic validation request</span>';
+    wrap.innerHTML = '<label for="readinessBatchSize" style="font-weight:700;color:#475569">Readiness batch size</label><input id="readinessBatchSize" type="number" min="1" max="50" step="1" inputmode="numeric" style="width:72px;padding:5px 8px;border:1px solid #dbe3ef;border-radius:7px;background:#fff;font-size:10.5px" aria-label="Number of test cases per readiness validation batch"><span>test cases per validation request</span>';
     subtitle.insertAdjacentElement('afterend', wrap);
 
-    const select = document.getElementById('readinessBatchSize');
-    select.value = String(storedBatchSize());
-    select.addEventListener('change', () => {
-      const value = normalizeBatchSize(select.value);
-      select.value = String(value);
+    const input = document.getElementById('readinessBatchSize');
+    input.value = String(storedBatchSize());
+
+    const persist = () => {
+      const value = normalizeBatchSize(input.value);
+      input.value = String(value);
       try { sessionStorage.setItem(BATCH_SIZE_KEY, String(value)); } catch {}
-    });
+    };
+    input.addEventListener('change', persist);
+    input.addEventListener('blur', persist);
   }
 
   function pathOf(input) {
@@ -59,11 +64,11 @@
     const hint = document.getElementById('runHint');
     if (hint) {
       hint.textContent = total
-        ? `Checking automation readiness ${Math.min(completed, total)}/${total} · batch ${Math.min(batch + 1, batches)}/${batches} · review controls locked`
+        ? `Checking automation readiness ${Math.min(completed, total)}/${total} · batch ${Math.min(batch + 1, batches)}/${batches} · ${batchSize} case(s) per batch · review controls locked`
         : 'Checking automation readiness · review controls locked';
     }
     const subtitle = document.getElementById('caseSubtitle');
-    if (subtitle && total) subtitle.textContent = `All test cases are visible · validating ${batchSize} at a time · ${Math.min(completed, total)}/${total} checked`;
+    if (subtitle && total) subtitle.textContent = `All test cases are visible · validating up to ${batchSize} at a time · ${Math.min(completed, total)}/${total} checked`;
   }
 
   function lockReviewControls() {
@@ -76,13 +81,13 @@
     if (runBtn) runBtn.disabled = true;
     const addBtn = document.getElementById('addCaseBtn');
     if (addBtn) addBtn.disabled = true;
-    const batchSelect = document.getElementById('readinessBatchSize');
-    if (batchSelect) batchSelect.disabled = true;
+    const batchInput = document.getElementById('readinessBatchSize');
+    if (batchInput) batchInput.disabled = true;
   }
 
   function unlockBatchControl() {
-    const batchSelect = document.getElementById('readinessBatchSize');
-    if (batchSelect) batchSelect.disabled = false;
+    const batchInput = document.getElementById('readinessBatchSize');
+    if (batchInput) batchInput.disabled = false;
   }
 
   const casesRoot = document.getElementById('cases');
