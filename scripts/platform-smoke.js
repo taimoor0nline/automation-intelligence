@@ -135,9 +135,10 @@ for (const forbidden of ['window.fetch =', 'response.json =', 'generationElapsed
 }
 
 const readinessBatch = fs.readFileSync(path.join(root, 'testpilot-ui/readiness-batch.js'), 'utf8');
-for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'ALLOWED_BATCH_SIZES = [1, 2, 3]', 'readinessBatchSize', 'sessionStorage', 'cases per deterministic validation request', 'BATCH_TIMEOUT_MS = 12000']) {
+for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'MIN_BATCH_SIZE = 1', 'MAX_BATCH_SIZE = 50', 'type="number"', 'readinessBatchSize', 'sessionStorage', 'test cases per validation request', 'BATCH_TIMEOUT_MS = 12000']) {
   if (!readinessBatch.includes(marker)) errors.push(`readiness batching missing marker: ${marker}`);
 }
+if (readinessBatch.includes('ALLOWED_BATCH_SIZES')) errors.push('readiness batch size should be a numeric input, not a fixed option list');
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
 if (!fs.existsSync(restUi)) errors.push('missing REST API workspace UI');
