@@ -10,6 +10,7 @@ const jsFiles = [
   'server/data/sessionStore.js',
   'server/middleware/sessionPersistence.js',
   'server/routes/auth.js',
+  'server/routes/chat.js',
   'server/routes/projects.js',
   'server/routes/reporting.js',
   'server/routes/restApi.js',
@@ -112,6 +113,15 @@ for (const marker of ['AUTOMATION_RUN_ID', 'cleanupAutomationBrowsers', 'post-ru
 const engineConfig = fs.readFileSync(path.join(root, 'automation-system/engine.config.js'), 'utf8');
 for (const marker of ['AUTOMATION_RUN_ID', '--ai-testpilot-run-id=']) {
   if (!engineConfig.includes(marker)) errors.push(`engine Chromium ownership marker missing: ${marker}`);
+}
+
+const chatRoute = fs.readFileSync(path.join(root, 'server/routes/chat.js'), 'utf8');
+for (const marker of ['browser=not-launched', 'discovery=http+cheerio', 'status: "NOT_LAUNCHED"', 'Chrome launches only for approved test execution']) {
+  if (!chatRoute.includes(marker)) errors.push(`browser-free generation contract missing marker: ${marker}`);
+}
+const generationUi = fs.readFileSync(path.join(root, 'testpilot-ui/generation-experience.js'), 'utf8');
+for (const marker of ['Browser-free generation', 'Chrome not launched', 'Chrome starts only after you click', 'browser-free automation readiness']) {
+  if (!generationUi.includes(marker)) errors.push(`browser-free generation UI missing marker: ${marker}`);
 }
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
