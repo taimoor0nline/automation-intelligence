@@ -10,7 +10,6 @@ const {
   readinessSummary,
 } = require("../services/testCaseFeasibility");
 const { generateSingleTestCase, repairTestCase, suggestAssertionCapability } = require("../services/testCaseAiService");
-const { normalizeTestCategory, inferTestCategory } = require("../services/testCategories");
 
 function cleanString(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
@@ -23,7 +22,6 @@ function normalizeTestCase(raw, fallbackId = "TC-H001") {
     id,
     title: cleanString(testCase.title, 300),
     type: ["positive", "negative", "boundary", "functional", "custom"].includes(cleanString(testCase.type, 30).toLowerCase()) ? cleanString(testCase.type, 30).toLowerCase() : "functional",
-    testCategory: normalizeTestCategory(testCase.testCategory || testCase.category),
     priority: ["low", "medium", "high"].includes(cleanString(testCase.priority, 30).toLowerCase()) ? cleanString(testCase.priority, 30).toLowerCase() : "medium",
     preconditions: Array.isArray(testCase.preconditions) ? testCase.preconditions.map((value) => cleanString(value, 500)).filter(Boolean).slice(0, 20) : [],
     testData: testCase.testData && typeof testCase.testData === "object" && !Array.isArray(testCase.testData) ? testCase.testData : {},
@@ -70,26 +68,8 @@ function upsertSessionCase(session, candidate) {
   else session.testCases = [candidate, ...(session.testCases || [])];
 }
 
-function mergeAssessedCases(sessionCases = [], assessed = []) {
-  const assessedById = new Map(assessed.map((tc) => [String(tc.id || "").toUpperCase(), tc]));
-  const merged = (sessionCases || []).map((current) => {
-    const replacement = assessedById.get(String(current?.id || "").toUpperCase());
-    if (!replacement) return current;
-    assessedById.delete(String(current?.id || "").toUpperCase());
-    return { ...current, ...replacement, automationReadiness: replacement.automationReadiness };
-  });
-  for (const remaining of assessedById.values()) merged.push(remaining);
-  return merged;
-}
-
 router.post("/api/test-cases/revalidate", async (req, res) => {
-  const {
-    sessionId = "default",
-    testCases = null,
-    credentials = null,
-    batchIndex = null,
-    batchCount = null,
-  } = req.body || {};
+  const { sessionId = "default", testCases = null, credentials = null } = req.body || {};
   const session = getSession(sessionId);
 
   try {
@@ -98,30 +78,13 @@ router.post("/api/test-cases/revalidate", async (req, res) => {
     updateCredentials(session, credentials);
 
     const sourceCases = Array.isArray(testCases) ? testCases : session.testCases;
-    if (!Array.isArray(sourceCases) || !sourceCases.length) throw new Error("At least one test case is required for readiness validation.");
     const normalized = sourceCases.map((tc, index) => normalizeTestCase(tc, `TC-H${String(index + 1).padStart(3, "0")}`));
     const assessed = assessTestCases(normalized, context(session));
+    session.testCases = assessed;
+    session.automationReadiness = readinessSummary(assessed);
+    session.readinessValidated = true;
 
-    session.testCases = mergeAssessedCases(session.testCases || [], assessed);
-    session.automationReadiness = readinessSummary(session.testCases);
-    session.readinessValidated = session.testCases.length > 0 && session.testCases.every((tc) => Boolean(tc?.automationReadiness));
-
-    const batchLabel = Number.isInteger(Number(batchIndex)) && Number.isInteger(Number(batchCount))
-      ? ` batch=${Number(batchIndex) + 1}/${Number(batchCount)}`
-      : "";
-    console.log(`[readiness] validated ${assessed.length} case(s)${batchLabel}; complete=${session.readinessValidated ? 'yes' : 'no'} ready=${session.automationReadiness.ready}/${session.automationReadiness.total}`);
-
-    return res.json({
-      ok: true,
-      testCases: assessed,
-      automationReadiness: session.automationReadiness,
-      readinessPending: !session.readinessValidated,
-      batch: {
-        index: Number.isInteger(Number(batchIndex)) ? Number(batchIndex) : null,
-        count: Number.isInteger(Number(batchCount)) ? Number(batchCount) : null,
-        size: assessed.length,
-      },
-    });
+    return res.json({ ok: true, testCases: assessed, automationReadiness: session.automationReadiness, readinessPending: false });
   } catch (err) {
     session.readinessValidated = false;
     return res.status(422).json({ ok: false, reply: err.message, readinessPending: true });
@@ -149,7 +112,6 @@ router.post("/api/test-cases/generate-one", async (req, res) => {
       pageDiscoveries: session.pageDiscoveries,
       modelTier: session.aiModelTier || "strong",
     });
-    candidate.testCategory = inferTestCategory({ story: `${session.story}\n${request}`, testCase: candidate });
     candidate.createdBy = "human-request";
     candidate.source = "ai-on-demand";
     candidate.repairHistory = [];
@@ -199,7 +161,7 @@ router.post("/api/test-cases/repair", async (req, res) => {
     });
     if (!repair.repaired) return res.status(422).json({ ok: false, repaired: false, reply: repair.explanation, automationReadiness: readiness });
 
-    const repaired = normalizeTestCase({ ...repair.testCase, id: original.id, testCategory: original.testCategory }, original.id);
+    const repaired = normalizeTestCase({ ...repair.testCase, id: original.id }, original.id);
     repaired.automationReadiness = classifyTestCase(repaired, context(session));
     repaired.repairHistory = [
       ...(original.repairHistory || []),
