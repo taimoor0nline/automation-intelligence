@@ -1,6 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const { randomUUID } = require("crypto");
 const { spawn, execFile } = require("child_process");
+const { cleanupAutomationBrowsers } = require("./browserProcessCleanup");
 
 const AUTOMATION_DIR = path.join(__dirname, "..", "..", "automation-system");
 const SPEC_DIR = path.join(AUTOMATION_DIR, "tests", "e2e", "generated");
@@ -167,7 +169,7 @@ function validateRuntimeContext(executionContext = {}) {
   }
 }
 
-async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure }) {
+async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, runId }) {
   const cypressBin = path.join(AUTOMATION_DIR, "node_modules", "cypress", "bin", "cypress");
   if (!fs.existsSync(cypressBin)) throw new Error("Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install.");
   if (!fs.existsSync(REPORTER_PATH)) throw new Error(`Automation result reporter is missing: ${REPORTER_PATH}`);
@@ -189,6 +191,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
   const apiAuth = executionContext.apiAuth || {};
   const env = {
     ...process.env,
+    AUTOMATION_RUN_ID: runId,
     AUTOMATION_RESULT_FILE: RESULT_FILE,
     AUTOMATION_BASE_URL: executionContext.baseUrl || process.env.TEST_BASE_URL || "http://localhost:4000",
     AUTOMATION_VIDEO: String(video),
@@ -206,58 +209,64 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     DEMO_STEP_DELAY_MS: String(demoStepDelayMs),
   };
 
-  const child = spawn(process.execPath, args, {
-    cwd: AUTOMATION_DIR,
-    env,
-    windowsHide: false,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.on("data", (chunk) => process.stdout.write(chunk));
-  child.stderr.on("data", (chunk) => process.stderr.write(chunk));
-
+  let child = null;
   let closed = false;
   let exitCode = null;
-  child.on("close", (code) => { closed = true; exitCode = code; });
+  try {
+    child = spawn(process.execPath, args, {
+      cwd: AUTOMATION_DIR,
+      env,
+      windowsHide: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout.on("data", (chunk) => process.stdout.write(chunk));
+    child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+    child.on("close", (code) => { closed = true; exitCode = code; });
 
-  const overallTimeoutMs = Math.max(30000, Math.min(numberEnv(process.env.AUTOMATION_ENGINE_TIMEOUT_MS, 120000), 600000));
-  const exitGraceMs = Math.max(1000, Math.min(numberEnv(process.env.AUTOMATION_ENGINE_EXIT_GRACE_MS, 5000), 30000));
-  const startedAt = Date.now();
-  let reporterResult = null;
+    const overallTimeoutMs = Math.max(30000, Math.min(numberEnv(process.env.AUTOMATION_ENGINE_TIMEOUT_MS, 120000), 600000));
+    const exitGraceMs = Math.max(1000, Math.min(numberEnv(process.env.AUTOMATION_ENGINE_EXIT_GRACE_MS, 5000), 30000));
+    const startedAt = Date.now();
+    let reporterResult = null;
 
-  while (Date.now() - startedAt < overallTimeoutMs) {
-    if (fs.existsSync(RESULT_FILE)) {
-      try { reporterResult = JSON.parse(fs.readFileSync(RESULT_FILE, "utf8")); break; } catch {}
+    while (Date.now() - startedAt < overallTimeoutMs) {
+      if (fs.existsSync(RESULT_FILE)) {
+        try { reporterResult = JSON.parse(fs.readFileSync(RESULT_FILE, "utf8")); break; } catch {}
+      }
+      if (closed) break;
+      await delay(200);
     }
-    if (closed) break;
-    await delay(200);
+
+    if (!reporterResult) {
+      await killProcessTree(child.pid);
+      throw new Error(closed
+        ? `Automation engine exited before producing test results (exit code ${exitCode}).`
+        : `Automation engine did not produce test results within ${Math.round(overallTimeoutMs / 1000)}s.`);
+    }
+
+    console.log(`[single-spec-runner] Test results captured before teardown: ${reporterResult.passed} passed, ${reporterResult.failed} failed.`);
+    const graceStartedAt = Date.now();
+    while (!closed && Date.now() - graceStartedAt < exitGraceMs) await delay(200);
+
+    let forcedTeardown = false;
+    if (!closed) {
+      forcedTeardown = true;
+      console.warn(`[single-spec-runner] Browser teardown exceeded ${exitGraceMs}ms; closing the automation process tree so analytics can continue.`);
+      await killProcessTree(child.pid);
+      await delay(750);
+    } else {
+      console.log(`[single-spec-runner] Automation process exited cleanly with code ${exitCode}.`);
+    }
+
+    return { reporterResult, forcedTeardown };
+  } finally {
+    if (child && !closed) await killProcessTree(child.pid);
+    await cleanupAutomationBrowsers({ runId, reason: `post-run ${runId}`, log: true });
   }
-
-  if (!reporterResult) {
-    await killProcessTree(child.pid);
-    throw new Error(closed
-      ? `Automation engine exited before producing test results (exit code ${exitCode}).`
-      : `Automation engine did not produce test results within ${Math.round(overallTimeoutMs / 1000)}s.`);
-  }
-
-  console.log(`[single-spec-runner] Test results captured before teardown: ${reporterResult.passed} passed, ${reporterResult.failed} failed.`);
-  const graceStartedAt = Date.now();
-  while (!closed && Date.now() - graceStartedAt < exitGraceMs) await delay(200);
-
-  let forcedTeardown = false;
-  if (!closed) {
-    forcedTeardown = true;
-    console.warn(`[single-spec-runner] Browser teardown exceeded ${exitGraceMs}ms; closing the automation process tree so analytics can continue.`);
-    await killProcessTree(child.pid);
-    await delay(750);
-  } else {
-    console.log(`[single-spec-runner] Automation process exited cleanly with code ${exitCode}.`);
-  }
-
-  return { reporterResult, forcedTeardown };
 }
 
 async function executeSingleGeneratedSpec(generated, executionContext = {}) {
   let prepared = null;
+  const runId = `run-${Date.now()}-${randomUUID().slice(0, 8)}`;
   try {
     prepared = prepareSpec(generated);
     const headed = boolEnv(process.env.AUTOMATION_HEADED, true);
@@ -268,14 +277,16 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}) {
 
     removeOldArtifacts();
     console.log(`[single-spec-runner] Running one spec containing all approved cases in ${browser} (${headed ? "headed" : "headless"})` + (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : ""));
+    console.log(`[single-spec-runner] Run ownership id: ${runId}`);
     console.log(`[single-spec-runner] Spec: ${prepared.automationRelativeSpecPath}`);
     console.log("[single-spec-runner] Results are captured as soon as the tests finish; browser teardown cannot block analytics/report generation.");
 
-    const run = await runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure });
+    const run = await runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, runId });
     const summarized = summarizeReporterResult(run.reporterResult, browser, run.forcedTeardown);
     return { ok: true, specPath: prepared.specPath, summary: summarized.summary, artifacts: summarized.artifacts, error: null };
   } catch (err) {
     console.error("[single-spec-runner] Automation execution failed:", err);
+    await cleanupAutomationBrowsers({ runId, reason: `failed run ${runId}`, log: true });
     return { ok: false, specPath: prepared?.specPath || null, summary: null, artifacts: null, error: err.message || String(err) };
   }
 }
