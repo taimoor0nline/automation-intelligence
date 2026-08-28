@@ -53,18 +53,22 @@ Rules:
 - Generate exactly one candidate test case and preserve the requested business intent.
 - Never invent selectors, pages, routes, controls, messages, validation rules or business constraints.
 - Use exact discovered selectors.
+- Steps contain browser ACTIONS only. Do not put ASSERT_* operations, verify_text, assert_text or other assertion pseudo-actions in steps. Assertions belong in expectedResults.
 - If a field must intentionally remain empty, use an action such as "clear" or "leave blank" for that selector; do NOT emit a fill/type action with an empty or null value.
 - If runtime credentials are needed, describe the dependency; never include actual credentials.
 - Do not make unsupported behavior appear automatable by removing an essential requirement.
 - Return JSON only.
 Schema: {"testCase":{"title":string,"type":"positive"|"negative"|"boundary"|"functional"|"custom","priority":"low"|"medium"|"high","preconditions":[string],"testData":object,"steps":[{"action":string,"target":string,"value":string|null}],"expectedResults":[string]}}`;
 
-const REPAIR_CASE_PROMPT = `You are a constrained QA test-case repair assistant. Repair ONLY the deterministic validation problem supplied by the automation system.
+const REPAIR_CASE_PROMPT = `You are a constrained QA test-case repair assistant. Repair ONLY the deterministic validation problems supplied by the automation system.
 Hard rules:
 - Preserve the original business intent and expected behaviour.
 - Never delete, weaken or replace an essential requirement merely to make the case automatable.
 - Use only supplied page-discovery evidence. Never invent selectors, routes, controls, messages or capabilities.
+- Steps contain browser ACTIONS only. Never put ASSERT_* operations, verify_text, assert_text, check_text or other assertion pseudo-actions in steps. Express assertions in expectedResults using the grounded selector.
 - A fill/type/input action must contain a non-empty value. If the business intent is to leave a discovered input empty, represent that as a "clear" or "leave blank" action with the same selector, not fill/type with "" or null.
+- For exact text validation, use an expected result such as: Text equals "Expected message" in [data-testid="..."]
+- For contains text validation, use an expected result such as: Text contains "Expected fragment" in [data-testid="..."]
 - If the issue cannot be repaired without changing intent or inventing evidence, return repaired=false.
 - Do not modify the test-case id or include secrets.
 - Return JSON only.
@@ -93,18 +97,95 @@ function normalizeCandidate(raw, id, source) {
   };
 }
 
-function deterministicEmptyFieldRepair(testCase, readiness) {
-  const reason = String(readiness?.reason || "");
-  const target = reason.match(/Typing step is missing a value for\s+(.+)$/i)?.[1]?.trim();
-  if (!target) return null;
-  const index = (testCase.steps || []).findIndex((step) => {
-    const action = String(step?.action || "").toLowerCase();
-    const value = step?.value;
-    return String(step?.target || "").trim() === target && /enter|type|fill|input/.test(action) && (value === null || value === undefined || String(value) === "");
-  });
-  if (index < 0) return null;
-  const steps = (testCase.steps || []).map((step, i) => i === index ? { action: "clear", target, value: null } : { ...step });
-  return normalizeCandidate({ ...testCase, steps }, testCase.id, testCase.source === "ai-on-demand" ? "ai-on-demand" : "ai-repaired");
+function quotedValues(text) {
+  const values = [];
+  const regex = /["'`]([^"'`]+)["'`]/g;
+  let match;
+  while ((match = regex.exec(String(text || ""))) !== null) values.push(match[1]);
+  return values;
+}
+
+function isVerificationAction(action) {
+  const normalized = String(action || "").trim().toLowerCase().replace(/[_-]+/g, " ");
+  return /^assert\b/.test(normalized) || /^verify\b/.test(normalized) || /^check\s+text\b/.test(normalized) || /^validate\s+text\b/.test(normalized);
+}
+
+function textExpectationKind(text) {
+  const value = String(text || "").toLowerCase();
+  if (/contains?|includes?|has text/.test(value)) return "contains";
+  if (/matches?|equals?|exactly|exact match|same text/.test(value)) return "equals";
+  return "";
+}
+
+function canonicalTextExpectation(target, value, kind = "equals") {
+  if (!target || value === null || value === undefined || String(value) === "") return "";
+  const escaped = String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `Text ${kind === "contains" ? "contains" : "equals"} "${escaped}" in ${target}`;
+}
+
+function attachSelectorToTextExpectation(expectedResults, target, preferredValue = null, preferredKind = "") {
+  const next = [...(expectedResults || [])];
+  if (!target) return { expectedResults: next, attached: false };
+
+  if (preferredValue !== null && preferredValue !== undefined && String(preferredValue) !== "") {
+    const canonical = canonicalTextExpectation(target, preferredValue, preferredKind || "equals");
+    if (canonical && !next.includes(canonical)) next.push(canonical);
+    return { expectedResults: next, attached: Boolean(canonical) };
+  }
+
+  for (let i = 0; i < next.length; i += 1) {
+    const expectation = String(next[i] || "");
+    if (expectation.includes(target)) continue;
+    const values = quotedValues(expectation);
+    const message = values.length ? values[values.length - 1] : "";
+    const kind = textExpectationKind(expectation);
+    if (!message || !kind || !/(?:text|message|error|label|content)/i.test(expectation)) continue;
+    next[i] = canonicalTextExpectation(target, message, kind);
+    return { expectedResults: next, attached: true };
+  }
+
+  return { expectedResults: next, attached: false };
+}
+
+function deterministicContractRepair(testCase) {
+  const source = testCase.source === "ai-on-demand" ? "ai-on-demand" : "ai-repaired";
+  let expectedResults = [...(testCase.expectedResults || [])];
+  const steps = [];
+  const changes = [];
+
+  for (const originalStep of testCase.steps || []) {
+    const step = { ...originalStep };
+    const action = String(step.action || "").trim();
+    const normalizedAction = action.toLowerCase().replace(/[_-]+/g, " ");
+    const target = String(step.target || "").trim();
+    const value = step.value;
+
+    if (/^(?:enter|type|fill|input)\b/.test(normalizedAction) && (value === null || value === undefined || String(value) === "")) {
+      steps.push({ action: "clear", target, value: null });
+      changes.push(`converted empty ${action || "fill"} to clear for ${target}`);
+      continue;
+    }
+
+    if (isVerificationAction(action) || /^ASSERT_[A-Z0-9_]+$/i.test(action)) {
+      let kind = textExpectationKind(action);
+      if (/TEXT_CONTAINS/i.test(action)) kind = "contains";
+      if (/TEXT_EQUALS/i.test(action)) kind = "equals";
+      const attached = attachSelectorToTextExpectation(expectedResults, target, value, kind);
+      expectedResults = attached.expectedResults;
+      if (attached.attached) {
+        changes.push(`moved verification step ${action} into expected results for ${target}`);
+        continue;
+      }
+    }
+
+    steps.push(step);
+  }
+
+  if (!changes.length) return null;
+  return {
+    testCase: normalizeCandidate({ ...testCase, steps, expectedResults }, testCase.id, source),
+    changes,
+  };
 }
 
 function verifyRepairCandidate(candidate, pageDiscoveries) {
@@ -119,11 +200,15 @@ async function generateSingleTestCase({ id, requestText, story, pageDiscoveries,
 }
 
 async function repairTestCase({ testCase, readiness, story, pageDiscoveries, modelTier = "fast" }) {
-  const deterministic = deterministicEmptyFieldRepair(testCase, readiness);
+  const deterministic = deterministicContractRepair(testCase);
   if (deterministic) {
-    const verification = verifyRepairCandidate(deterministic, pageDiscoveries);
+    const verification = verifyRepairCandidate(deterministic.testCase, pageDiscoveries);
     if (verification.ok) {
-      return { repaired: true, explanation: "Converted the empty fill/type step to an explicit clear action so the field remains intentionally empty while satisfying the deterministic automation contract.", testCase: deterministic };
+      return {
+        repaired: true,
+        explanation: `Normalized the test into the deterministic automation contract: ${deterministic.changes.join("; ")}.`,
+        testCase: deterministic.testCase,
+      };
     }
   }
 
@@ -137,7 +222,10 @@ async function repairTestCase({ testCase, readiness, story, pageDiscoveries, mod
 
   if (!result?.repaired) return { repaired: false, explanation: String(result?.explanation || "The issue could not be repaired without changing test intent or inventing evidence."), testCase };
 
-  const candidate = normalizeCandidate(result.testCase, testCase.id, testCase.source === "ai-on-demand" ? "ai-on-demand" : "ai-repaired");
+  let candidate = normalizeCandidate(result.testCase, testCase.id, testCase.source === "ai-on-demand" ? "ai-on-demand" : "ai-repaired");
+  const normalizedAiCandidate = deterministicContractRepair(candidate);
+  if (normalizedAiCandidate) candidate = normalizedAiCandidate.testCase;
+
   const verification = verifyRepairCandidate(candidate, pageDiscoveries);
   if (!verification.ok) {
     return {
