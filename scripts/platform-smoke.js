@@ -12,6 +12,7 @@ const jsFiles = [
   'server/routes/auth.js',
   'server/routes/chat.js',
   'server/routes/projects.js',
+  'server/routes/readinessBatch.js',
   'server/routes/reporting.js',
   'server/routes/restApi.js',
   'server/routes/sessionContext.js',
@@ -129,20 +130,25 @@ for (const forbidden of ['ownedBrowserPids', 'generation-browser-audit', 'cleanu
 }
 
 const generationUi = fs.readFileSync(path.join(root, 'testpilot-ui/generation-experience.js'), 'utf8');
-for (const marker of ['__aiTestPilotNativeFetch', 'setFastProfile', 'original index.html handler owns /api/chat']) {
-  if (!generationUi.includes(marker)) errors.push(`generation stability helper missing marker: ${marker}`);
+for (const marker of ['__aiTestPilotNativeFetch', 'setFastProfile', 'original index.html handler owns /api/chat', 'readinessBatchSize', 'type="number"', 'DEFAULT_BATCH_SIZE = 2', 'aiTestPilotReadinessBatchSize']) {
+  if (!generationUi.includes(marker)) errors.push(`generation/settings helper missing marker: ${marker}`);
 }
 for (const forbidden of ['window.fetch =', 'response.json =', 'MutationObserver', 'generationElapsed', 'updateElapsed', '/api/test-cases/revalidate', 'generationProgress', 'readinessBatchScript']) {
   if (generationUi.includes(forbidden)) errors.push(`generation UI must remain non-invasive: ${forbidden}`);
 }
 
-const addTestMode = fs.readFileSync(path.join(root, 'testpilot-ui/add-test-mode.js'), 'utf8');
-if (!addTestMode.includes('window.fetch = window.__aiTestPilotNativeFetch')) errors.push('native fetch must be restored after readiness initialization');
-
 const readinessUi = fs.readFileSync(path.join(root, 'testpilot-ui/readiness.js'), 'utf8');
-for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'MAX_BATCH_SIZE = 50', 'type="number"', 'readinessBatchSize', 'sessionStorage', 'validateReadinessBatch', 'BATCH_TIMEOUT_MS = 12000', 'if (readinessRefreshInFlight || readinessPaused) return']) {
-  if (!readinessUi.includes(marker)) errors.push(`integrated readiness batching missing marker: ${marker}`);
+for (const marker of ['/api/test-cases/revalidate', 'scheduleReadiness(1500)', 'testCases = data.testCases', 'renderCases();']) {
+  if (!readinessUi.includes(marker)) errors.push(`stable readiness lifecycle missing marker: ${marker}`);
 }
+
+const readinessBatchRoute = fs.readFileSync(path.join(root, 'server/routes/readinessBatch.js'), 'utf8');
+for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'MAX_BATCH_SIZE = 50', 'aiTestPilotReadinessBatchSize', 'setImmediate', '[readiness-batch]', 'batchCount', 'batchSize']) {
+  if (!readinessBatchRoute.includes(marker)) errors.push(`server readiness batching missing marker: ${marker}`);
+}
+
+const projectsRoute = fs.readFileSync(path.join(root, 'server/routes/projects.js'), 'utf8');
+if (!projectsRoute.includes("router.use(require('./readinessBatch'))")) errors.push('projects router must mount server-side readiness batching before lifecycle routes');
 
 const readinessBatch = fs.readFileSync(path.join(root, 'testpilot-ui/readiness-batch.js'), 'utf8');
 if (readinessBatch.includes('window.fetch =')) errors.push('legacy readiness-batch compatibility file must not wrap fetch');
