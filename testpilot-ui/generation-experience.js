@@ -2,10 +2,11 @@
   if (window.__aiTestPilotGenerationExperience) return;
   window.__aiTestPilotGenerationExperience = true;
 
-  const previousFetch = window.fetch.bind(window);
   let active = false;
   let stageTimer = null;
   let stageIndex = 0;
+  let observer = null;
+  let safetyTimer = null;
 
   const stages = [
     'Discovering the relevant page structure…',
@@ -13,22 +14,6 @@
     'Generating grounded test cases with AI…',
     'Finalizing generated test cases…',
   ];
-
-  function requestPath(input) {
-    try {
-      const raw = typeof input === 'string' ? input : String(input?.url || '');
-      return new URL(raw, window.location.origin).pathname;
-    } catch {
-      return String(input || '').split('?')[0];
-    }
-  }
-
-  function isInitialGeneration(input, payload) {
-    if (requestPath(input) !== '/api/chat') return false;
-    if (!payload || typeof payload !== 'object') return false;
-    if (Array.isArray(payload.approvedIds) || payload.message === 'approve reviewed cases') return false;
-    return Boolean(payload.targetUrl && String(payload.message || '').trim());
-  }
 
   function ensureStyles() {
     if (document.getElementById('generationExperienceStyles')) return;
@@ -79,14 +64,48 @@
     if (stage) stage.textContent = text;
   }
 
-  function clearStageTimer() {
+  function clearRuntime() {
     clearInterval(stageTimer);
+    clearTimeout(safetyTimer);
     stageTimer = null;
+    safetyTimer = null;
+    observer?.disconnect();
+    observer = null;
   }
 
   function removeLegacyGenerationMessage() {
     const legacy = document.querySelector('#cases>.activity-alert');
     if (legacy && /generat|discover/i.test(legacy.textContent || '')) legacy.remove();
+  }
+
+  function finish(ok, caseCount = 0) {
+    if (!active) return;
+    active = false;
+    clearRuntime();
+    removeLegacyGenerationMessage();
+    document.body.classList.remove('ai-generation-active');
+
+    const panel = ensurePanel();
+    panel.classList.toggle('complete', Boolean(ok));
+    panel.classList.toggle('failed', !ok);
+    if (ok) {
+      setStage(`${caseCount} test case${caseCount === 1 ? '' : 's'} generated and ready for human review.`);
+      setTimeout(() => panel.classList.remove('show', 'complete'), 700);
+    } else {
+      setStage('Test-case generation did not complete. Check the error message and try again.');
+      setTimeout(() => panel.classList.remove('show', 'failed'), 4500);
+    }
+  }
+
+  function inspectUiState() {
+    if (!active) return;
+    const cases = document.querySelectorAll('#cases .case');
+    if (cases.length) {
+      finish(true, cases.length);
+      return;
+    }
+    const errorBox = document.getElementById('errorBox');
+    if (errorBox?.classList.contains('show') && String(errorBox.textContent || '').trim()) finish(false);
   }
 
   function begin() {
@@ -98,71 +117,45 @@
     panel.classList.remove('complete', 'failed');
     panel.classList.add('show');
     setStage(stages[0]);
-    clearStageTimer();
+
     stageTimer = setInterval(() => {
       stageIndex = Math.min(stageIndex + 1, stages.length - 1);
       setStage(stages[stageIndex]);
     }, 5000);
+
+    observer = new MutationObserver(inspectUiState);
+    const cases = document.getElementById('cases');
+    const errorBox = document.getElementById('errorBox');
+    if (cases) observer.observe(cases, { childList: true, subtree: true });
+    if (errorBox) observer.observe(errorBox, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+
+    // Safety only: never leave a stale overlay indefinitely. This does not control generation itself.
+    safetyTimer = setTimeout(() => {
+      if (!active) return;
+      const rendered = document.querySelectorAll('#cases .case').length;
+      if (rendered) finish(true, rendered);
+      else finish(false);
+    }, 180000);
   }
-
-  function finish(ok, caseCount = 0) {
-    if (!active) return;
-    active = false;
-    clearStageTimer();
-    removeLegacyGenerationMessage();
-    document.body.classList.remove('ai-generation-active');
-
-    const panel = ensurePanel();
-    panel.classList.toggle('complete', Boolean(ok));
-    panel.classList.toggle('failed', !ok);
-    if (ok) {
-      setStage(`${caseCount || 'AI'} test case${caseCount === 1 ? '' : 's'} generated. Preparing them for human review and readiness checks…`);
-      setTimeout(() => panel.classList.remove('show', 'complete'), 900);
-    } else {
-      setStage('Test-case generation did not complete.');
-      setTimeout(() => panel.classList.remove('show', 'failed'), 5000);
-    }
-  }
-
-  window.fetch = async function generationAwareFetch(input, init = {}) {
-    let nextInit = init;
-    let generationRequest = false;
-
-    if (typeof init?.body === 'string') {
-      try {
-        const payload = JSON.parse(init.body);
-        if (isInitialGeneration(input, payload)) {
-          generationRequest = true;
-          payload.aiModelTier = 'fast';
-          nextInit = { ...init, body: JSON.stringify(payload) };
-          setFastProfile();
-          begin();
-        }
-      } catch {}
-    }
-
-    try {
-      const response = await previousFetch(input, nextInit);
-      if (!generationRequest) return response;
-
-      const originalJson = response.json.bind(response);
-      response.json = async () => {
-        const data = await originalJson();
-        const cases = Array.isArray(data?.testCases) ? data.testCases : [];
-        finish(Boolean(response.ok && cases.length), cases.length);
-        return data;
-      };
-      return response;
-    } catch (err) {
-      if (generationRequest) finish(false);
-      throw err;
-    }
-  };
 
   function start() {
     ensureStyles();
     ensurePanel();
     setFastProfile();
+
+    const generateBtn = document.getElementById('generateBtn');
+    if (!generateBtn || generateBtn.dataset.generationExperienceBound === '1') return;
+    generateBtn.dataset.generationExperienceBound = '1';
+
+    // Capture phase runs before the original index.html click handler. We only show UI and select Fast;
+    // we never intercept fetch(), Response.json(), testCases, or renderCases().
+    generateBtn.addEventListener('click', () => {
+      const target = String(document.getElementById('targetUrl')?.value || '').trim();
+      const story = String(document.getElementById('story')?.value || '').trim();
+      if (!target || !story) return;
+      setFastProfile();
+      begin();
+    }, true);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
