@@ -1,9 +1,4 @@
 (function () {
-  // readiness.js keeps its own nativeFetch reference for deterministic readiness batching.
-  // Restore the browser's original fetch for the rest of the page so the original /api/chat
-  // generation handler is never routed through a later wrapper.
-  if (window.__aiTestPilotNativeFetch) window.fetch = window.__aiTestPilotNativeFetch;
-
   const modal = document.getElementById('editorModal');
   const card = modal?.querySelector('.modal-card');
   if (!card || document.getElementById('testCreationMode')) return;
@@ -57,6 +52,7 @@
   function showDetails(show) {
     detailNodes.forEach((node) => { node.style.display = show ? '' : 'none'; });
     if (saveBtn) saveBtn.style.display = show ? '' : 'none';
+    // Cancel remains visible in every stage so the user can leave without saving.
     if (cancelBtn) cancelBtn.style.display = '';
   }
 
@@ -94,6 +90,8 @@
       return;
     }
 
+    // AI mode is intentionally staged: first ask AI for a scenario candidate,
+    // then reveal the full editable form for human review before Save is enabled.
     showDetails(false);
     resetAiGenerator();
     if (modeHint) modeHint.textContent = 'Describe one scenario and generate a candidate. The full test-case fields will appear for review before you can save.';
@@ -102,6 +100,8 @@
 
   modeSelect?.addEventListener('change', () => setMode(modeSelect.value));
 
+  // readiness.js fills the editor when the AI candidate arrives. Watch its status
+  // and reveal all fields only after generation succeeds so human review remains mandatory.
   const aiStatus = document.getElementById('editorAiStatus');
   if (aiStatus) {
     const observer = new MutationObserver(() => {
@@ -133,6 +133,7 @@
         if (modeHint) modeHint.textContent = 'Select a creation method to continue.';
         setTimeout(() => modeSelect?.focus(), 20);
       } else {
+        // Editing an existing case is always a direct full-form review/edit flow.
         if (templateSection) templateSection.style.display = 'none';
         if (aiGenerator) aiGenerator.style.display = 'none';
         showDetails(true);
@@ -141,12 +142,4 @@
     };
     try { openEditor = window.openEditor; } catch {}
   }
-
-  ['/test-case-export.js', '/reporting-entry.js'].forEach((src) => {
-    if (document.querySelector(`script[src="${src}"]`)) return;
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = false;
-    document.body.appendChild(script);
-  });
 })();
