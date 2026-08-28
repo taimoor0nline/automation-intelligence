@@ -1,5 +1,6 @@
 const { modelForProfile } = require("./aiModelProfiles");
 const { assertionCatalog, ASSERTION_OPERATION_SET } = require("./assertionRegistry");
+const { compileTestCase } = require("./automationDsl");
 
 function numberEnv(value, fallback) {
   const n = Number(value);
@@ -9,14 +10,11 @@ function numberEnv(value, fallback) {
 const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_TIMEOUT_MS, 180000), 600000));
 
 function ensureConfigured() {
-  if (!process.env.QWEN_API_KEY || !process.env.QWEN_BASE_URL) {
-    throw new Error("AI provider is not configured on the server.");
-  }
+  if (!process.env.QWEN_API_KEY || !process.env.QWEN_BASE_URL) throw new Error("AI provider is not configured on the server.");
 }
 
 function parseJson(raw) {
-  const cleaned = String(raw || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-  return JSON.parse(cleaned);
+  return JSON.parse(String(raw || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim());
 }
 
 async function callModel(systemPrompt, payload, modelTier = "fast") {
@@ -27,27 +25,19 @@ async function callModel(systemPrompt, payload, modelTier = "fast") {
   try {
     const response = await fetch(`${process.env.QWEN_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.QWEN_API_KEY}` },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: JSON.stringify(payload) },
-        ],
+        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify(payload) }],
         response_format: { type: "json_object" },
         temperature: 0.03,
       }),
       signal: controller.signal,
     });
-
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(`AI provider returned ${response.status}: ${body.slice(0, 250)}`);
     }
-
     const data = await response.json();
     const raw = data.choices?.[0]?.message?.content;
     if (!raw) throw new Error("AI provider returned an empty response.");
@@ -58,86 +48,31 @@ async function callModel(systemPrompt, payload, modelTier = "fast") {
 }
 
 const SINGLE_CASE_PROMPT = `You are a senior QA analyst generating exactly ONE test case requested by a human reviewer.
-The human request defines the desired scenario. The supplied business story provides surrounding business context. Page discovery is the only evidence for pages, controls, selectors, routes, messages, options and validation metadata.
-
+The human request defines the desired scenario. The supplied business story provides context. Page discovery is the only evidence for pages, controls, selectors, routes, messages, options and validation metadata.
 Rules:
-- Generate exactly one candidate test case.
-- Preserve the human's requested business intent. Do not broaden it.
+- Generate exactly one candidate test case and preserve the requested business intent.
 - Never invent selectors, pages, routes, controls, messages, validation rules or business constraints.
-- Use exact discovered selectors when a selector is needed.
-- If valid runtime credentials are needed, describe that as a precondition/action; never include actual credentials.
-- Do not make an unsupported scenario appear automatable by removing or replacing its essential requirement.
-- Steps and expected results must be concrete enough for deterministic readiness checks.
-- For element expectations, include the exact discovered selector in the expected-result sentence whenever possible.
-- Prefer explicit assertion language such as visible, hidden, exists, text contains, value equals, checked, disabled, required, valid, attribute, class, count, URL/path, title, cookie or storage key.
+- Use exact discovered selectors.
+- If a field must intentionally remain empty, use an action such as "clear" or "leave blank" for that selector; do NOT emit a fill/type action with an empty or null value.
+- If runtime credentials are needed, describe the dependency; never include actual credentials.
+- Do not make unsupported behavior appear automatable by removing an essential requirement.
 - Return JSON only.
+Schema: {"testCase":{"title":string,"type":"positive"|"negative"|"boundary"|"functional"|"custom","priority":"low"|"medium"|"high","preconditions":[string],"testData":object,"steps":[{"action":string,"target":string,"value":string|null}],"expectedResults":[string]}}`;
 
-Schema:
-{
-  "testCase": {
-    "title": string,
-    "type": "positive"|"negative"|"boundary"|"functional"|"custom",
-    "priority": "low"|"medium"|"high",
-    "preconditions": [string],
-    "testData": object,
-    "steps": [{"action": string, "target": string, "value": string|null}],
-    "expectedResults": [string]
-  }
-}`;
-
-const REPAIR_CASE_PROMPT = `You are a constrained QA test-case repair assistant.
-Repair ONLY the deterministic validation problem supplied by the automation system.
-
+const REPAIR_CASE_PROMPT = `You are a constrained QA test-case repair assistant. Repair ONLY the deterministic validation problem supplied by the automation system.
 Hard rules:
 - Preserve the original business intent and expected behaviour.
-- Never delete, weaken or replace an essential business requirement merely to make the case automatable.
-- Use only supplied page-discovery evidence.
-- Never invent a selector, page, route, control, validation rule, message, option or automation capability.
-- If the supplied reason cannot be repaired without changing business intent or inventing evidence, return repaired=false and explain why.
-- Do not modify the test-case id.
-- Do not include secrets or runtime credential values.
+- Never delete, weaken or replace an essential requirement merely to make the case automatable.
+- Use only supplied page-discovery evidence. Never invent selectors, routes, controls, messages or capabilities.
+- A fill/type/input action must contain a non-empty value. If the business intent is to leave a discovered input empty, represent that as a "clear" or "leave blank" action with the same selector, not fill/type with "" or null.
+- If the issue cannot be repaired without changing intent or inventing evidence, return repaired=false.
+- Do not modify the test-case id or include secrets.
 - Return JSON only.
+Schema: {"repaired":boolean,"explanation":string,"testCase":{"id":string,"title":string,"type":"positive"|"negative"|"boundary"|"functional"|"custom","priority":"low"|"medium"|"high","preconditions":[string],"testData":object,"steps":[{"action":string,"target":string,"value":string|null}],"expectedResults":[string]}}`;
 
-Schema:
-{
-  "repaired": boolean,
-  "explanation": string,
-  "testCase": {
-    "id": string,
-    "title": string,
-    "type": "positive"|"negative"|"boundary"|"functional"|"custom",
-    "priority": "low"|"medium"|"high",
-    "preconditions": [string],
-    "testData": object,
-    "steps": [{"action": string, "target": string, "value": string|null}],
-    "expectedResults": [string]
-  }
-}`;
-
-const ASSERTION_SUGGESTION_PROMPT = `You are a Cypress assertion capability advisor for a deterministic AI test-automation platform.
-The platform has an allow-listed assertion registry. A human-approved expected result could not be fully represented by the current registry, or the reviewer wants a better assertion.
-
-Rules:
-- Preserve the exact business intent. Do not weaken or replace the expected result.
-- First determine whether an EXISTING supported assertion can legitimately express it. If yes, return USE_EXISTING and the exact operation name.
-- Otherwise return ADD_ASSERTION with one proposed ASSERT_* operation and a concise Cypress implementation strategy.
-- Return MANUAL only when browser automation should not attempt the behavior (for example CAPTCHA/biometric/native OS interaction).
-- Never return arbitrary executable JavaScript, eval, Function, child_process, fs, shell commands or secrets.
-- Cypress strategies may reference safe browser-testing primitives such as cy.get, cy.location, cy.title, cy.getCookie, cy.window, cy.intercept, cy.wait, cy.readFile, Chai/Chai-jQuery, or a named well-known test dependency when genuinely required.
-- If a new dependency is suggested, identify it explicitly and explain why; otherwise dependency must be null.
-- Page discovery is the only evidence for selectors/pages/controls. Do not invent selectors.
-- Return JSON only.
-
-Schema:
-{
-  "kind": "USE_EXISTING"|"ADD_ASSERTION"|"MANUAL",
-  "operation": string|null,
-  "title": string,
-  "rationale": string,
-  "cypressStrategy": string,
-  "dependency": string|null,
-  "expectedResult": string
-}`;
+const ASSERTION_SUGGESTION_PROMPT = `You are a Cypress assertion capability advisor for a deterministic test-automation platform.
+Preserve exact business intent. Prefer an EXISTING supported assertion when it legitimately represents the expected result; otherwise propose one allow-listed-style ASSERT_* capability and a concise Cypress strategy. Return MANUAL only for behavior browser automation should not attempt. Never emit arbitrary executable code or invent selectors. Return JSON only.
+Schema: {"kind":"USE_EXISTING"|"ADD_ASSERTION"|"MANUAL","operation":string|null,"title":string,"rationale":string,"cypressStrategy":string,"dependency":string|null,"expectedResult":string}`;
 
 function normalizeCandidate(raw, id, source) {
   const tc = raw && typeof raw === "object" ? raw : {};
@@ -158,17 +93,40 @@ function normalizeCandidate(raw, id, source) {
   };
 }
 
+function deterministicEmptyFieldRepair(testCase, readiness) {
+  const reason = String(readiness?.reason || "");
+  const target = reason.match(/Typing step is missing a value for\s+(.+)$/i)?.[1]?.trim();
+  if (!target) return null;
+  const index = (testCase.steps || []).findIndex((step) => {
+    const action = String(step?.action || "").toLowerCase();
+    const value = step?.value;
+    return String(step?.target || "").trim() === target && /enter|type|fill|input/.test(action) && (value === null || value === undefined || String(value) === "");
+  });
+  if (index < 0) return null;
+  const steps = (testCase.steps || []).map((step, i) => i === index ? { action: "clear", target, value: null } : { ...step });
+  return normalizeCandidate({ ...testCase, steps }, testCase.id, testCase.source === "ai-on-demand" ? "ai-on-demand" : "ai-repaired");
+}
+
+function verifyRepairCandidate(candidate, pageDiscoveries) {
+  const compiled = compileTestCase(candidate, { pageDiscoveries, hasCredentials: true });
+  if (compiled.ok) return { ok: true, compiled };
+  return { ok: false, reason: compiled.reason || compiled.errors?.[0] || compiled.reasonCode || "The repaired candidate still does not satisfy the deterministic automation contract." };
+}
+
 async function generateSingleTestCase({ id, requestText, story, pageDiscoveries, modelTier = "fast" }) {
-  const result = await callModel(SINGLE_CASE_PROMPT, {
-    requestText,
-    businessStory: story,
-    pageDiscoveries,
-    supportedAssertions: assertionCatalog(),
-  }, modelTier);
+  const result = await callModel(SINGLE_CASE_PROMPT, { requestText, businessStory: story, pageDiscoveries, supportedAssertions: assertionCatalog() }, modelTier);
   return normalizeCandidate(result?.testCase, id, "ai-on-demand");
 }
 
 async function repairTestCase({ testCase, readiness, story, pageDiscoveries, modelTier = "fast" }) {
+  const deterministic = deterministicEmptyFieldRepair(testCase, readiness);
+  if (deterministic) {
+    const verification = verifyRepairCandidate(deterministic, pageDiscoveries);
+    if (verification.ok) {
+      return { repaired: true, explanation: "Converted the empty fill/type step to an explicit clear action so the field remains intentionally empty while satisfying the deterministic automation contract.", testCase: deterministic };
+    }
+  }
+
   const result = await callModel(REPAIR_CASE_PROMPT, {
     businessStory: story,
     originalTestCase: testCase,
@@ -177,15 +135,19 @@ async function repairTestCase({ testCase, readiness, story, pageDiscoveries, mod
     supportedAssertions: assertionCatalog(),
   }, modelTier);
 
-  if (!result?.repaired) {
-    return { repaired: false, explanation: String(result?.explanation || "The issue could not be repaired without changing test intent or inventing evidence."), testCase };
+  if (!result?.repaired) return { repaired: false, explanation: String(result?.explanation || "The issue could not be repaired without changing test intent or inventing evidence."), testCase };
+
+  const candidate = normalizeCandidate(result.testCase, testCase.id, testCase.source === "ai-on-demand" ? "ai-on-demand" : "ai-repaired");
+  const verification = verifyRepairCandidate(candidate, pageDiscoveries);
+  if (!verification.ok) {
+    return {
+      repaired: false,
+      explanation: `AI proposed a change, but deterministic revalidation still rejected it: ${verification.reason}`,
+      testCase,
+    };
   }
 
-  return {
-    repaired: true,
-    explanation: String(result.explanation || "The candidate test case was corrected using discovered application evidence."),
-    testCase: normalizeCandidate(result.testCase, testCase.id, testCase.source === "ai-on-demand" ? "ai-on-demand" : "ai-repaired"),
-  };
+  return { repaired: true, explanation: String(result.explanation || "The candidate test case was corrected using discovered application evidence."), testCase: candidate };
 }
 
 async function suggestAssertionCapability({ testCase, readiness, story, pageDiscoveries, modelTier = "fast" }) {
