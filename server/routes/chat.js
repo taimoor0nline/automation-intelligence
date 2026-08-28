@@ -101,6 +101,13 @@ router.post("/api/chat", async (req, res) => {
       session.credentials = credentials && typeof credentials === "object"
         ? { username: String(credentials.username || ""), password: String(credentials.password || "") }
         : null;
+      session.browserExecution = {
+        status: "NOT_LAUNCHED",
+        phase: "TEST_GENERATION",
+        reason: "Generation and readiness use server-side HTTP/DOM evidence only. Chrome launches only for approved test execution.",
+      };
+
+      console.log(`[generation-runtime] session=${sessionId} browser=not-launched discovery=http+cheerio readiness=deterministic-server-side`);
 
       stage = "page discovery";
       const discoveryUrls = resolveDiscoveryUrls(targetUrl, session.additionalPaths);
@@ -138,22 +145,23 @@ router.post("/api/chat", async (req, res) => {
 
       const totalMs = Date.now() - requestStartedAt;
       const cacheLabel = discoveryResult.cacheHit ? " cache-hit" : discoveryResult.bypassed ? " cache-bypassed" : " fresh";
-      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length} cases=${session.testCases.length}`);
+      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length} cases=${session.testCases.length} browser=not-launched`);
 
       return res.json({
-        reply: `AI generated ${session.testCases.length} story-driven test case(s), up to a maximum of ${MAX_GENERATED_CASES}, from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately.\n\n${formatTestCaseList(session.testCases)}`,
+        reply: `AI generated ${session.testCases.length} story-driven test case(s), up to a maximum of ${MAX_GENERATED_CASES}, from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately. Chrome was not launched during generation.\n\n${formatTestCaseList(session.testCases)}`,
         feature: generated.feature || null,
         testCases: session.testCases,
         pageDiscoveries: session.pageDiscoveries,
         automationReadiness: session.automationReadiness,
         readinessPending: true,
         aiModelTier: session.aiModelTier,
+        browserExecution: session.browserExecution,
         generationTiming: { discoveryMs, discoveryCacheHit: discoveryResult.cacheHit, discoveryCacheBypassed: discoveryResult.bypassed, aiGenerationMs, totalMs },
       });
     }
 
     if (session.state === "AWAITING_APPROVAL") {
-      return res.status(409).json({ reply: session.readinessValidated ? "Test cases are awaiting human review." : "Test cases are awaiting human review while automation readiness is still being checked.", testCases: session.testCases, automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []), readinessPending: !session.readinessValidated });
+      return res.status(409).json({ reply: session.readinessValidated ? "Test cases are awaiting human review." : "Test cases are awaiting human review while automation readiness is still being checked.", testCases: session.testCases, automationReadiness: session.automationReadiness || readinessSummary(session.testCases || []), readinessPending: !session.readinessValidated, browserExecution: session.browserExecution || { status: "NOT_LAUNCHED", phase: "HUMAN_REVIEW" } });
     }
 
     return res.json({ reply: "This run is complete. Start a new story to create another run.", summary: session.lastResults?.summary || null, failureAnalyses: session.failureAnalyses || [], reportUrl: session.reportHtml ? `/api/reports/${encodeURIComponent(sessionId)}` : null });
