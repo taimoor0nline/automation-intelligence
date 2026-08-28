@@ -35,6 +35,7 @@ const jsFiles = [
   'testpilot-ui/test-case-export.js',
   'testpilot-ui/report-excel.js',
   'testpilot-ui/generation-experience.js',
+  'testpilot-ui/readiness.js',
   'testpilot-ui/readiness-batch.js',
 ];
 
@@ -120,25 +121,31 @@ for (const marker of ['AUTOMATION_RUN_ID', '--ai-testpilot-run-id=']) {
 }
 
 const chatRoute = fs.readFileSync(path.join(root, 'server/routes/chat.js'), 'utf8');
-for (const marker of ['browser=not-launched', 'discovery=http+cheerio', 'status: "NOT_LAUNCHED"', 'Browser management is not invoked in this route']) {
+for (const marker of ['browser=not-launched', 'discovery=http+cheerio', 'status: "NOT_LAUNCHED"', 'Browser management is not invoked in this route', 'aiModelTier = "fast"']) {
   if (!chatRoute.includes(marker)) errors.push(`browser-free generation contract missing marker: ${marker}`);
 }
 for (const forbidden of ['ownedBrowserPids', 'generation-browser-audit', 'cleanupAutomationBrowsers', 'executeSingleGeneratedSpec']) {
   if (chatRoute.includes(forbidden)) errors.push(`generation route must not invoke browser lifecycle code: ${forbidden}`);
 }
+
 const generationUi = fs.readFileSync(path.join(root, 'testpilot-ui/generation-experience.js'), 'utf8');
-for (const marker of ['Generating AI Test Cases', 'body.ai-generation-active #cases>.activity-alert', 'Page discovery and AI generation run without launching the Cypress execution browser', 'MutationObserver', 'generated and ready for human review']) {
-  if (!generationUi.includes(marker)) errors.push(`generation UI missing marker: ${marker}`);
+for (const marker of ['__aiTestPilotNativeFetch', 'setFastProfile', 'original index.html handler owns /api/chat']) {
+  if (!generationUi.includes(marker)) errors.push(`generation stability helper missing marker: ${marker}`);
 }
-for (const forbidden of ['window.fetch =', 'response.json =', 'generationElapsed', 'updateElapsed', 'isReadinessValidation', '/api/test-cases/revalidate']) {
-  if (generationUi.includes(forbidden)) errors.push(`generation UI must not intercept response/timer/readiness lifecycle: ${forbidden}`);
+for (const forbidden of ['window.fetch =', 'response.json =', 'MutationObserver', 'generationElapsed', 'updateElapsed', '/api/test-cases/revalidate', 'generationProgress', 'readinessBatchScript']) {
+  if (generationUi.includes(forbidden)) errors.push(`generation UI must remain non-invasive: ${forbidden}`);
+}
+
+const addTestMode = fs.readFileSync(path.join(root, 'testpilot-ui/add-test-mode.js'), 'utf8');
+if (!addTestMode.includes('window.fetch = window.__aiTestPilotNativeFetch')) errors.push('native fetch must be restored after readiness initialization');
+
+const readinessUi = fs.readFileSync(path.join(root, 'testpilot-ui/readiness.js'), 'utf8');
+for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'MAX_BATCH_SIZE = 50', 'type="number"', 'readinessBatchSize', 'sessionStorage', 'validateReadinessBatch', 'BATCH_TIMEOUT_MS = 12000', 'if (readinessRefreshInFlight || readinessPaused) return']) {
+  if (!readinessUi.includes(marker)) errors.push(`integrated readiness batching missing marker: ${marker}`);
 }
 
 const readinessBatch = fs.readFileSync(path.join(root, 'testpilot-ui/readiness-batch.js'), 'utf8');
-for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'MIN_BATCH_SIZE = 1', 'MAX_BATCH_SIZE = 50', 'type="number"', 'readinessBatchSize', 'sessionStorage', 'test cases per validation request', 'BATCH_TIMEOUT_MS = 12000']) {
-  if (!readinessBatch.includes(marker)) errors.push(`readiness batching missing marker: ${marker}`);
-}
-if (readinessBatch.includes('ALLOWED_BATCH_SIZES')) errors.push('readiness batch size should be a numeric input, not a fixed option list');
+if (readinessBatch.includes('window.fetch =')) errors.push('legacy readiness-batch compatibility file must not wrap fetch');
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
 if (!fs.existsSync(restUi)) errors.push('missing REST API workspace UI');
