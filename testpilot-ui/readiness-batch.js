@@ -6,7 +6,6 @@
   const BATCH_TIMEOUT_MS = 12000;
   const previousFetch = window.fetch.bind(window);
   let batchActive = false;
-  let progress = { completed: 0, total: 0, batch: 0, batches: 0 };
 
   function pathOf(input) {
     try {
@@ -18,7 +17,6 @@
   }
 
   function setProgress(completed, total, batch, batches) {
-    progress = { completed, total, batch, batches };
     const hint = document.getElementById('runHint');
     if (hint) {
       hint.textContent = total
@@ -85,7 +83,6 @@
       btn.addEventListener('click', () => {
         btn.remove();
         testCases = testCases.map((tc) => tc?.automationReadiness?.reasonCode === 'READINESS_BATCH_RETRY_REQUIRED' ? { ...tc, automationReadiness: null } : tc);
-        renderCases();
         window.refreshTestReadiness?.();
       });
     }
@@ -126,8 +123,7 @@
 
     batchActive = true;
     document.body.classList.add('readiness-batch-active');
-    const retry = document.getElementById('retryReadinessBtn');
-    retry?.remove();
+    document.getElementById('retryReadinessBtn')?.remove();
     setProgress(0, candidates.length, 0, batches.length);
     lockReviewControls();
 
