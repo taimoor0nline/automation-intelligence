@@ -113,18 +113,21 @@ async function cleanupAutomationBrowsers({
     if (verifiedGone) {
       console.log(`[browser-cleanup] ${reason}: verified all AI TestPilot Chromium processes are closed.`);
     } else {
-      console.error(`[browser-cleanup] ${reason}: cleanup verification failed; ${remaining.length} owned Chromium process(es) still detected after ${attempt} attempt(s): ${remaining.join(', ')}.`);
+      console.warn(`[browser-cleanup] ${reason}: ${remaining.length} owned Chromium process(es) still detected after ${attempt} cleanup attempt(s): ${remaining.join(', ')}. Test results remain valid and will still be returned.`);
     }
   }
 
-  if (!verifiedGone && runId) {
-    const error = new Error(`AI TestPilot Chromium cleanup failed for ${runId}; ${remaining.length} owned browser process(es) remain.`);
-    error.code = 'AUTOMATION_BROWSER_CLEANUP_FAILED';
-    error.remainingPids = remaining;
-    throw error;
-  }
-
-  return { found: firstPids.length, killed, pids: firstPids, remaining, verifiedGone, attempts: attempt };
+  // Cleanup is a lifecycle concern, not a test-result concern. Never throw here:
+  // a Windows process that is slow to terminate must not erase already-captured PASS/FAIL results.
+  return {
+    found: firstPids.length,
+    killed,
+    pids: firstPids,
+    remaining,
+    verifiedGone,
+    attempts: attempt,
+    warning: verifiedGone ? null : 'AUTOMATION_BROWSER_CLEANUP_INCOMPLETE',
+  };
 }
 
 function installBrowserCleanupLifecycle() {
