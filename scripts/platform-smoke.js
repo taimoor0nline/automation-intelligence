@@ -126,11 +126,11 @@ for (const forbidden of ['ownedBrowserPids', 'generation-browser-audit', 'cleanu
   if (chatRoute.includes(forbidden)) errors.push(`generation route must not invoke browser lifecycle code: ${forbidden}`);
 }
 const generationUi = fs.readFileSync(path.join(root, 'testpilot-ui/generation-experience.js'), 'utf8');
-for (const marker of ['Generating AI Test Cases', 'body.ai-generation-active #cases>.activity-alert', 'Page discovery and AI generation run without launching the Cypress execution browser', 'Preparing them for human review and readiness checks']) {
-  if (!generationUi.includes(marker)) errors.push(`simplified generation loader missing marker: ${marker}`);
+for (const marker of ['Generating AI Test Cases', 'body.ai-generation-active #cases>.activity-alert', 'Page discovery and AI generation run without launching the Cypress execution browser', 'MutationObserver', 'generated and ready for human review']) {
+  if (!generationUi.includes(marker)) errors.push(`generation UI missing marker: ${marker}`);
 }
-for (const forbidden of ['generationElapsed', 'updateElapsed', 'isReadinessValidation', '/api/test-cases/revalidate']) {
-  if (generationUi.includes(forbidden)) errors.push(`generation loader should not depend on timer/readiness lifecycle: ${forbidden}`);
+for (const forbidden of ['window.fetch =', 'response.json =', 'generationElapsed', 'updateElapsed', 'isReadinessValidation', '/api/test-cases/revalidate']) {
+  if (generationUi.includes(forbidden)) errors.push(`generation UI must not intercept response/timer/readiness lifecycle: ${forbidden}`);
 }
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
