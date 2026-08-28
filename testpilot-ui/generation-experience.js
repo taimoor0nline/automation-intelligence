@@ -70,11 +70,11 @@
     if (stage) stage.textContent = stages[0];
     timer = setInterval(() => {
       if (elapsed) elapsed.textContent = `${Math.max(0, Math.round((Date.now() - startedAt) / 1000))}s`;
-    }, 250);
+    }, 1000);
     stageTimer = setInterval(() => {
       stageIndex = Math.min(stageIndex + 1, stages.length - 1);
       if (stage) stage.textContent = stages[stageIndex];
-    }, 2500);
+    }, 3000);
   }
 
   function finish(ok, timing) {
@@ -102,9 +102,6 @@
         const payload = JSON.parse(init.body);
         if (isInitialGeneration(input, payload)) {
           generationRequest = true;
-          // Initial scenario generation is a structured drafting task. Keep it on
-          // the low-latency profile; stronger models are reserved for explicit
-          // repair/failure-analysis requests where additional reasoning is useful.
           payload.aiModelTier = 'fast';
           nextInit = { ...init, body: JSON.stringify(payload) };
           setFastProfile();
@@ -132,8 +129,6 @@
   function start() {
     ensureStyles();
     ensurePanel();
-    // Avoid the server-injected default profile putting the demo back onto the
-    // slow balanced/strong model before the first request.
     setFastProfile();
   }
 
