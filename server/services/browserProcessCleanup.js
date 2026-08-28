@@ -3,6 +3,8 @@ const { promisify } = require('util');
 
 const execFileAsync = promisify(execFile);
 const RUN_MARKER_PREFIX = '--ai-testpilot-run-id=';
+const DEFAULT_CLEANUP_ATTEMPTS = 5;
+const DEFAULT_VERIFY_DELAY_MS = 450;
 
 function safeRunId(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
@@ -11,6 +13,10 @@ function safeRunId(value) {
 function markerForRun(runId) {
   const safe = safeRunId(runId);
   return safe ? `${RUN_MARKER_PREFIX}${safe}` : RUN_MARKER_PREFIX;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function windowsAutomationPids(marker) {
@@ -70,20 +76,55 @@ async function terminatePidTree(pid) {
   try { process.kill(pid, 'SIGTERM'); } catch {}
 }
 
-async function cleanupAutomationBrowsers({ runId = '', reason = 'cleanup', log = true } = {}) {
-  const pids = [...new Set(await ownedBrowserPids(runId))];
-  if (!pids.length) return { found: 0, killed: 0, pids: [] };
+async function cleanupAutomationBrowsers({
+  runId = '',
+  reason = 'cleanup',
+  log = true,
+  attempts = DEFAULT_CLEANUP_ATTEMPTS,
+  verifyDelayMs = DEFAULT_VERIFY_DELAY_MS,
+} = {}) {
+  const maxAttempts = Math.max(1, Math.min(Number(attempts) || DEFAULT_CLEANUP_ATTEMPTS, 10));
+  const waitMs = Math.max(100, Math.min(Number(verifyDelayMs) || DEFAULT_VERIFY_DELAY_MS, 2000));
+  const firstPids = [...new Set(await ownedBrowserPids(runId))];
+
+  if (!firstPids.length) {
+    if (log && runId) console.log(`[browser-cleanup] ${reason}: verified no owned Chromium processes remain.`);
+    return { found: 0, killed: 0, pids: [], remaining: [], verifiedGone: true, attempts: 0 };
+  }
 
   if (log) {
-    console.warn(`[browser-cleanup] Found ${pids.length} AI TestPilot Chromium process${pids.length === 1 ? '' : 'es'} during ${reason}; terminating owned browser process tree(s).`);
+    console.warn(`[browser-cleanup] Found ${firstPids.length} AI TestPilot Chromium process${firstPids.length === 1 ? '' : 'es'} during ${reason}; terminating owned browser process tree(s).`);
   }
-  for (const pid of pids) await terminatePidTree(pid);
 
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  const remaining = await ownedBrowserPids(runId);
-  const killed = Math.max(0, pids.length - remaining.length);
-  if (log) console.log(`[browser-cleanup] ${reason}: ${remaining.length ? `${remaining.length} owned Chromium process(es) still detected` : 'owned Chromium cleanup complete'}.`);
-  return { found: pids.length, killed, pids, remaining };
+  let remaining = firstPids;
+  let attempt = 0;
+  while (remaining.length && attempt < maxAttempts) {
+    attempt += 1;
+    const targets = [...new Set(remaining)];
+    if (log) console.log(`[browser-cleanup] ${reason}: cleanup attempt ${attempt}/${maxAttempts} for ${targets.length} owned Chromium process(es).`);
+    for (const pid of targets) await terminatePidTree(pid);
+    await delay(waitMs);
+    remaining = [...new Set(await ownedBrowserPids(runId))];
+  }
+
+  const killed = Math.max(0, firstPids.length - remaining.length);
+  const verifiedGone = remaining.length === 0;
+  if (log) {
+    if (verifiedGone) {
+      console.log(`[browser-cleanup] ${reason}: verified all AI TestPilot Chromium processes are closed.`);
+    } else {
+      console.error(`[browser-cleanup] ${reason}: cleanup verification failed; ${remaining.length} owned Chromium process(es) still detected after ${attempt} attempt(s): ${remaining.join(', ')}.`);
+    }
+  }
+
+  if (!verifiedGone && runId) {
+    const error = new Error(`AI TestPilot Chromium cleanup failed for ${runId}; ${remaining.length} owned browser process(es) remain.`);
+    error.code = 'AUTOMATION_BROWSER_CLEANUP_FAILED';
+    error.remainingPids = remaining;
+    throw error;
+  }
+
+  return { found: firstPids.length, killed, pids: firstPids, remaining, verifiedGone, attempts: attempt };
 }
 
 function installBrowserCleanupLifecycle() {
@@ -99,9 +140,9 @@ function installBrowserCleanupLifecycle() {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[browser-cleanup] ${signal} received; cleaning AI TestPilot browser processes before exit.`);
-    const hardExit = setTimeout(() => process.exit(1), 5000);
+    const hardExit = setTimeout(() => process.exit(1), 8000);
     hardExit.unref?.();
-    cleanupAutomationBrowsers({ reason: `server ${signal}`, log: true })
+    cleanupAutomationBrowsers({ reason: `server ${signal}`, log: true, attempts: 6, verifyDelayMs: 500 })
       .catch(() => {})
       .finally(() => process.exit(0));
   };
