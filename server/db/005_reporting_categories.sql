@@ -20,15 +20,14 @@ UPDATE test_cases
      ELSE 'FUNCTIONAL'
    END;
 
--- Historical result rows can inherit their category from the corresponding
--- reviewed case in the same session/run.
+-- Historical result rows inherit category from their corresponding reviewed case.
+-- Rows without a matching historical case remain FUNCTIONAL via the column default.
 UPDATE test_results result_row
-   SET test_category = coalesce(case_row.test_category, 'FUNCTIONAL')
-  FROM test_runs run_row
-  LEFT JOIN test_cases case_row
-    ON case_row.session_id = run_row.session_id
-   AND case_row.external_case_id = result_row.external_case_id
- WHERE result_row.run_id = run_row.id;
+   SET test_category = case_row.test_category
+  FROM test_runs run_row, test_cases case_row
+ WHERE result_row.run_id = run_row.id
+   AND case_row.session_id = run_row.session_id
+   AND case_row.external_case_id = result_row.external_case_id;
 
 UPDATE test_runs run_row
    SET executed_by_role = user_row.role::text
