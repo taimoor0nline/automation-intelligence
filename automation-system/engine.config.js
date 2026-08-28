@@ -15,6 +15,7 @@ function numberEnv(value, fallback = 0) {
 const RESULT_FILE = process.env.AUTOMATION_RESULT_FILE || path.join(__dirname, "artifacts", "latest-run-result.json");
 const LIVE_INFO_FILE = process.env.AUTOMATION_CDP_INFO_FILE || path.join(__dirname, "artifacts", "live-browser-cdp.json");
 const LIVE_STATE_FILE = process.env.AUTOMATION_LIVE_STATE_FILE || path.join(__dirname, "artifacts", "live-browser-state.json");
+const AUTOMATION_RUN_ID = String(process.env.AUTOMATION_RUN_ID || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
 
 function writeJsonAtomic(filePath, payload) {
   try {
@@ -112,6 +113,11 @@ module.exports = defineConfig({
     },
     setupNodeEvents(on, config) {
       on("before:browser:launch", (browser, launchOptions) => {
+        if (browser.family === "chromium" && AUTOMATION_RUN_ID) {
+          const marker = `--ai-testpilot-run-id=${AUTOMATION_RUN_ID}`;
+          if (!launchOptions.args.includes(marker)) launchOptions.args.push(marker);
+        }
+
         const streamingEnabled = boolEnv(process.env.AUTOMATION_LIVE_STREAM, false);
         if (!streamingEnabled || browser.family !== "chromium") return launchOptions;
 
@@ -134,7 +140,7 @@ module.exports = defineConfig({
           launchOptions.args.push("--remote-debugging-address=127.0.0.1");
         }
 
-        writeJsonAtomic(LIVE_INFO_FILE, { port: debugPort, browser: browser.name, at: new Date().toISOString() });
+        writeJsonAtomic(LIVE_INFO_FILE, { port: debugPort, browser: browser.name, runId: AUTOMATION_RUN_ID || null, at: new Date().toISOString() });
         publishLiveState("running", { browser: browser.name, port: debugPort, passed: 0, failed: 0, total: 0 });
 
         console.log(`[automation-engine] Live browser stream attached to Cypress Chrome DevTools port ${debugPort}.`);
