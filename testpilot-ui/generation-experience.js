@@ -2,10 +2,14 @@
   if (window.__aiTestPilotGenerationExperience) return;
   window.__aiTestPilotGenerationExperience = true;
 
+  // Preserve the browser's original fetch before readiness.js is loaded. The generation path
+  // must remain owned by the original index.html handler and must not depend on fetch wrappers.
+  if (!window.__aiTestPilotNativeFetch) window.__aiTestPilotNativeFetch = window.fetch.bind(window);
+
   // Keep generation deliberately simple and non-invasive.
   // The original index.html handler owns /api/chat, Response.json(), testCases and renderCases().
-  // This helper only selects the Fast profile for initial generation. It does not add overlays,
-  // timers, MutationObservers, fetch wrappers, readiness hooks, or dynamically loaded scripts.
+  // This helper only selects the Fast profile for the UI. It does not add overlays,
+  // timers, MutationObservers, readiness hooks, or dynamically loaded scripts.
   function setFastProfile() {
     const select = document.getElementById('aiModelTier');
     if (!select) return;
