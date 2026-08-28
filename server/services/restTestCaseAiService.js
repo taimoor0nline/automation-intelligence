@@ -1,4 +1,5 @@
 const { modelForProfile } = require('./aiModelProfiles');
+const { inferTestCategory } = require('./testCategories');
 
 const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(Number(process.env.QWEN_TIMEOUT_MS || 180000), 600000));
 const MAX_CASES = Math.max(1, Math.min(Number(process.env.AI_REST_TEST_CASE_COUNT || 5), 12));
@@ -165,7 +166,12 @@ async function generateRestTestCases({ story, operations, modelTier = 'strong' }
   const compact = (operations || []).slice(0, 100).map(compactOperation);
   if (!compact.length) throw new Error('Select at least one REST operation before generating tests.');
   const result = await callProvider({ businessRequirement: story, apiOperations: compact, requestedMaximumCases: MAX_CASES }, modelTier);
-  return validate(result, compact);
+  const validated = validate(result, compact);
+  validated.testCases = validated.testCases.map((tc) => {
+    const testCategory = inferTestCategory({ story, testCase: tc });
+    return { ...tc, testCategory, testData: { ...(tc.testData || {}), __testCategory: testCategory } };
+  });
+  return validated;
 }
 
 module.exports = { generateRestTestCases, MAX_CASES };
