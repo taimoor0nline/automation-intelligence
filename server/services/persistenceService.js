@@ -1,6 +1,16 @@
 const db = require('../db');
+const { normalizeTestCategory } = require('./testCategories');
 
 function enabled() { return db.isConfigured(); }
+
+function categoryOf(testCase) {
+  return normalizeTestCategory(
+    testCase?.testCategory ||
+    testCase?.category ||
+    testCase?.testData?.__testCategory ||
+    'FUNCTIONAL'
+  );
+}
 
 async function persistSession(sessionId, session, context = {}) {
   if (!enabled()) return null;
@@ -51,11 +61,14 @@ async function persistTestCases(sessionId, testCases = []) {
   if (!enabled()) return;
   await db.withTransaction(async (client) => {
     for (const tc of testCases) {
+      const testCategory = categoryOf(tc);
       await client.query(
-        `insert into test_cases(session_id,external_case_id,title,type,priority,source,case_json)
-         values($1,$2,$3,$4,$5,$6,$7::jsonb)
-         on conflict(session_id,external_case_id) do update set title=excluded.title,type=excluded.type,priority=excluded.priority,source=excluded.source,case_json=excluded.case_json`,
-        [sessionId, tc.id, tc.title, tc.type || null, tc.priority || null, tc.source || null, JSON.stringify(tc)]
+        `insert into test_cases(session_id,external_case_id,title,type,test_category,priority,source,case_json)
+         values($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+         on conflict(session_id,external_case_id) do update set
+           title=excluded.title,type=excluded.type,test_category=excluded.test_category,
+           priority=excluded.priority,source=excluded.source,case_json=excluded.case_json`,
+        [sessionId, tc.id, tc.title, tc.type || null, testCategory, tc.priority || null, tc.source || null, JSON.stringify({ ...tc, testCategory })]
       );
     }
   });
@@ -66,20 +79,46 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
   return db.withTransaction(async (client) => {
     const targetType = String(session.targetType || 'WEB').toUpperCase() === 'REST' ? 'REST' : 'WEB';
     const run = await client.query(
-      `insert into test_runs(session_id,project_id,repository_id,run_number,executed_by,approved_ids,total,passed,failed,duration_ms,browser,summary_json,target_type,api_target_id,completed_at)
-       values($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,now())
-       on conflict(session_id,run_number) do update set approved_ids=excluded.approved_ids,total=excluded.total,passed=excluded.passed,failed=excluded.failed,duration_ms=excluded.duration_ms,browser=excluded.browser,summary_json=excluded.summary_json,target_type=excluded.target_type,api_target_id=excluded.api_target_id,completed_at=now()
+      `insert into test_runs(
+         session_id,project_id,repository_id,run_number,executed_by,executed_by_role,
+         approved_ids,total,passed,failed,duration_ms,browser,summary_json,target_type,api_target_id,completed_at)
+       values($1,$2,$3,$4,$5,(select role::text from users where id=$5),$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,now())
+       on conflict(session_id,run_number) do update set
+         executed_by=excluded.executed_by,executed_by_role=excluded.executed_by_role,
+         approved_ids=excluded.approved_ids,total=excluded.total,passed=excluded.passed,failed=excluded.failed,
+         duration_ms=excluded.duration_ms,browser=excluded.browser,summary_json=excluded.summary_json,
+         target_type=excluded.target_type,api_target_id=excluded.api_target_id,completed_at=now()
        returning id`,
-      [sessionId, session.projectId || null, session.repositoryId || null, runNumber, userId || null, JSON.stringify(approvedIds || []), summary.total || 0, summary.passed || 0, summary.failed || 0, summary.durationMs || null, summary.browser || null, JSON.stringify(summary), targetType, targetType === 'REST' ? (session.apiTargetId || null) : null]
+      [
+        sessionId,
+        session.projectId || null,
+        session.repositoryId || null,
+        runNumber,
+        userId || null,
+        JSON.stringify(approvedIds || []),
+        summary.total || 0,
+        summary.passed || 0,
+        summary.failed || 0,
+        summary.durationMs || null,
+        summary.browser || null,
+        JSON.stringify(summary),
+        targetType,
+        targetType === 'REST' ? (session.apiTargetId || null) : null,
+      ]
     );
     const runId = run.rows[0].id;
+    const categoryByCaseId = new Map(
+      (session.testCases || []).map((testCase) => [String(testCase.id || '').toUpperCase(), categoryOf(testCase)])
+    );
+
     await client.query('delete from test_results where run_id=$1', [runId]);
     for (const result of summary.tests || []) {
       const caseId = result.testCaseId || String(result.title || '').match(/TC(?:\d{3}|-H\d{3})/)?.[0] || null;
+      const testCategory = categoryByCaseId.get(String(caseId || '').toUpperCase()) || 'FUNCTIONAL';
       await client.query(
-        `insert into test_results(run_id,external_case_id,title,passed,duration_ms,error_message,evidence_json)
-         values($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-        [runId, caseId, result.title || caseId || 'Test', Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
+        `insert into test_results(run_id,external_case_id,title,test_category,passed,duration_ms,error_message,evidence_json)
+         values($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
+        [runId, caseId, result.title || caseId || 'Test', testCategory, Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
       );
     }
     return runId;
