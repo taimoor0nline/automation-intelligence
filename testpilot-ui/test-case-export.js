@@ -30,12 +30,8 @@
     document.head.appendChild(style);
   }
 
-  function escXml(value) {
-    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-  }
-  function escHtml(value) {
-    return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
-  }
+  function escXml(value) { return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;'); }
+  function escHtml(value) { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
   function categoryOf(tc) { return String(tc?.testCategory || tc?.category || tc?.testData?.__testCategory || 'FUNCTIONAL').toUpperCase(); }
   function currentCases() { try { return typeof testCases !== 'undefined' && Array.isArray(testCases) ? testCases : []; } catch { return []; } }
   function columnName(index) { let n=index+1,out=''; while(n>0){const rem=(n-1)%26;out=String.fromCharCode(65+rem)+out;n=Math.floor((n-1)/26);} return out; }
@@ -80,9 +76,11 @@
     if (!button) return;
     button.classList.add('icon-action');
     if (extraClass) button.classList.add(extraClass);
-    button.innerHTML = ICONS[icon] || '';
     button.title = label;
     button.setAttribute('aria-label', label);
+    if (button.dataset.iconAction === icon) return;
+    button.dataset.iconAction = icon;
+    button.innerHTML = ICONS[icon] || '';
   }
 
   function decorateTopActions() {
@@ -113,29 +111,21 @@
     const expected=document.getElementById('editExpected')?.closest('.field');
     if(!expected) return;
     const box=document.createElement('div');box.id='editorAssertionAdvisor';box.className='editor-assertion-advisor';box.innerHTML=`<div class="editor-assertion-head"><div><div class="editor-assertion-title">AI assertion advisor</div><div class="editor-assertion-note">Available only when deterministic readiness reports an unsupported or uncompiled expectation.</div></div><button id="editorAssertionBtn" type="button" class="btn ghost icon-action" title="Suggest assertion with AI" aria-label="Suggest assertion with AI">${ICONS.assertion}</button></div><div id="editorAssertionResult" class="editor-assertion-result"></div>`;expected.appendChild(box);
-    document.getElementById('editorAssertionBtn')?.addEventListener('click',requestAssertionSuggestion);
+    const btn=document.getElementById('editorAssertionBtn');if(btn)btn.dataset.iconAction='assertion';
+    btn?.addEventListener('click',requestAssertionSuggestion);
   }
-  function refreshAssertionAdvisor(){
-    ensureAssertionAdvisor();
-    const box=document.getElementById('editorAssertionAdvisor'),tc=currentEditorCase(),can=Boolean(tc?.automationReadiness?.canSuggestAssertion);
-    if(!box)return;box.style.display=can?'block':'none';
-    const result=document.getElementById('editorAssertionResult');if(result&&!can)result.textContent='';
-  }
+  function refreshAssertionAdvisor(){ensureAssertionAdvisor();const box=document.getElementById('editorAssertionAdvisor'),tc=currentEditorCase(),can=Boolean(tc?.automationReadiness?.canSuggestAssertion);if(!box)return;box.style.display=can?'block':'none';const result=document.getElementById('editorAssertionResult');if(result&&!can)result.textContent='';}
   async function requestAssertionSuggestion(){
     const tc=currentEditorCase();if(!tc?.automationReadiness?.canSuggestAssertion)return;
     const btn=document.getElementById('editorAssertionBtn'),out=document.getElementById('editorAssertionResult');if(btn)btn.disabled=true;if(out)out.textContent='Checking assertion options…';
-    try{
-      const username=document.getElementById('username')?.value||'',password=document.getElementById('password')?.value||'';
-      const r=await fetch('/api/test-cases/assertion-suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,testCase:tc,credentials:{username,password}})});const data=await r.json();if(!r.ok)throw new Error(data.reply||'AI could not suggest an assertion.');const s=data.suggestion||{};if(out)out.innerHTML=`<b>${escHtml(s.kind||'REVIEW')}${s.operation?` · ${escHtml(s.operation)}`:''}</b><br>${escHtml(s.rationale||'')}${s.cypressStrategy?`<br><b>Cypress:</b> ${escHtml(s.cypressStrategy)}`:''}`;
-    }catch(err){if(out)out.textContent=err.message;}finally{if(btn)btn.disabled=false;}
+    try{const username=document.getElementById('username')?.value||'',password=document.getElementById('password')?.value||'';const r=await fetch('/api/test-cases/assertion-suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,testCase:tc,credentials:{username,password}})});const data=await r.json();if(!r.ok)throw new Error(data.reply||'AI could not suggest an assertion.');const s=data.suggestion||{};if(out)out.innerHTML=`<b>${escHtml(s.kind||'REVIEW')}${s.operation?` · ${escHtml(s.operation)}`:''}</b><br>${escHtml(s.rationale||'')}${s.cypressStrategy?`<br><b>Cypress:</b> ${escHtml(s.cypressStrategy)}`:''}`;}catch(err){if(out)out.textContent=err.message;}finally{if(btn)btn.disabled=false;}
   }
 
-  function wrapEditor(){
-    const previous=window.openEditor;if(typeof previous!=='function'||previous.__iconWrapped)return;
-    const wrapped=function(index){editorIndex=Number(index);previous(index);setTimeout(refreshAssertionAdvisor,0);};wrapped.__iconWrapped=true;window.openEditor=wrapped;try{openEditor=wrapped;}catch{}
-  }
+  function wrapEditor(){const previous=window.openEditor;if(typeof previous!=='function'||previous.__iconWrapped)return;const wrapped=function(index){editorIndex=Number(index);previous(index);setTimeout(refreshAssertionAdvisor,0);};wrapped.__iconWrapped=true;window.openEditor=wrapped;try{openEditor=wrapped;}catch{}}
   function refreshAll(){decorateTopActions();decorateCaseActions();wrapEditor();refreshAssertionAdvisor();}
+  let refreshScheduled=false;
+  function scheduleRefresh(){if(refreshScheduled)return;refreshScheduled=true;queueMicrotask(()=>{refreshScheduled=false;refreshAll();});}
   injectStyles();
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{refreshAll();new MutationObserver(refreshAll).observe(document.body,{childList:true,subtree:true});});
-  else{refreshAll();new MutationObserver(refreshAll).observe(document.body,{childList:true,subtree:true});}
+  const start=()=>{refreshAll();new MutationObserver(scheduleRefresh).observe(document.body,{childList:true,subtree:true});};
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
 })();
