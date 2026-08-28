@@ -6,6 +6,7 @@ const { getSession, resetSession } = require("../data/sessionStore");
 const { discoverPages } = require("../services/pageDiscovery");
 const { compactDiscoveriesForModel } = require("../services/modelDiscoveryView");
 const { normalizeProfile } = require("../services/aiModelProfiles");
+const { inferTestCategory } = require("../services/testCategories");
 const qwen = require("../services/qwenClient");
 const { readinessSummary } = require("../services/testCaseFeasibility");
 const { MAX_GENERATED_CASES, pruneGeneratedTestCases } = require("../services/testCaseScopeFilter");
@@ -46,7 +47,7 @@ function pendingReadinessSummary(testCases = []) {
 }
 
 function formatTestCaseList(testCases) {
-  return testCases.map((tc) => `• ${tc.id} [${tc.type}/${tc.priority}] [CHECKING] — ${tc.title}`).join("\n");
+  return testCases.map((tc) => `• ${tc.id} [${tc.testCategory || "FUNCTIONAL"}/${tc.type}/${tc.priority}] [CHECKING] — ${tc.title}`).join("\n");
 }
 
 function discoveryCacheKey(urls) { return [...urls].sort().join("\n"); }
@@ -125,7 +126,12 @@ router.post("/api/chat", async (req, res) => {
       }
 
       stage = "prepare human review";
-      session.testCases = scopedCases.map((tc) => ({ ...tc, source: "ai", automationReadiness: null }));
+      session.testCases = scopedCases.map((tc) => ({
+        ...tc,
+        testCategory: inferTestCategory({ story, testCase: tc }),
+        source: "ai",
+        automationReadiness: null,
+      }));
       session.automationReadiness = pendingReadinessSummary(session.testCases);
       session.readinessValidated = false;
       session.state = "AWAITING_APPROVAL";
