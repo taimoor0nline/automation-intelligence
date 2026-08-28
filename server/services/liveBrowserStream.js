@@ -13,6 +13,7 @@ let statusMessage = "Waiting for an automation browser.";
 let runSummary = null;
 let currentRunKey = null;
 let ws = null;
+let attachedTargetUrl = null;
 let stopRequested = false;
 let connectLoopPromise = null;
 
@@ -41,7 +42,7 @@ function pushFrame(base64) {
 }
 function getJson(url) {
   return new Promise((resolve, reject) => {
-    http.get(url, (res) => {
+    const request = http.get(url, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk) => { body += chunk; });
@@ -49,7 +50,9 @@ function getJson(url) {
         if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`HTTP ${res.statusCode}`));
         try { resolve(JSON.parse(body)); } catch (err) { reject(err); }
       });
-    }).on("error", reject);
+    });
+    request.setTimeout(2000, () => request.destroy(new Error("CDP request timed out")));
+    request.on("error", reject);
   });
 }
 function readJsonFile(filePath) {
@@ -64,7 +67,11 @@ async function discoverDebuggerPort(infoFile) {
 async function discoverPageTarget(port) {
   const targets = await getJson(`http://127.0.0.1:${port}/json`);
   if (!Array.isArray(targets)) return null;
-  return targets.find((target) => target.type === "page" && target.webSocketDebuggerUrl) || null;
+  const pages = targets.filter((target) => target.type === "page" && target.webSocketDebuggerUrl);
+  if (!pages.length) return null;
+  return pages.find((target) => /^https?:/i.test(String(target.url || ""))) ||
+    pages.find((target) => !/^(?:about:blank|chrome:|devtools:)/i.test(String(target.url || ""))) ||
+    pages[0];
 }
 function completedMessage(state) {
   const passed = Number(state?.passed || 0);
@@ -97,34 +104,76 @@ function attachToTarget(target, stateFile) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(target.webSocketDebuggerUrl);
     ws = socket;
+    attachedTargetUrl = target.webSocketDebuggerUrl;
     let commandId = 1;
     let lastFrameSentAt = 0;
+    let lastFrameObservedAt = Date.now();
+    const pendingCaptures = new Set();
+    let heartbeat = null;
+
+    function cleanup() {
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = null;
+      pendingCaptures.clear();
+    }
+
+    function requestFallbackFrame() {
+      if (socket.readyState !== WebSocket.OPEN || pendingCaptures.size >= 2) return;
+      const id = commandId++;
+      pendingCaptures.add(id);
+      try {
+        socket.send(JSON.stringify({ id, method: "Page.captureScreenshot", params: { format: "jpeg", quality: 68, fromSurface: true } }));
+      } catch {
+        pendingCaptures.delete(id);
+      }
+    }
+
     socket.once("open", () => {
       setStatus("live", `Streaming ${target.title || "automation browser"}`);
       socket.send(JSON.stringify({ id: commandId++, method: "Page.enable" }));
       socket.send(JSON.stringify({ id: commandId++, method: "Page.startScreencast", params: { format: "jpeg", quality: 68, maxWidth: 1280, maxHeight: 720, everyNthFrame: 1 } }));
+      heartbeat = setInterval(() => {
+        const quietFor = Date.now() - lastFrameObservedAt;
+        if (quietFor >= 900) requestFallbackFrame();
+        if (quietFor >= 6000 && socket.readyState === WebSocket.OPEN && pendingCaptures.size >= 2) {
+          try { socket.close(); } catch {}
+        }
+      }, 500);
       resolve();
     });
     socket.on("message", (raw) => {
       let message;
       try { message = JSON.parse(String(raw)); } catch { return; }
+
+      if (pendingCaptures.has(message.id)) {
+        pendingCaptures.delete(message.id);
+        if (message.result?.data) {
+          lastFrameObservedAt = Date.now();
+          pushFrame(message.result.data);
+        }
+        return;
+      }
+
       if (message.method !== "Page.screencastFrame") return;
       const sessionId = message.params?.sessionId;
       if (sessionId != null && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ id: commandId++, method: "Page.screencastFrameAck", params: { sessionId } }));
       }
+      lastFrameObservedAt = Date.now();
       const now = Date.now();
       if (now - lastFrameSentAt < 120) return;
       lastFrameSentAt = now;
       if (message.params?.data) pushFrame(message.params.data);
     });
-    socket.once("error", reject);
+    socket.once("error", (err) => { cleanup(); reject(err); });
     socket.once("close", () => {
+      cleanup();
       const state = readJsonFile(stateFile);
       if (!observeRunState(state)) {
-        setStatus("waiting", "Automation browser disconnected. Waiting for final run status...");
+        setStatus("waiting", state?.status === "running" ? "Browser page changed or stream stalled. Reconnecting to the active test page..." : "Automation browser disconnected. Waiting for final run status...");
       }
       if (ws === socket) ws = null;
+      if (attachedTargetUrl === target.webSocketDebuggerUrl) attachedTargetUrl = null;
     });
   });
 }
@@ -150,9 +199,23 @@ async function connectionLoop(infoFile, stateFile) {
         continue;
       }
       if (!ws || ws.readyState === WebSocket.CLOSED) await attachToTarget(target, stateFile);
+
+      let lastTargetCheckAt = 0;
       while (!stopRequested && ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(ws.readyState)) {
         const liveState = readJsonFile(stateFile);
         observeRunState(liveState);
+        const now = Date.now();
+        if (now - lastTargetCheckAt >= 1000 && ws?.readyState === WebSocket.OPEN) {
+          lastTargetCheckAt = now;
+          try {
+            const activeTarget = await discoverPageTarget(port);
+            if (activeTarget?.webSocketDebuggerUrl && attachedTargetUrl && activeTarget.webSocketDebuggerUrl !== attachedTargetUrl) {
+              setStatus("waiting", "Cypress switched browser pages. Reconnecting live view...");
+              try { ws.close(); } catch {}
+              break;
+            }
+          } catch {}
+        }
         await delay(200);
       }
     } catch (err) {
@@ -177,6 +240,7 @@ async function stop(message = "Automation run finished.") {
     try { ws.close(); } catch {}
   }
   ws = null;
+  attachedTargetUrl = null;
   setStatus("finished", message);
 }
 function subscribe(req, res) {
