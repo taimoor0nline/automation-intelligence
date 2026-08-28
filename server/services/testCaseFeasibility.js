@@ -101,7 +101,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   if (!Array.isArray(testCase.steps) || !testCase.steps.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_STEPS", reason: "At least one executable test step is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!Array.isArray(testCase.expectedResults) || !testCase.expectedResults.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_EXPECTED_RESULTS", reason: "At least one expected result is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
 
-  const testCategory = normalizeTestCategory(testCase.testCategory || testCase.category);
+  const testCategory = normalizeTestCategory(testCase.testCategory || testCase.category || testCase.testData?.__testCategory);
   if (requiresExternalLoadEngine(testCategory)) {
     return result({
       status: REQUIRES_FRAMEWORK_CAPABILITY,
