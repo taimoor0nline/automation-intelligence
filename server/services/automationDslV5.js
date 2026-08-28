@@ -17,6 +17,14 @@ function normalizeExpectedResult(value) {
     /http\s+status(?:\s*code)?\s+for\s+(["'`][^"'`]+["'`])\s+(?:is|equals?|=)\s+(\d{3})/gi,
     "HTTP status is $2 for $1"
   );
+
+  // The V3 parser recognizes `Text contains "..."` directly. Human/AI test
+  // cases also commonly use `Text in <selector> contains "..."`; normalize
+  // that phrasing while keeping the grounded selector in the sentence.
+  text = text.replace(
+    /^\s*text\s+in\s+(\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\[name=(?:"[^"]+"|'[^']+')\])\s+(contains?|includes?)\s+(["'`][\s\S]+["'`])\s*$/i,
+    (_all, selector, verb, expected) => `Text ${verb} ${expected} in ${selector}`
+  );
   return text;
 }
 
@@ -44,9 +52,32 @@ function ensureStartNavigation(compiled, pageDiscoveries = []) {
   return { ...compiled, plan: { ...compiled.plan, actions } };
 }
 
+function stripQuotedText(value) {
+  return String(value || "").replace(/["'`][^"'`]*["'`]/g, "");
+}
+
+function explicitlyAssertsRequiredAttribute(value) {
+  const text = stripQuotedText(value).toLowerCase();
+  return /\bnot required\b|\boptional\b|\brequired\s+attribute\b|\bhas\s+(?:the\s+)?required\b|\b(?:is|be|remains?|should be|must be)\s+required\b/.test(text);
+}
+
+function removeFalseRequiredAssertions(compiled, normalizedTestCase) {
+  if (!compiled?.ok || !compiled.plan?.assertions?.length) return compiled;
+  const expectedResults = Array.isArray(normalizedTestCase?.expectedResults) ? normalizedTestCase.expectedResults : [];
+  const assertions = compiled.plan.assertions.filter((assertion) => {
+    if (assertion.operation !== "ASSERT_REQUIRED" && assertion.operation !== "ASSERT_OPTIONAL") return true;
+    const selector = String(assertion.selector || "");
+    const matching = expectedResults.filter((item) => selector && String(item).includes(selector));
+    if (!matching.length) return true;
+    return matching.some(explicitlyAssertsRequiredAttribute);
+  });
+  return { ...compiled, plan: { ...compiled.plan, assertions } };
+}
+
 function compileTestCase(testCase, context = {}) {
   const normalized = normalizeTestCase(testCase);
-  const compiled = v4.compileTestCase(normalized, context);
+  let compiled = v4.compileTestCase(normalized, context);
+  compiled = removeFalseRequiredAssertions(compiled, normalized);
   return ensureStartNavigation(compiled, context.pageDiscoveries || []);
 }
 
