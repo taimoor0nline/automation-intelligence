@@ -69,9 +69,9 @@ function testForAnalysis(session, analysis) {
   }) || { fail: true, title: analysis?.testCase || "Failed test" };
 }
 
-function latestJobForSession(sessionId) {
+function latestJobForSession(sessionId, runNumber) {
   return [...jobs.values()]
-    .filter((item) => item.sessionId === sessionId)
+    .filter((item) => item.sessionId === sessionId && Number(item.runNumber) === Number(runNumber))
     .sort((a, b) => Date.parse(b.startedAt || 0) - Date.parse(a.startedAt || 0))[0] || null;
 }
 
@@ -130,6 +130,7 @@ async function analyzeOne(session, test) {
 async function runJob(job, sessionId, session, failures) {
   job.state = "RUNNING";
   send(job, "ANALYSIS_STARTED", {
+    runNumber: job.runNumber,
     totalFailed: failures.length,
     concurrency: job.concurrency,
   });
@@ -142,6 +143,7 @@ async function runJob(job, sessionId, session, failures) {
       const test = failures[index];
       const tc = testCaseFor(session, test);
       send(job, "ANALYSIS_ITEM_STARTED", {
+        runNumber: job.runNumber,
         index,
         workerNumber: workerIndex + 1,
         testCase: tc.id,
@@ -154,6 +156,7 @@ async function runJob(job, sessionId, session, failures) {
         job.results.push(analysis);
         job.completed += 1;
         send(job, "ANALYSIS_ITEM_COMPLETED", {
+          runNumber: job.runNumber,
           index,
           workerNumber: workerIndex + 1,
           testCase: tc.id,
@@ -177,6 +180,7 @@ async function runJob(job, sessionId, session, failures) {
         };
         job.results.push(fallback);
         send(job, "ANALYSIS_ITEM_FAILED", {
+          runNumber: job.runNumber,
           index,
           workerNumber: workerIndex + 1,
           testCase: tc.id,
@@ -195,6 +199,7 @@ async function runJob(job, sessionId, session, failures) {
       if (job.completed % 5 === 0 || job.completed === failures.length) {
         updateReport(sessionId, session, job.results);
         send(job, "ANALYSIS_CHECKPOINT", {
+          runNumber: job.runNumber,
           completed: job.completed,
           totalFailed: failures.length,
           reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
@@ -206,8 +211,7 @@ async function runJob(job, sessionId, session, failures) {
   await Promise.all(workers);
   updateReport(sessionId, session, job.results);
 
-  const runNumber = session.lastResults?.runNumber;
-  const history = (session.runHistory || []).find((item) => item.runNumber === runNumber);
+  const history = (session.runHistory || []).find((item) => item.runNumber === job.runNumber);
   if (history) {
     history.analysisStatus = "COMPLETED";
     history.failureAnalyses = job.results;
@@ -217,6 +221,7 @@ async function runJob(job, sessionId, session, failures) {
   job.state = "COMPLETED";
   job.completedAt = new Date().toISOString();
   send(job, "ANALYSIS_COMPLETED", {
+    runNumber: job.runNumber,
     completed: job.completed,
     totalFailed: failures.length,
     failedAnalysisCount: job.failedAnalysisCount,
@@ -243,12 +248,18 @@ router.post("/api/test-results/analyze/start", (req, res) => {
     return res.json({ ok: true, analysisNeeded: false, totalFailed: 0, failureAnalyses: [] });
   }
 
-  const active = [...jobs.values()].find((item) => item.sessionId === sessionId && item.state === "RUNNING");
+  const runNumber = session.lastResults?.runNumber;
+  const active = [...jobs.values()].find((item) =>
+    item.sessionId === sessionId &&
+    Number(item.runNumber) === Number(runNumber) &&
+    ["QUEUED", "RUNNING"].includes(item.state)
+  );
   if (active) {
     return res.status(202).json({
       ok: true,
       reused: true,
       jobId: active.jobId,
+      runNumber: active.runNumber,
       totalFailed: active.totalFailed,
       concurrency: active.concurrency,
       eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(active.jobId)}`,
@@ -259,6 +270,7 @@ router.post("/api/test-results/analyze/start", (req, res) => {
   const job = {
     jobId,
     sessionId,
+    runNumber,
     state: "QUEUED",
     concurrency: analysisConcurrency(),
     totalFailed: failures.length,
@@ -274,7 +286,7 @@ router.post("/api/test-results/analyze/start", (req, res) => {
 
   setImmediate(() => runJob(job, sessionId, session, failures).catch((err) => {
     job.state = "FAILED";
-    send(job, "ANALYSIS_FAILED", { error: err.message, completed: job.completed, totalFailed: failures.length });
+    send(job, "ANALYSIS_FAILED", { runNumber: job.runNumber, error: err.message, completed: job.completed, totalFailed: failures.length });
     for (const client of job.clients) {
       try { client.end(); } catch {}
     }
@@ -285,6 +297,7 @@ router.post("/api/test-results/analyze/start", (req, res) => {
   return res.status(202).json({
     ok: true,
     jobId,
+    runNumber,
     totalFailed: failures.length,
     concurrency: job.concurrency,
     eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(jobId)}`,
@@ -299,6 +312,7 @@ router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
     return res.json({
       ok: true,
       state: "NOT_REQUIRED",
+      runNumber: session.lastResults?.runNumber || null,
       totalFailed: 0,
       completed: 0,
       items: [],
@@ -306,12 +320,14 @@ router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
     });
   }
 
-  const job = latestJobForSession(sessionId);
+  const runNumber = session.lastResults?.runNumber;
+  const job = latestJobForSession(sessionId, runNumber);
   if (!job) {
     const stored = Array.isArray(session.failureAnalyses) ? session.failureAnalyses : [];
     return res.json({
       ok: true,
       state: stored.length >= failures.length ? "COMPLETED" : "PENDING",
+      runNumber,
       totalFailed: failures.length,
       completed: stored.length,
       items: liveItems(session, stored),
@@ -324,6 +340,7 @@ router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
   return res.json({
     ok: true,
     jobId: job.jobId,
+    runNumber: job.runNumber,
     state: job.state,
     totalFailed: job.totalFailed,
     completed: job.completed,
@@ -365,6 +382,7 @@ router.get("/api/test-results/analyze/status/:sessionId/:jobId", (req, res) => {
   return res.json({
     ok: true,
     jobId: job.jobId,
+    runNumber: job.runNumber,
     state: job.state,
     totalFailed: job.totalFailed,
     completed: job.completed,
