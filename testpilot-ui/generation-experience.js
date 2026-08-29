@@ -45,9 +45,7 @@
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/test-case-compare.js', 'data-test-case-compare');
     loadScript('/execution-report-actions.js', 'data-execution-report-actions');
-    loadScript('/web-capability-matrix.js', 'data-web-capability-matrix');
-    loadScript('/review-security-context.js', 'data-review-security-context');
-    loadScript('/execution-failure-category.js', 'data-execution-failure-category');
+    loadScript('/execution-error-classification.js', 'data-execution-error-classification');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
