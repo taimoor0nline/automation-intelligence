@@ -9,6 +9,7 @@ const SPEC_DIR = path.join(AUTOMATION_DIR, "tests", "e2e", "generated");
 const ARTIFACT_DIR = path.join(AUTOMATION_DIR, "artifacts");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "videos");
 const SCREENSHOT_DIR = path.join(ARTIFACT_DIR, "screenshots");
+const PROGRESS_DIR = path.join(ARTIFACT_DIR, "progress");
 const ENGINE_CONFIG = path.join(AUTOMATION_DIR, "engine.config.js");
 const REPORTER_PATH = path.join(AUTOMATION_DIR, "reporters", "result-file-reporter.js");
 const RESULT_FILE = path.join(ARTIFACT_DIR, "latest-run-result.json");
@@ -49,11 +50,15 @@ function prepareSpec(generated) {
   };
 }
 
-function removeOldArtifacts() {
+function removeOldArtifacts(progressFile) {
   fs.rmSync(VIDEO_DIR, { recursive: true, force: true });
   fs.rmSync(SCREENSHOT_DIR, { recursive: true, force: true });
   fs.rmSync(RESULT_FILE, { force: true });
   fs.rmSync(`${RESULT_FILE}.tmp`, { force: true });
+  if (progressFile) {
+    fs.rmSync(progressFile, { force: true });
+    fs.rmSync(`${progressFile}.tmp`, { force: true });
+  }
 }
 
 function findFiles(root, extension) {
@@ -125,6 +130,34 @@ function summarizeReporterResult(raw, browser, forcedTeardown) {
   };
 }
 
+function normalizeLiveProgress(raw, browser, expectedTotal) {
+  const tests = (raw?.tests || []).map((test) => {
+    const testCaseId = tcIdFromText(test.title);
+    return {
+      title: String(test.title || ""),
+      testCaseId,
+      pass: test.state === "passed",
+      fail: test.state === "failed",
+      state: String(test.state || "unknown"),
+      durationMs: Number.isFinite(Number(test.durationMs)) ? Math.round(Number(test.durationMs)) : null,
+      err: test.err?.message ? { message: String(test.err.message) } : null,
+      evidence: {},
+    };
+  });
+  return {
+    complete: Boolean(raw?.complete),
+    total: Number(expectedTotal || tests.length),
+    completed: tests.length,
+    passed: tests.filter((test) => test.pass).length,
+    failed: tests.filter((test) => test.fail).length,
+    pending: Math.max(0, Number(expectedTotal || tests.length) - tests.length),
+    durationMs: Number.isFinite(Number(raw?.durationMs)) ? Math.round(Number(raw.durationMs)) : null,
+    browser,
+    tests,
+    updatedAt: raw?.updatedAt || new Date().toISOString(),
+  };
+}
+
 function killProcessTree(pid) {
   if (!pid) return Promise.resolve();
   if (process.platform === "win32") {
@@ -169,7 +202,7 @@ function validateRuntimeContext(executionContext = {}) {
   }
 }
 
-async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, runId }) {
+async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, runId, progressFile, expectedTotal, onProgress }) {
   const cypressBin = path.join(AUTOMATION_DIR, "node_modules", "cypress", "bin", "cypress");
   if (!fs.existsSync(cypressBin)) throw new Error("Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install.");
   if (!fs.existsSync(REPORTER_PATH)) throw new Error(`Automation result reporter is missing: ${REPORTER_PATH}`);
@@ -193,6 +226,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     ...process.env,
     AUTOMATION_RUN_ID: runId,
     AUTOMATION_RESULT_FILE: RESULT_FILE,
+    AUTOMATION_PROGRESS_FILE: progressFile,
     AUTOMATION_BASE_URL: executionContext.baseUrl || process.env.TEST_BASE_URL || "http://localhost:4000",
     AUTOMATION_VIDEO: String(video),
     AUTOMATION_SCREENSHOT_ON_FAILURE: String(screenshotOnRunFailure),
@@ -212,6 +246,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
   let child = null;
   let closed = false;
   let exitCode = null;
+  let lastProgressCount = -1;
   try {
     child = spawn(process.execPath, args, {
       cwd: AUTOMATION_DIR,
@@ -229,11 +264,21 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     let reporterResult = null;
 
     while (Date.now() - startedAt < overallTimeoutMs) {
+      if (progressFile && fs.existsSync(progressFile)) {
+        try {
+          const rawProgress = JSON.parse(fs.readFileSync(progressFile, "utf8"));
+          const progress = normalizeLiveProgress(rawProgress, browser, expectedTotal);
+          if (progress.completed !== lastProgressCount) {
+            lastProgressCount = progress.completed;
+            if (typeof onProgress === "function") onProgress(progress);
+          }
+        } catch {}
+      }
       if (fs.existsSync(RESULT_FILE)) {
         try { reporterResult = JSON.parse(fs.readFileSync(RESULT_FILE, "utf8")); break; } catch {}
       }
       if (closed) break;
-      await delay(200);
+      await delay(150);
     }
 
     if (!reporterResult) {
@@ -264,9 +309,10 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
   }
 }
 
-async function executeSingleGeneratedSpec(generated, executionContext = {}) {
+async function executeSingleGeneratedSpec(generated, executionContext = {}, options = {}) {
   let prepared = null;
   const runId = `run-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const progressFile = path.join(PROGRESS_DIR, `${runId}.json`);
   try {
     prepared = prepareSpec(generated);
     const headed = boolEnv(process.env.AUTOMATION_HEADED, true);
@@ -274,20 +320,43 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}) {
     const demoStepDelayMs = Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_STEP_DELAY_MS, 0), 3000));
     const video = boolEnv(process.env.AUTOMATION_VIDEO, true);
     const screenshotOnRunFailure = boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true);
+    const expectedTotal = Array.isArray(options.approvedIds) ? options.approvedIds.length : 0;
 
-    removeOldArtifacts();
+    removeOldArtifacts(progressFile);
+    fs.mkdirSync(PROGRESS_DIR, { recursive: true });
     console.log(`[single-spec-runner] Running one spec containing all approved cases in ${browser} (${headed ? "headed" : "headless"})` + (demoStepDelayMs ? ` with ${demoStepDelayMs}ms demo step delay` : ""));
     console.log(`[single-spec-runner] Run ownership id: ${runId}`);
     console.log(`[single-spec-runner] Spec: ${prepared.automationRelativeSpecPath}`);
-    console.log("[single-spec-runner] Results are captured as soon as the tests finish; browser teardown cannot block analytics/report generation.");
+    console.log("[single-spec-runner] Results are captured incrementally after each test while the same browser session continues.");
 
-    const run = await runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, runId });
+    if (typeof options.onStart === "function") options.onStart({ runId, browser, total: expectedTotal });
+    const run = await runAutomationCli({
+      prepared,
+      executionContext,
+      browser,
+      headed,
+      demoStepDelayMs,
+      video,
+      screenshotOnRunFailure,
+      runId,
+      progressFile,
+      expectedTotal,
+      onProgress: options.onProgress,
+    });
     const summarized = summarizeReporterResult(run.reporterResult, browser, run.forcedTeardown);
-    return { ok: true, specPath: prepared.specPath, summary: summarized.summary, artifacts: summarized.artifacts, error: null };
+    if (typeof options.onProgress === "function") {
+      options.onProgress({
+        ...summarized.summary,
+        completed: summarized.summary.tests.length,
+        complete: true,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return { ok: true, runId, specPath: prepared.specPath, summary: summarized.summary, artifacts: summarized.artifacts, error: null };
   } catch (err) {
     console.error("[single-spec-runner] Automation execution failed:", err);
     await cleanupAutomationBrowsers({ runId, reason: `failed run ${runId}`, log: true });
-    return { ok: false, specPath: prepared?.specPath || null, summary: null, artifacts: null, error: err.message || String(err) };
+    return { ok: false, runId, specPath: prepared?.specPath || null, summary: null, artifacts: null, error: err.message || String(err) };
   }
 }
 
