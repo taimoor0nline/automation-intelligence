@@ -41,6 +41,7 @@
     loadScript('/progressive-generation.js', 'data-progressive-generation');
     loadScript('/review-filters.js', 'data-review-filters');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
+    loadScript('/test-case-compare.js', 'data-test-case-compare');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
