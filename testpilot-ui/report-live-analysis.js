@@ -122,7 +122,10 @@
     }
     if (type === "ANALYSIS_FAILED") {
       activeJobId = null;
-      scheduleDiscovery(1800);
+      for (const id of failedIds) {
+        if (!analyses.has(id)) setCell(id, errorHtml("The AI analysis job stopped before this case completed. Retry AI Failure Analysis from TestNexus AI."));
+      }
+      scheduleDiscovery(5000);
     }
   }
 
@@ -182,6 +185,14 @@
 
       if (data.state === "COMPLETED" || data.state === "NOT_REQUIRED") {
         stopped = true;
+        return;
+      }
+      if (data.state === "FAILED") {
+        activeJobId = null;
+        for (const id of failedIds) {
+          if (!analyses.has(id)) setCell(id, errorHtml("The AI analysis job stopped before this case completed. Retry AI Failure Analysis from TestNexus AI."));
+        }
+        scheduleDiscovery(5000);
         return;
       }
       if (data.jobId && data.eventsUrl) {
