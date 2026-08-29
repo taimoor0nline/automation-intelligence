@@ -5,6 +5,8 @@
   let cancellationRequested = false;
   let resetting = false;
 
+  function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
   function sid() {
     try {
       if (window.sessionId) return window.sessionId;
@@ -32,7 +34,6 @@
       #cancelExecutionBtn:hover{background:#fee2e2}
       #resetExecutionBtn{white-space:nowrap}
       #resetExecutionBtn:disabled,#cancelExecutionBtn:disabled{opacity:.5;cursor:not-allowed}
-      .execution-reset-note{margin-top:8px;font-size:10.5px;color:#64748b;line-height:1.4}
     `;
     document.head.appendChild(style);
   }
@@ -46,6 +47,13 @@
 
   function hasReviewedCases() {
     try { return Array.isArray(testCases) && testCases.length > 0; } catch { return false; }
+  }
+
+  function hasExecutionData() {
+    const statusText = String(document.getElementById('runStatus')?.textContent || '').trim().toLowerCase();
+    if (!['', 'idle', 'ready', 'review required'].includes(statusText)) return true;
+    if (document.querySelector('#results .result')) return true;
+    return Number(document.getElementById('mTotal')?.textContent || 0) > 0;
   }
 
   function clearExecutionUi() {
@@ -102,25 +110,41 @@
     refreshControls();
   }
 
+  async function requestCancellation(session) {
+    const response = await fetch(`/api/test-runs/cancel/${encodeURIComponent(session)}`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: '{}',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.reply || 'Could not cancel the automation run.');
+    return data;
+  }
+
   async function cancelRun() {
     const session = sid();
-    if (!session) return;
+    if (!session || cancellationRequested) return;
     const button = document.getElementById('cancelExecutionBtn');
     cancellationRequested = true;
     if (button) { button.disabled = true; button.textContent = 'Cancelling…'; }
     try {
-      const response = await fetch(`/api/test-runs/cancel/${encodeURIComponent(session)}`, {
-        method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: '{}',
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.reply || 'Could not cancel the automation run.');
-      try { if (typeof setActivityStatus === 'function') setActivityStatus(data.cancelled ? 'Cancelling' : 'Cancelled', Boolean(data.cancelled)); } catch {}
-      if (!data.cancelled) finishCancellation();
+      try { if (typeof setActivityStatus === 'function') setActivityStatus('Cancelling', true); } catch {}
+      let data = null;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        data = await requestCancellation(session);
+        if (data.cancelled) break;
+        if (String(data.state || '').toUpperCase() !== 'RUNNING') break;
+        await delay(250);
+      }
+      if (!data?.cancelled && String(data?.state || '').toUpperCase() === 'RUNNING') {
+        throw new Error('The run is still preparing. Try Cancel Run again in a moment.');
+      }
+      if (!data?.cancelled) finishCancellation();
     } catch (err) {
       cancellationRequested = false;
       try { if (typeof showError === 'function') showError(err.message); } catch {}
+      const cancel = document.getElementById('cancelExecutionBtn');
+      if (cancel) { cancel.disabled = false; cancel.textContent = 'Cancel Run'; }
       refreshControls();
     }
   }
@@ -183,7 +207,7 @@
       cancel.style.display = running ? 'inline-flex' : 'none';
       if (!running) { cancel.disabled = false; cancel.textContent = 'Cancel Run'; }
     }
-    if (reset) reset.disabled = running || generating || resetting;
+    if (reset) reset.disabled = running || generating || resetting || !hasExecutionData();
 
     if (completed || cancelled) setRunLabel('Re-run Approved Tests');
 
@@ -214,6 +238,9 @@
 
     const status = document.getElementById('runStatus');
     if (status) new MutationObserver(refreshControls).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
+
+    const results = document.getElementById('results');
+    if (results) new MutationObserver(refreshControls).observe(results, { childList: true, subtree: true });
 
     const errorBox = document.getElementById('errorBox');
     if (errorBox) {
