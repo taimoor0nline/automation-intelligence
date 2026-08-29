@@ -56,9 +56,13 @@
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 
+  function testCaseId(test) {
+    return String(test?.testCaseId || String(test?.title || '').match(/TC(?:\d{3}|-H\d{3})/i)?.[0] || '').toUpperCase();
+  }
+
   function evidenceUrl(test) {
     if (test?.evidence?.screenshotUrl) return test.evidence.screenshotUrl;
-    const id = test?.testCaseId || String(test?.title || '').match(/TC(?:\d{3}|-H\d{3})/i)?.[0];
+    const id = testCaseId(test);
     return id ? `/api/artifacts/${encodeURIComponent(sessionId)}/screenshot/${encodeURIComponent(id)}` : '';
   }
 
@@ -93,38 +97,88 @@
     return `<div class="result-evidence"><button type="button" class="evidence-open" data-evidence-url="${esc(url)}" style="font-size:10.5px;font-weight:700;color:var(--blue);border:1px solid #dbe3ff;background:#f5f7ff;border-radius:6px;padding:4px 7px;cursor:pointer">Open screenshot</button></div>`;
   }
 
+  function failedCaseActions(test) {
+    if (!test?.fail) return '';
+    const id = testCaseId(test);
+    if (!id) return '';
+    return `<div class="result-retest-actions" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><button type="button" class="btn ghost individual-retest" data-test-case-id="${esc(id)}">Re-test This Test</button><button type="button" class="btn ghost edit-failed-test" data-test-case-id="${esc(id)}">Edit / Rewrite Test</button></div>`;
+  }
+
   function decorateFinalEvidence(summary) {
     const results = document.getElementById('results');
     if (!results || !Array.isArray(summary?.tests)) return;
     const rows = [...results.querySelectorAll('.result')];
     summary.tests.forEach((test, index) => {
-      if (!test?.evidence?.screenshotAvailable) return;
       const row = rows[index];
-      if (!row || row.querySelector('.evidence-open')) return;
+      if (!row) return;
       const title = row.querySelector('.result-title') || row.firstElementChild;
       if (!title) return;
-      title.insertAdjacentHTML('beforeend', screenshotControl(test));
+      if (test?.evidence?.screenshotAvailable && !row.querySelector('.evidence-open')) title.insertAdjacentHTML('beforeend', screenshotControl(test));
+      if (test?.fail && !row.querySelector('.result-retest-actions')) title.insertAdjacentHTML('beforeend', failedCaseActions(test));
     });
   }
 
-  function installEvidenceHandler() {
-    if (window.__aiTestPilotEvidenceHandler) return;
-    window.__aiTestPilotEvidenceHandler = true;
+  function installResultHandlers() {
+    if (window.__aiTestPilotResultHandlers) return;
+    window.__aiTestPilotResultHandlers = true;
     document.addEventListener('click', async (event) => {
-      const button = event.target.closest('.evidence-open[data-evidence-url]');
-      if (!button) return;
-      event.preventDefault();
-      const original = button.textContent;
-      button.disabled = true;
-      button.textContent = 'Opening…';
-      try {
-        await openEvidence(button.dataset.evidenceUrl);
-      } catch (err) {
-        if (typeof showError === 'function') showError(err.message);
-        else alert(err.message);
-      } finally {
-        button.disabled = false;
-        button.textContent = original;
+      const evidenceButton = event.target.closest('.evidence-open[data-evidence-url]');
+      if (evidenceButton) {
+        event.preventDefault();
+        const original = evidenceButton.textContent;
+        evidenceButton.disabled = true;
+        evidenceButton.textContent = 'Opening…';
+        try {
+          await openEvidence(evidenceButton.dataset.evidenceUrl);
+        } catch (err) {
+          if (typeof showError === 'function') showError(err.message);
+          else alert(err.message);
+        } finally {
+          evidenceButton.disabled = false;
+          evidenceButton.textContent = original;
+        }
+        return;
+      }
+
+      const editButton = event.target.closest('.edit-failed-test[data-test-case-id]');
+      if (editButton) {
+        event.preventDefault();
+        const id = String(editButton.dataset.testCaseId || '').toUpperCase();
+        const index = Array.isArray(testCases) ? testCases.findIndex((tc) => String(tc?.id || '').toUpperCase() === id) : -1;
+        if (index < 0) {
+          if (typeof showError === 'function') showError(`Could not find ${id} in the reviewed test cases.`);
+          return;
+        }
+        const hint = document.getElementById('runHint');
+        if (hint) hint.textContent = `${id} opened for editing. Save it, wait for Automation Ready, then re-test only this case.`;
+        if (typeof window.openEditor === 'function') window.openEditor(index);
+        else if (typeof openEditor === 'function') openEditor(index);
+        return;
+      }
+
+      const retestButton = event.target.closest('.individual-retest[data-test-case-id]');
+      if (retestButton) {
+        event.preventDefault();
+        const id = String(retestButton.dataset.testCaseId || '').toUpperCase();
+        const tc = Array.isArray(testCases) ? testCases.find((item) => String(item?.id || '').toUpperCase() === id) : null;
+        if (!tc) {
+          if (typeof showError === 'function') showError(`Could not find ${id} in the reviewed test cases.`);
+          return;
+        }
+        if (tc.automationReadiness?.status !== 'READY') {
+          if (typeof showError === 'function') showError(`${id} must be Automation Ready before it can be re-tested. Save any edits and wait for readiness validation to complete.`);
+          return;
+        }
+        retestButton.disabled = true;
+        retestButton.textContent = 'Starting re-test…';
+        try {
+          await executeApprovedIds([id], { individual: true, testCaseId: id });
+        } finally {
+          if (document.body.contains(retestButton)) {
+            retestButton.disabled = false;
+            retestButton.textContent = 'Re-test This Test';
+          }
+        }
       }
     });
   }
@@ -256,83 +310,83 @@
     runButton.style.display = 'inline-flex';
   }
 
-  function install() {
-    installEvidenceHandler();
-    const oldButton = document.getElementById('runBtn');
-    if (!oldButton || oldButton.dataset.streamingExecution === '1') return;
+  async function executeApprovedIds(approvedIds, options = {}) {
+    const approved = (approvedIds || []).map((id) => String(id || '')).filter(Boolean);
+    if (!approved.length) {
+      if (typeof showError === 'function') showError('Select at least one test case.');
+      return null;
+    }
 
-    // Replacing the legacy button intentionally removes the old /api/chat execution handler.
-    // The generated/reviewed case state is preserved; only execution is owned by the streaming runner below.
-    const runButton = oldButton.cloneNode(true);
-    runButton.dataset.streamingExecution = '1';
-    oldButton.replaceWith(runButton);
+    const runButton = document.getElementById('runBtn');
+    let executionStarted = false;
+    const singleId = options.individual ? String(options.testCaseId || approved[0]) : '';
+    if (typeof clearError === 'function') clearError();
+    if (runButton) setBusy(runButton, true, singleId ? `Re-testing ${singleId}…` : 'Starting tests…');
+    setActivityStatus(singleId ? `Starting ${singleId}` : 'Starting execution', true);
+    window.dispatchEvent(new CustomEvent('testnexus:execution-starting', { detail: { approvedIds: approved, individual: Boolean(options.individual), testCaseId: singleId || null } }));
 
-    runButton.addEventListener('click', async () => {
-      clearError();
-      const approved = [...document.querySelectorAll('.case-check:checked')].map((el) => el.value);
-      if (!approved.length) { showError('Select at least one test case.'); return; }
+    const results = document.getElementById('results');
+    if (results) {
+      results.innerHTML = singleId
+        ? `<div class="activity-alert">Starting individual re-test ${esc(singleId)}…<small>This creates a new one-test execution run. The earlier suite run remains available in history.</small></div>`
+        : `<div class="activity-alert">Starting browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will execute one-by-one. Each test captures evidence, closes its controlled Chrome instance, then continues with the next approved test.</small></div>`;
+    }
+    const analysis = document.getElementById('analysis');
+    if (analysis) analysis.innerHTML = '';
+    const reportBox = document.getElementById('reportBox');
+    if (reportBox) reportBox.style.display = 'none';
+    const reportActions = document.getElementById('executionReportActions');
+    if (reportActions) reportActions.style.display = 'none';
 
-      let executionStarted = false;
-      setBusy(runButton, true, 'Starting tests…');
-      setActivityStatus('Starting execution', true);
-      window.dispatchEvent(new CustomEvent('testnexus:execution-starting', { detail: { approvedIds: approved } }));
+    const streamState = { controller: new AbortController(), completed: false, error: null, terminal: null, lastEvent: null };
+    let streamPromise = null;
+    try {
+      streamPromise = streamExecution(streamState);
+      const startResponse = await fetch('/api/test-runs/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, approvedIds: approved, reviewedTestCases: testCases }),
+      });
+      const startData = await startResponse.json();
+      if (!startResponse.ok) throw new Error(startData.reply || 'Could not start execution.');
 
-      const results = document.getElementById('results');
-      if (results) results.innerHTML = `<div class="activity-alert">Starting browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will execute one-by-one. Each test captures evidence, closes its controlled Chrome instance, then continues with the next approved test.</small></div>`;
-      const analysis = document.getElementById('analysis');
-      if (analysis) analysis.innerHTML = '';
-      const reportBox = document.getElementById('reportBox');
-      if (reportBox) reportBox.style.display = 'none';
-      const reportActions = document.getElementById('executionReportActions');
-      if (reportActions) reportActions.style.display = 'none';
+      executionStarted = true;
+      setActivityStatus(`Running 0/${startData.total}`, true);
+      window.dispatchEvent(new CustomEvent('testnexus:execution-started', { detail: { total: startData.total, approvedIds: approved, individual: Boolean(options.individual), testCaseId: singleId || null } }));
 
-      const streamState = { controller: new AbortController(), completed: false, error: null, terminal: null, lastEvent: null };
-      let streamPromise = null;
-      try {
-        streamPromise = streamExecution(streamState);
-        const startResponse = await fetch('/api/test-runs/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, approvedIds: approved, reviewedTestCases: testCases }),
-        });
-        const startData = await startResponse.json();
-        if (!startResponse.ok) throw new Error(startData.reply || 'Could not start execution.');
+      await streamPromise;
+      if (streamState.error) throw new Error(streamState.error);
 
-        executionStarted = true;
-        setActivityStatus(`Running 0/${startData.total}`, true);
-        window.dispatchEvent(new CustomEvent('testnexus:execution-started', { detail: { total: startData.total, approvedIds: approved } }));
+      const finalData = await loadFinalResult();
+      if (typeof window.renderResults === 'function') window.renderResults(finalData.summary, []);
+      else if (typeof renderResults === 'function') renderResults(finalData.summary, []);
+      setTimeout(() => decorateFinalEvidence(finalData.summary), 0);
 
-        await streamPromise;
-        if (streamState.error) throw new Error(streamState.error);
-
-        const finalData = await loadFinalResult();
-        if (typeof window.renderResults === 'function') window.renderResults(finalData.summary, []);
-        else if (typeof renderResults === 'function') renderResults(finalData.summary, []);
-        setTimeout(() => decorateFinalEvidence(finalData.summary), 0);
-
-        if (finalData.reportUrl) {
-          const link = document.getElementById('reportLink');
-          const box = document.getElementById('reportBox');
-          if (link) link.href = finalData.reportUrl;
-          if (box) box.style.display = 'none';
+      setActivityStatus('Completed', false);
+      if (runButton) runButton.dataset.oldText = 'Re-test Approved Tests';
+      window.dispatchEvent(new CustomEvent('testnexus:execution-completed', {
+        detail: {
+          summary: finalData.summary,
+          reportUrl: null,
+          approvedIds: approved,
+          individual: Boolean(options.individual),
+          testCaseId: singleId || null,
         }
-
-        setActivityStatus('Completed', false);
-        runButton.dataset.oldText = 'Re-test Approved Tests';
-        window.dispatchEvent(new CustomEvent('testnexus:execution-completed', {
-          detail: { summary: finalData.summary, reportUrl: finalData.reportUrl || null, approvedIds: approved }
-        }));
-      } catch (err) {
-        streamState.controller.abort();
-        if (streamPromise) await streamPromise.catch(() => {});
-        showError(err.message || 'Execution failed.');
-        setActivityStatus('Error', false);
-        if (executionStarted) runButton.dataset.oldText = 'Re-test Approved Tests';
-        window.dispatchEvent(new CustomEvent('testnexus:execution-failed', {
-          detail: { error: err.message || 'Execution failed.', approvedIds: approved, executionStarted }
-        }));
-      } finally {
-        streamState.controller.abort();
+      }));
+      return finalData;
+    } catch (err) {
+      streamState.controller.abort();
+      if (streamPromise) await streamPromise.catch(() => {});
+      if (typeof showError === 'function') showError(err.message || 'Execution failed.');
+      setActivityStatus('Error', false);
+      if (executionStarted && runButton) runButton.dataset.oldText = 'Re-test Approved Tests';
+      window.dispatchEvent(new CustomEvent('testnexus:execution-failed', {
+        detail: { error: err.message || 'Execution failed.', approvedIds: approved, executionStarted, individual: Boolean(options.individual), testCaseId: singleId || null }
+      }));
+      return null;
+    } finally {
+      streamState.controller.abort();
+      if (runButton) {
         setBusy(runButton, false, '');
         if (executionStarted) setFinishedButton(runButton);
         else {
@@ -340,6 +394,23 @@
           runButton.textContent = 'Start Tests';
         }
       }
+    }
+  }
+
+  window.testNexusExecuteApprovedIds = executeApprovedIds;
+
+  function install() {
+    installResultHandlers();
+    const oldButton = document.getElementById('runBtn');
+    if (!oldButton || oldButton.dataset.streamingExecution === '1') return;
+
+    const runButton = oldButton.cloneNode(true);
+    runButton.dataset.streamingExecution = '1';
+    oldButton.replaceWith(runButton);
+
+    runButton.addEventListener('click', async () => {
+      const approved = [...document.querySelectorAll('.case-check:checked')].map((el) => el.value);
+      await executeApprovedIds(approved, { individual: false });
     });
   }
 
