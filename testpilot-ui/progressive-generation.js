@@ -66,7 +66,8 @@
           else if (line.startsWith('data:')) dataText += line.slice(5).trim();
         }
         if (!dataText) continue;
-        try { await onEvent(eventType, JSON.parse(dataText)); } catch (err) { if (eventType === 'GENERATION_FAILED') throw err; }
+        const data = JSON.parse(dataText);
+        await onEvent(eventType, data);
       }
     }
   }
@@ -85,10 +86,11 @@
     window.__aiTestPilotProgressiveGenerationActive = true;
     resetExecutionState();
     renderCases();
-    $('cases').innerHTML = '<div class="activity-alert">Preparing progressive test generation…<small>Generated cases will appear here as each small AI work unit completes.</small></div>';
+    if ($('caseSubtitle')) $('caseSubtitle').textContent = 'Starting generation · results will appear progressively';
     setBusy($('generateBtn'), true, 'Generating test cases…');
 
     const selection = generationSelection();
+    const securitySelected = selection.categories.includes('SECURITY');
     const paths = $('additionalPaths').value.split(',').map((v) => v.trim()).filter(Boolean);
     const payload = {
       sessionId, message: story, targetUrl, additionalPaths: paths,
@@ -97,8 +99,8 @@
       bypassDiscoveryCache: Boolean($('bypassDiscoveryCache')?.checked),
       selectedTestCategories: selection.categories,
       selectedScenarioTypes: selection.scenarioTypes,
-      selectedSecuritySubcategories: selection.securitySubcategories,
-      selectedSecuritySeverities: selection.securitySeverities,
+      selectedSecuritySubcategories: securitySelected ? selection.securitySubcategories : [],
+      selectedSecuritySeverities: securitySelected ? selection.securitySeverities : [],
     };
 
     try {
@@ -106,30 +108,27 @@
       const start = await startResponse.json();
       if (!startResponse.ok) throw new Error(start.reply || 'Progressive generation could not start.');
       const total = Number(start.totalRequested || 0);
-      if ($('caseSubtitle')) $('caseSubtitle').textContent = `Progressive generation started · 0/${total} cases`;
+      if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generation started · 0/${total} cases · ${start.concurrency || 1} worker(s)`;
 
       let completed = false;
       await consumeSse(start.eventsUrl, async (type, data) => {
         if (type === 'DISCOVERY_COMPLETED') {
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Page discovery complete · ${data.pageCount || 0} page(s) · generating first test…`;
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Page discovery complete in ${data.durationMs || 0} ms · generating test cases…`;
           return;
         }
         if (type === 'GENERATION_PLAN') {
-          const units = (data.units || []).slice(0, 5).map((u) => `${String(u.category || '').replaceAll('_',' ').toLowerCase()} / ${u.scenarioType || 'functional'}`);
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generation plan ready · ${units.join(' · ')} · streaming results progressively`;
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${data.units?.length || total} generation work unit(s) planned · streaming results as they complete`;
           return;
         }
         if (type === 'BATCH_STARTED') {
           setActivityStatus(`Generating ${data.generatedSoFar || 0}/${data.totalRequested || total}`, true);
-          const scope = `${String(data.category || '').replaceAll('_',' ').toLowerCase()} / ${String(data.scenarioType || 'functional').toLowerCase()}`;
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generating ${scope} · ${data.generatedSoFar || 0}/${data.totalRequested || total} available`;
           return;
         }
         if (type === 'BATCH_COMPLETED') {
           mergeIncoming(data.cases || []);
           setActivityStatus(`Generating ${data.generatedSoFar || testCases.length}/${data.totalRequested || total}`, true);
           const scope = `${String(data.category || '').replaceAll('_',' ').toLowerCase()} / ${String(data.scenarioType || 'functional').toLowerCase()}`;
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${data.generatedSoFar || testCases.length}/${data.totalRequested || total} generated · latest ${scope} in ${((data.durationMs || 0) / 1000).toFixed(1)}s · continuing…`;
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${data.generatedSoFar || testCases.length}/${data.totalRequested || total} generated · ${scope} completed in ${((data.durationMs || 0) / 1000).toFixed(1)}s`;
           return;
         }
         if (type === 'GENERATION_COMPLETED') {
@@ -138,7 +137,7 @@
           window.__aiTestPilotProgressiveGenerationActive = false;
           renderCases();
           setActivityStatus('Checking readiness', true);
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${testCases.length} test case(s) generated progressively in ${((data.durationMs || 0) / 1000).toFixed(1)}s · readiness validation starting…`;
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${testCases.length} test case(s) generated in ${((data.durationMs || 0) / 1000).toFixed(1)}s · readiness validation starting…`;
           return;
         }
         if (type === 'GENERATION_FAILED') throw new Error(data.message || 'Progressive generation failed.');
