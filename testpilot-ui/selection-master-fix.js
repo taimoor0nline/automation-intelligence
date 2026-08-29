@@ -11,7 +11,7 @@
     const root=document.querySelector(c.root),all=document.querySelector(c.all),button=document.querySelector(c.button),count=c.count?document.querySelector(c.count):null;if(!root||!all)return;
     const items=enabledItems(root,c),selected=items.filter(x=>x.checked).map(x=>x.value),isAll=items.length>0&&selected.length===items.length;
     all.checked=isAll;all.indeterminate=selected.length>0&&!isAll;
-    if(button){const text=isAll?c.allText:`${selected.length} ${c.noun}${selected.length===1?'':'s'} selected`;button.innerHTML=`<span>${text}</span><span class="generation-chevron">⌄</span>`;button.title=selected.join(', ');}
+    if(button){const text=isAll?c.allText:`${selected.length} ${c.noun}${selected.length===1?'':'s'} selected`;const html=`<span>${text}</span><span class="generation-chevron">⌄</span>`;if(button.innerHTML!==html)button.innerHTML=html;const title=selected.join(', ');if(button.title!==title)button.title=title;}
     if(count)count.textContent=isAll?'All':String(selected.length);
     try{sessionStorage.setItem(c.storage,JSON.stringify(selected));}catch{}
   }
@@ -33,5 +33,9 @@
     const message=!categories.length?'Select at least one available Test Category before generating test cases.':'Select at least one Scenario Type before generating test cases.';
     if(typeof showError==='function')showError(message);else alert(message);
   },true);
-  const observer=new MutationObserver(()=>install());observer.observe(document.documentElement,{childList:true,subtree:true});install();setTimeout(()=>observer.disconnect(),5000);
+
+  // Do not observe the entire document during bootstrap. The generation widgets are created
+  // predictably, so a handful of bounded retries gives the same result without startup churn.
+  function start(){[0,60,160,400,900,1600].forEach(delay=>setTimeout(install,delay));}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
