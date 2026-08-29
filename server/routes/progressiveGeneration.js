@@ -11,7 +11,7 @@ const { generateBatch } = require('../services/progressiveTestGenerator');
 
 const jobs = new Map();
 const MAX_CASES = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 5) || 5, 50));
-const GENERATION_BATCH_SIZE = Math.max(1, Math.min(Number(process.env.AI_GENERATION_BATCH_SIZE || 1) || 1, 5));
+const GENERATION_CONCURRENCY = Math.max(1, Math.min(Number(process.env.AI_GENERATION_CONCURRENCY || 2) || 2, 4));
 const JOB_TTL_MS = 30 * 60 * 1000;
 const SCENARIO_TYPES = ['functional','negative','boundary','positive'];
 
@@ -90,7 +90,7 @@ async function runGeneration(job, input) {
   const startedAt = Date.now();
   try {
     job.state = 'DISCOVERING';
-    emit(job, 'GENERATION_STARTED', { totalRequested: MAX_CASES, batchSize: GENERATION_BATCH_SIZE });
+    emit(job, 'GENERATION_STARTED', { totalRequested: MAX_CASES, concurrency: GENERATION_CONCURRENCY });
 
     const urls = discoveryUrls(input.targetUrl, input.additionalPaths);
     const discoveryStarted = Date.now();
@@ -102,62 +102,112 @@ async function runGeneration(job, input) {
     const categoryPool = relevantCategories(input.categories, input.story, compact);
     const categories = categoryPlan(categoryPool, MAX_CASES);
     const scenarioTypes = scenarioTypePlan(input.scenarioTypes, MAX_CASES);
+    const units = Array.from({ length: MAX_CASES }, (_, i) => ({ index: i, category: categories[i], scenarioType: scenarioTypes[i] }));
     emit(job, 'GENERATION_PLAN', {
       categories: categoryPool,
       scenarioTypes: input.scenarioTypes,
-      units: Array.from({ length: MAX_CASES }, (_, i) => ({ category: categories[i], scenarioType: scenarioTypes[i] })),
+      units,
+      concurrency: GENERATION_CONCURRENCY,
       allCategoriesAutoScoped: input.categories.length === TEST_CATEGORIES.length,
     });
 
-    const cases = [];
+    const slots = Array(MAX_CASES).fill(null);
+    let nextUnit = 0;
+    let completedCount = 0;
     let feature = null;
-    let batchNumber = 0;
-    while (cases.length < MAX_CASES) {
-      const remaining = MAX_CASES - cases.length;
-      const batchCount = Math.min(GENERATION_BATCH_SIZE, remaining);
-      const category = categories[cases.length] || categoryPool[0] || 'FUNCTIONAL';
-      const scenarioType = scenarioTypes[cases.length] || 'functional';
-      batchNumber += 1;
-      job.state = 'GENERATING';
-      emit(job, 'BATCH_STARTED', { batchNumber, category, scenarioType, requested: batchCount, generatedSoFar: cases.length, totalRequested: MAX_CASES });
 
-      const batchStarted = Date.now();
-      const generated = await generateBatch({
-        story: input.story,
-        pageDiscoveries: compact,
-        environment: 'Test',
-        category,
-        scenarioType,
-        count: batchCount,
-        excludeTitles: cases.map((tc) => tc.title),
-        securitySubcategories: input.securitySubcategories,
-        securitySeverities: input.securitySeverities,
-        modelTier: input.aiModelTier,
-      });
-      feature ||= generated.feature;
+    async function generateUnit(unit, workerNumber) {
+      const securityScope = unit.category === 'SECURITY';
+      let lastError = null;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const batchStarted = Date.now();
+        emit(job, 'BATCH_STARTED', {
+          batchNumber: unit.index + 1,
+          workerNumber,
+          category: unit.category,
+          scenarioType: unit.scenarioType,
+          requested: 1,
+          generatedSoFar: completedCount,
+          totalRequested: MAX_CASES,
+        });
+        try {
+          const generated = await generateBatch({
+            story: input.story,
+            pageDiscoveries: compact,
+            environment: 'Test',
+            category: unit.category,
+            scenarioType: unit.scenarioType,
+            count: 1,
+            excludeTitles: slots.filter(Boolean).map((tc) => tc.title),
+            securitySubcategories: securityScope ? input.securitySubcategories : [],
+            securitySeverities: securityScope ? input.securitySeverities : [],
+            modelTier: input.aiModelTier,
+          });
+          feature ||= generated.feature;
+          const raw = generated.testCases?.[0];
+          if (!raw) throw new Error(`AI returned no ${unit.category}/${unit.scenarioType} test case.`);
+          const duplicate = slots.some((existing) => existing && existing.title.trim().toLowerCase() === raw.title.trim().toLowerCase());
+          if (duplicate) {
+            lastError = new Error(`Duplicate test title returned for ${unit.category}/${unit.scenarioType}.`);
+            continue;
+          }
 
-      const accepted = [];
-      for (const raw of generated.testCases || []) {
-        if (cases.length >= MAX_CASES) break;
-        const duplicate = cases.some((existing) => existing.title.trim().toLowerCase() === raw.title.trim().toLowerCase());
-        if (duplicate) continue;
-        const id = `TC${String(cases.length + 1).padStart(3, '0')}`;
-        const tc = { ...raw, id, source: 'ai', automationReadiness: null };
-        cases.push(tc); accepted.push(tc);
+          const tc = { ...raw, id: `TC${String(unit.index + 1).padStart(3, '0')}`, source: 'ai', automationReadiness: null };
+          slots[unit.index] = tc;
+          completedCount += 1;
+          const available = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
+          session.testCases = available;
+          session.automationReadiness = pendingSummary(available);
+          emit(job, 'BATCH_COMPLETED', {
+            batchNumber: unit.index + 1,
+            workerNumber,
+            category: unit.category,
+            scenarioType: unit.scenarioType,
+            durationMs: Date.now() - batchStarted,
+            cases: [tc],
+            generatedSoFar: completedCount,
+            totalRequested: MAX_CASES,
+          });
+          return;
+        } catch (err) {
+          lastError = err;
+          if (attempt === 2) throw err;
+        }
       }
-      if (!accepted.length) throw new Error(`Generation batch ${batchNumber} returned only duplicate or unusable ${category}/${scenarioType} cases.`);
-
-      session.testCases = [...cases];
-      session.automationReadiness = pendingSummary(cases);
-      emit(job, 'BATCH_COMPLETED', { batchNumber, category, scenarioType, durationMs: Date.now() - batchStarted, cases: accepted, generatedSoFar: cases.length, totalRequested: MAX_CASES });
+      throw lastError || new Error('Generation unit failed.');
     }
+
+    async function worker(workerNumber) {
+      while (true) {
+        const unitIndex = nextUnit;
+        nextUnit += 1;
+        if (unitIndex >= units.length) return;
+        await generateUnit(units[unitIndex], workerNumber);
+      }
+    }
+
+    job.state = 'GENERATING';
+    const workerCount = Math.min(GENERATION_CONCURRENCY, units.length);
+    await Promise.all(Array.from({ length: workerCount }, (_, i) => worker(i + 1)));
+
+    const cases = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
+    if (cases.length !== MAX_CASES) throw new Error(`Generation completed with ${cases.length}/${MAX_CASES} test cases.`);
 
     session.testCases = cases;
     session.automationReadiness = pendingSummary(cases);
     session.readinessValidated = false;
     session.state = 'AWAITING_APPROVAL';
-    finish(job, 'GENERATION_COMPLETED', { feature, cases, pageCount: pages.length, totalGenerated: cases.length, durationMs: Date.now() - startedAt, categoryPlan: categories, scenarioTypePlan: scenarioTypes });
-    console.log(`[progressive-generation] session=${job.sessionId} cases=${cases.length} batches=${batchNumber} categories=${categoryPool.join(',')} types=${input.scenarioTypes.join(',')} total=${Date.now()-startedAt}ms`);
+    finish(job, 'GENERATION_COMPLETED', {
+      feature,
+      cases,
+      pageCount: pages.length,
+      totalGenerated: cases.length,
+      durationMs: Date.now() - startedAt,
+      categoryPlan: categories,
+      scenarioTypePlan: scenarioTypes,
+      concurrency: workerCount,
+    });
+    console.log(`[progressive-generation] session=${job.sessionId} cases=${cases.length} concurrency=${workerCount} categories=${categoryPool.join(',')} types=${input.scenarioTypes.join(',')} total=${Date.now()-startedAt}ms`);
   } catch (err) {
     job.error = err.message;
     session.state = 'IDLE';
@@ -178,8 +228,9 @@ router.post('/api/generation/start', allowQaManager, (req, res) => {
     const url = targetUrl(req.body?.targetUrl);
     const categories = normalizeCategories(req.body?.selectedTestCategories);
     const scenarioTypes = normalizeScenarioTypes(req.body?.selectedScenarioTypes);
-    const securitySubcategories = normalizeSecuritySubcategories(req.body?.selectedSecuritySubcategories);
-    const securitySeverities = normalizeSecuritySeverities(req.body?.selectedSecuritySeverities);
+    const hasSecurity = categories.includes('SECURITY');
+    const securitySubcategories = hasSecurity ? normalizeSecuritySubcategories(req.body?.selectedSecuritySubcategories) : [];
+    const securitySeverities = hasSecurity ? normalizeSecuritySeverities(req.body?.selectedSecuritySeverities) : [];
     const aiModelTier = normalizeProfile(req.body?.aiModelTier || process.env.AI_MODEL_DEFAULT || 'fast');
 
     const session = resetSession(sessionId);
@@ -198,7 +249,14 @@ router.post('/api/generation/start', allowQaManager, (req, res) => {
     const job = newJob(sessionId);
     const input = { targetUrl: url, story, additionalPaths: session.additionalPaths, categories, scenarioTypes, securitySubcategories, securitySeverities, aiModelTier };
     setImmediate(() => runGeneration(job, input));
-    res.status(202).json({ ok: true, sessionId, totalRequested: MAX_CASES, batchSize: GENERATION_BATCH_SIZE, eventsUrl: `/api/generation/events/${encodeURIComponent(sessionId)}` });
+    res.status(202).json({
+      ok: true,
+      sessionId,
+      totalRequested: MAX_CASES,
+      batchSize: 1,
+      concurrency: GENERATION_CONCURRENCY,
+      eventsUrl: `/api/generation/events/${encodeURIComponent(sessionId)}`,
+    });
   } catch (err) { res.status(400).json({ reply: err.message }); }
 });
 
