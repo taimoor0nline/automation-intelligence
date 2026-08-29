@@ -58,6 +58,8 @@ async function executeIsolatedSuite({
   const tests = [];
   const screenshotsByTestCase = {};
   const videosByTestCase = {};
+  const ownedRunIds = [];
+  const cleanupResults = [];
   let browser = process.env.AUTOMATION_BROWSER || 'chrome';
 
   const emit = (type, payload = {}) => {
@@ -115,6 +117,7 @@ async function executeIsolatedSuite({
     const execResult = await executeSingleGeneratedSpec(generated, executionContext, {
       approvedIds: [testCase.id],
     });
+    if (execResult?.runId) ownedRunIds.push(execResult.runId);
 
     browser = execResult?.summary?.browser || browser;
     let result = execResult?.summary?.tests?.[0] || null;
@@ -142,6 +145,17 @@ async function executeIsolatedSuite({
       if (copiedVideo) videosByTestCase[testCase.id] = copiedVideo;
     }
 
+    const browserCleanup = execResult?.runId
+      ? await cleanupAutomationBrowsers({
+          runId: execResult.runId,
+          reason: `post-test verification ${testCase.id}`,
+          log: true,
+          attempts: 4,
+          verifyDelayMs: 350,
+        })
+      : { verifiedGone: true, skipped: true };
+    cleanupResults.push({ testCaseId: testCase.id, runId: execResult?.runId || null, ...browserCleanup });
+
     tests.push(result);
     emit('TEST_COMPLETED', {
       status: 'RUNNING',
@@ -149,16 +163,25 @@ async function executeIsolatedSuite({
       currentTestCaseId: testCase.id,
       result,
       screenshotAvailable: Boolean(copiedScreenshot),
-      browserCleanup: { verifiedGone: true },
+      browserCleanup,
     });
   }
 
-  const finalCleanup = await cleanupAutomationBrowsers({
-    reason: `final isolated suite cleanup ${runId}`,
-    log: true,
-    attempts: 6,
-    verifyDelayMs: 500,
-  });
+  const finalChecks = [];
+  for (const ownedRunId of [...new Set(ownedRunIds)]) {
+    finalChecks.push(await cleanupAutomationBrowsers({
+      runId: ownedRunId,
+      reason: `final suite verification ${runId}`,
+      log: true,
+      attempts: 5,
+      verifyDelayMs: 400,
+    }));
+  }
+  const finalCleanup = {
+    verifiedGone: finalChecks.every((item) => item.verifiedGone !== false),
+    checkedRunIds: [...new Set(ownedRunIds)],
+    checks: finalChecks,
+  };
 
   const passed = tests.filter((test) => test.pass).length;
   const failed = tests.filter((test) => test.fail).length;
@@ -187,6 +210,7 @@ async function executeIsolatedSuite({
     currentTestCaseId: null,
     summary,
     finalCleanup,
+    cleanupResults,
     complete: true,
   });
 
@@ -196,6 +220,7 @@ async function executeIsolatedSuite({
     summary,
     artifacts,
     finalCleanup,
+    cleanupResults,
   };
 }
 
