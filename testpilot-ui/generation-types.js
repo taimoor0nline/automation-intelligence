@@ -1,5 +1,5 @@
 (function () {
-  const TYPES = ['functional','positive','negative','boundary'];
+  const TYPES = ['positive','negative','boundary'];
   const STORAGE_KEY = 'aiTestPilotGenerationScenarioTypes';
   const label = (value) => value.charAt(0).toUpperCase() + value.slice(1);
 
@@ -71,7 +71,7 @@
     const root = document.createElement('div');
     root.id = 'generationTypePicker';
     root.className = 'generation-type-picker';
-    root.innerHTML = `<div class="generation-type-heading"><label>Scenario types to generate</label><span id="generationTypeCount" class="generation-type-count">All</span></div><button id="generationTypeButton" class="generation-category-button" type="button"><span>All scenario types</span><span class="generation-chevron">⌄</span></button><div id="generationTypeMenu" class="generation-category-menu"><label class="generation-category-option generation-category-all"><input id="generationTypeSelectAll" type="checkbox" checked> Select All</label>${TYPES.map((type) => `<label class="generation-category-option"><input type="checkbox" data-scenario-type value="${type}" checked> ${label(type)}</label>`).join('')}</div><div class="generation-type-note">Choose how scenarios should behave. Test category remains a separate testing-purpose classification.</div>`;
+    root.innerHTML = `<div class="generation-type-heading"><label>Scenario types to generate</label><span id="generationTypeCount" class="generation-type-count">All</span></div><button id="generationTypeButton" class="generation-category-button" type="button"><span>All scenario types</span><span class="generation-chevron">⌄</span></button><div id="generationTypeMenu" class="generation-category-menu"><label class="generation-category-option generation-category-all"><input id="generationTypeSelectAll" type="checkbox" checked> Select All</label>${TYPES.map((type) => `<label class="generation-category-option"><input type="checkbox" data-scenario-type value="${type}" checked> ${label(type)}</label>`).join('')}</div><div class="generation-type-note">Choose whether scenarios are positive, negative, or boundary cases. Functional remains a separate Test Category.</div>`;
 
     if (categoryPicker) categoryPicker.insertAdjacentElement('beforebegin', root);
     else storyField.insertAdjacentElement('afterend', root);
