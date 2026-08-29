@@ -13,6 +13,7 @@ const jsFiles = [
   'server/routes/chat.js',
   'server/routes/projects.js',
   'server/routes/readinessBatch.js',
+  'server/routes/isolatedExecution.js',
   'server/routes/reporting.js',
   'server/routes/restApi.js',
   'server/routes/sessionContext.js',
@@ -27,6 +28,8 @@ const jsFiles = [
   'server/services/reportGenerator.js',
   'server/services/browserProcessCleanup.js',
   'server/services/singleSpecRunner.js',
+  'server/services/isolatedSuiteRunner.js',
+  'server/services/executionEventBus.js',
   'automation-system/engine.config.js',
   'testpilot-ui/platform-ui.js',
   'testpilot-ui/defect-assignment.js',
@@ -113,8 +116,8 @@ if (/throw error;/.test(browserCleanup) && /AUTOMATION_BROWSER_CLEANUP_FAILED/.t
   errors.push('browser cleanup must not throw away captured PASS/FAIL results');
 }
 const runner = fs.readFileSync(path.join(root, 'server/services/singleSpecRunner.js'), 'utf8');
-for (const marker of ['AUTOMATION_RUN_ID', 'cleanupAutomationBrowsers', 'post-run', 'randomUUID']) {
-  if (!runner.includes(marker)) errors.push(`single spec runner cleanup missing marker: ${marker}`);
+for (const marker of ['AUTOMATION_RUN_ID', 'cleanupAutomationBrowsers', 'post-run', 'randomUUID', 'AUTOMATION_SCREENSHOT_EACH_TEST', 'AUTOMATION_TEST_COMPLETION_PAUSE_MS']) {
+  if (!runner.includes(marker)) errors.push(`single spec runner cleanup/evidence missing marker: ${marker}`);
 }
 const engineConfig = fs.readFileSync(path.join(root, 'automation-system/engine.config.js'), 'utf8');
 for (const marker of ['AUTOMATION_RUN_ID', '--ai-testpilot-run-id=']) {
@@ -130,11 +133,11 @@ for (const forbidden of ['ownedBrowserPids', 'generation-browser-audit', 'cleanu
 }
 
 const generationUi = fs.readFileSync(path.join(root, 'testpilot-ui/generation-experience.js'), 'utf8');
-for (const marker of ['__aiTestPilotNativeFetch', 'setFastProfile', 'original index.html handler owns /api/chat', 'readinessBatchSize', 'type="number"', 'DEFAULT_BATCH_SIZE = 2', 'aiTestPilotReadinessBatchSize']) {
+for (const marker of ['__aiTestPilotNativeFetch', 'setFastProfile', 'original index.html handler owns /api/chat', 'INTERNAL_READINESS_BATCH_SIZE = 5', 'aiTestPilotReadinessBatchSize']) {
   if (!generationUi.includes(marker)) errors.push(`generation/settings helper missing marker: ${marker}`);
 }
-for (const forbidden of ['window.fetch =', 'response.json =', 'MutationObserver', 'generationElapsed', 'updateElapsed', '/api/test-cases/revalidate', 'generationProgress', 'readinessBatchScript']) {
-  if (generationUi.includes(forbidden)) errors.push(`generation UI must remain non-invasive: ${forbidden}`);
+for (const forbidden of ['type="number"', 'readinessBatchSize">', 'window.fetch =', 'response.json =', 'MutationObserver', 'generationElapsed', 'updateElapsed', '/api/test-cases/revalidate', 'generationProgress', 'readinessBatchScript']) {
+  if (generationUi.includes(forbidden)) errors.push(`generation UI must not expose batching or become invasive: ${forbidden}`);
 }
 
 const readinessUi = fs.readFileSync(path.join(root, 'testpilot-ui/readiness.js'), 'utf8');
@@ -143,15 +146,25 @@ for (const marker of ['/api/test-cases/revalidate', 'scheduleReadiness(1500)', '
 }
 
 const readinessBatchRoute = fs.readFileSync(path.join(root, 'server/routes/readinessBatch.js'), 'utf8');
-for (const marker of ['DEFAULT_BATCH_SIZE = 2', 'MAX_BATCH_SIZE = 50', 'aiTestPilotReadinessBatchSize', 'setImmediate', '[readiness-batch]', 'batchCount', 'batchSize']) {
+for (const marker of ['MAX_BATCH_SIZE = 50', 'setImmediate', '[readiness-batch]', 'batchCount', 'batchSize']) {
   if (!readinessBatchRoute.includes(marker)) errors.push(`server readiness batching missing marker: ${marker}`);
 }
 
 const projectsRoute = fs.readFileSync(path.join(root, 'server/routes/projects.js'), 'utf8');
-if (!projectsRoute.includes("router.use(require('./readinessBatch'))")) errors.push('projects router must mount server-side readiness batching before lifecycle routes');
+if (!projectsRoute.includes("router.use(require('./readinessBatch'))")) errors.push('projects router must mount readiness batching before lifecycle routes');
+if (!projectsRoute.includes("router.use(require('./isolatedExecution'))")) errors.push('projects router must mount isolated SSE execution routes');
 
 const readinessBatch = fs.readFileSync(path.join(root, 'testpilot-ui/readiness-batch.js'), 'utf8');
 if (readinessBatch.includes('window.fetch =')) errors.push('legacy readiness-batch compatibility file must not wrap fetch');
+
+const isolatedExecution = fs.readFileSync(path.join(root, 'server/routes/isolatedExecution.js'), 'utf8');
+for (const marker of ['/api/test-runs/start', '/api/test-runs/events/:sessionId', 'RUN_COMPLETED', "targetType === 'REST'", 'generateRestAutomation', 'screenshotEachTest: false', 'completionPauseMs: 0']) {
+  if (!isolatedExecution.includes(marker)) errors.push(`isolated execution missing marker: ${marker}`);
+}
+const isolatedRunner = fs.readFileSync(path.join(root, 'server/services/isolatedSuiteRunner.js'), 'utf8');
+for (const marker of ['generateAutomation', 'runnerOptions', 'isolated-per-test', 'post-test verification']) {
+  if (!isolatedRunner.includes(marker)) errors.push(`isolated suite runner missing marker: ${marker}`);
+}
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
 if (!fs.existsSync(restUi)) errors.push('missing REST API workspace UI');
