@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { modelForProfile } = require('./aiModelProfiles');
+const { refreshCapabilityConfiguration, visualBaselineMode } = require('./capabilityConfiguration');
 
 function numberEnv(value, fallback) {
   const n = Number(value);
@@ -82,17 +83,28 @@ function safeFiles(directory, predicate = () => true, max = 50) {
   }
 }
 
-function namedDatabaseQueries() {
-  if (!boolEnv(process.env.AUTOMATION_DB_ASSERTIONS_ENABLED, false)) return [];
-  if (!String(process.env.AUTOMATION_DB_ASSERTION_URL || '').trim()) return [];
+function namedDatabaseQueryDefinitions() {
+  if (!boolEnv(process.env.AUTOMATION_DB_ASSERTIONS_ENABLED, false)) return { names: [], parameters: {} };
+  if (!String(process.env.AUTOMATION_DB_ASSERTION_URL || '').trim()) return { names: [], parameters: {} };
   try {
     const parsed = JSON.parse(process.env.AUTOMATION_DB_ASSERTION_QUERIES_JSON || '{}');
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? Object.keys(parsed).filter(Boolean).sort().slice(0, 50)
-      : [];
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { names: [], parameters: {} };
+    const names = Object.keys(parsed).filter(Boolean).sort().slice(0, 50);
+    const parameters = {};
+    for (const name of names) {
+      const value = parsed[name];
+      parameters[name] = value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.params)
+        ? value.params.map(String).filter(Boolean)
+        : [];
+    }
+    return { names, parameters };
   } catch {
-    return [];
+    return { names: [], parameters: {} };
   }
+}
+
+function namedDatabaseQueries() {
+  return namedDatabaseQueryDefinitions().names;
 }
 
 function configuredExternalCapabilities() {
@@ -111,8 +123,9 @@ function runtimeCapabilities() {
   const uploadFixtures = safeFiles(uploadDir);
   const visualBaselines = safeFiles(baselineDir, (name) => /\.png$/i.test(name));
   const external = configuredExternalCapabilities();
-  const databaseQueries = namedDatabaseQueries();
-  const visualCanCreateBaseline = boolEnv(process.env.AUTOMATION_VISUAL_UPDATE_BASELINES, false);
+  const database = namedDatabaseQueryDefinitions();
+  const baselineMode = visualBaselineMode();
+  const visualCanCreateBaseline = baselineMode === 'create-missing';
 
   return {
     direct: {
@@ -123,10 +136,10 @@ function runtimeCapabilities() {
       BROWSER_PERMISSION: { available: true, mode: 'deterministic permission-state simulation' },
       CLIPBOARD: { available: true, mode: 'application clipboard-write observation' },
       BINARY_DOCUMENT_CONTENT: { available: true, formats: ['txt','csv','json','xml','html','pdf','docx','xls','xlsx','pptx'] },
-      VISUAL_REGRESSION: { available: visualBaselines.length > 0 || visualCanCreateBaseline, baselines: visualBaselines, baselineCreationEnabled: visualCanCreateBaseline },
+      VISUAL_REGRESSION: { available: visualBaselines.length > 0 || visualCanCreateBaseline, baselines: visualBaselines, baselineMode, baselineCreationEnabled: visualCanCreateBaseline },
     },
     database: {
-      DATABASE_ASSERTIONS: { available: databaseQueries.length > 0, namedQueries: databaseQueries, readOnly: true },
+      DATABASE_ASSERTIONS: { available: database.names.length > 0, namedQueries: database.names, queryParameters: database.parameters, readOnly: true },
     },
     external: Object.fromEntries(EXTERNAL_CAPABILITIES.map((capability) => [capability, { available: external.includes(capability) }])),
   };
@@ -138,12 +151,13 @@ Important rules:
 - maxTestCases is a HARD UPPER LIMIT, never a target. Never pad the suite just to reach it.
 - Decide how many tests are actually justified by the business story and discovered UI evidence. Return between 1 and maxTestCases.
 - The business story defines scope. Discovery provides evidence and must not broaden the requirement.
+- NEVER repurpose an unrelated discovered control to imitate a feature from the story. A search box is not a feedback field, a generic button is not a login button, etc.
 - Use only categories in allowedCategories and scenario types in allowedScenarioTypes.
 - Positive, negative and boundary are scenario types. FUNCTIONAL is a test category, not a scenario type.
 - Each planned test must cover a materially distinct behavior, rule, risk, state or boundary.
 - Do not invent validation rules, boundaries, messages, controls, selectors or business rules that are absent from the story/discovery.
 - runtimeCapabilities is authoritative for advanced automation availability. Use an advanced capability only when the story actually requires it AND runtimeCapabilities marks it available.
-- If the story requires an advanced capability that is unavailable (for example email/SMS adapter, DB named query, file fixture, visual baseline, native/mobile adapter, cross-origin iframe, real multi-tab or OS dialog), put that limitation in knownGaps instead of allocating an unrunnable test solely for it.
+- If the story requires an advanced capability that is unavailable, put that limitation in knownGaps instead of allocating an unrunnable test solely for it.
 - CAPTCHA/biometric support means an explicitly configured vendor-supported non-production test adapter only. Never propose defeating a production security challenge.
 - If the configured ceiling prevents fuller coverage, explicitly list the remaining gaps.
 - coverageScore is an AI ESTIMATE of requirement/scenario coverage achieved by this proposed runnable suite, from 0 to 100. It is NOT source-code coverage and NOT a measured execution metric.
@@ -185,6 +199,7 @@ async function proposeGenerationPlan({
   maxTestCases = 6,
   modelTier = 'fast',
 }) {
+  await refreshCapabilityConfiguration();
   const ceiling = Math.max(1, Math.min(Number(maxTestCases) || 1, 50));
   const categories = cleanTextArray(allowedCategories.map((x) => String(x).toUpperCase()), 50);
   const scenarioTypes = cleanTextArray(allowedScenarioTypes.map((x) => String(x).toLowerCase()), 20);
@@ -254,10 +269,21 @@ Rules:
 - If requestedCategory is CUSTOM and requestedCustomCategory is supplied, use that custom label as the testing-purpose sub-scope.
 - Generate only requestedScenarioType. Category and scenario type are separate dimensions.
 - If requestedScenarioType is custom and requestedCustomScenarioType is supplied, use that label to describe how the scenario should behave.
+- NEVER repurpose an unrelated discovered control to imitate story behavior. If the story says feedback but discovery only has search, do not use the search box as feedback.
 - Never invent selectors, pages, validation rules, messages, boundaries, options or business rules absent from story/discovery evidence.
 - Use discovered selectors exactly when technical targets are needed.
 - runtimeCapabilities is authoritative. Never generate an advanced step/assertion for a capability with available=false.
 - Prefer ordinary human-readable actions: navigate, fill, clear, click, select, check, uncheck, submit, verify.
+- Every expectedResults entry MUST be a deterministic, evidence-grounded assertion that the compiler can verify. Do not write vague outcomes such as "submission triggers processing", "page remains accessible", "field accepts data", or "action succeeds" unless you express the exact observable state.
+- Preferred basic expected-result grammar includes:
+  * Element #selector is visible | hidden | absent | exists | enabled | disabled | required | valid | invalid.
+  * Text in #selector contains "exact discovered text" | equals "exact discovered text" | is non-empty | is empty.
+  * Value of #selector equals "value" | contains "value" | is non-empty | is empty.
+  * Path equals "/discovered-path" | includes "/fragment".
+  * URL includes "evidenced fragment" | does not include "fragment".
+  * Selected value of #selector equals "value".
+  * Attribute "name" of #selector equals "value" only when discovery/requirement evidences it.
+- Use real discovered visible text for text assertions. Never use an id, class, selector or test-id token as display text unless discovery explicitly shows that same literal as rendered text.
 - Advanced actions are allowed only when required by the story and available:
   * File upload: {"action":"Upload file","target":"#discoveredFileInput","value":"fixture-name.ext"}. The value MUST be one of runtimeCapabilities.direct.FILE_UPLOAD.fixtures.
   * Drag/drop: {"action":"Drag and drop","target":"#discoveredSource","value":"#discoveredTarget"}.
@@ -267,7 +293,7 @@ Rules:
   * Visual: Visual screenshot #selector matches baseline "name.png". Baseline MUST be listed in runtimeCapabilities.direct.VISUAL_REGRESSION.baselines unless baselineCreationEnabled=true.
   * Web Vitals: LCP at most 2500 ms; CLS at most 0.1; INP at most 200 ms.
   * Email/SMS/OTP: Email received containing "text" or SMS received containing "text"; only when EMAIL_SMS_OTP is available.
-  * Database: Database query "approved_query_name" field "fieldName" equals "value" OR Database query "approved_query_name" row count equals 1. query name MUST be listed in runtimeCapabilities.database.DATABASE_ASSERTIONS.namedQueries.
+  * Database: Database query "approved_query_name" field "fieldName" equals "value" OR Database query "approved_query_name" row count equals 1. Query name MUST be listed in runtimeCapabilities.database.DATABASE_ASSERTIONS.namedQueries. If runtimeCapabilities.database.DATABASE_ASSERTIONS.queryParameters lists parameter keys for that query, include those exact keys and values in testData. Never output SQL.
   * Stream: WebSocket message contains "text" or SSE message contains "text".
   * Clipboard: Clipboard equals "text" or Clipboard contains "text".
   * Downloaded semantic document: Downloaded file "report.pdf" contains "Approved". Supported formats are listed in runtimeCapabilities.direct.BINARY_DOCUMENT_CONTENT.formats.
@@ -339,4 +365,4 @@ async function generateBatch({ story, pageDiscoveries, environment, category, sc
   return { feature: result.feature || null, testCases: cases, runtimeCapabilities: capabilities };
 }
 
-module.exports = { proposeGenerationPlan, generateBatch, runtimeCapabilities, configuredExternalCapabilities, namedDatabaseQueries };
+module.exports = { proposeGenerationPlan, generateBatch, runtimeCapabilities, configuredExternalCapabilities, namedDatabaseQueries, namedDatabaseQueryDefinitions };
