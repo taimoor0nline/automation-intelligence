@@ -47,6 +47,7 @@
     loadScript('/test-case-compare.js', 'data-test-case-compare');
     loadScript('/execution-report-actions.js', 'data-execution-report-actions');
     loadScript('/execution-error-classification.js', 'data-execution-error-classification');
+    loadScript('/streaming-failure-analysis.js', 'data-streaming-failure-analysis');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
