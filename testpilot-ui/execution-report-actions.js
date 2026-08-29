@@ -36,7 +36,6 @@
       #generateAiAnalysisReportBtn{width:100%;min-height:42px;background:linear-gradient(135deg,#2f5bff,#4f7cff);color:#fff;border:0;box-shadow:0 7px 18px rgba(47,91,255,.18)}
       #generateAiAnalysisReportBtn:hover{filter:brightness(.98);box-shadow:0 9px 22px rgba(47,91,255,.24)}
       #generateAiAnalysisReportBtn:disabled{opacity:.62;cursor:wait}
-      #generateAiAnalysisReportBtn small{display:block;font-size:9.5px;font-weight:600;opacity:.82;margin-top:2px}
     `;
     document.head.appendChild(style);
   }
@@ -68,7 +67,7 @@
 
     box = document.createElement('div');
     box.id = 'executionReportActions';
-    box.innerHTML = '<button id="generateAiAnalysisReportBtn" class="btn secondary" type="button">Generate AI Analysis Report<small>Creates the report now; failed cases analyze live inside it</small></button>';
+    box.innerHTML = '<button id="generateAiAnalysisReportBtn" class="btn secondary" type="button">Generate AI Analysis Report</button>';
     (analysis || results).insertAdjacentElement('afterend', box);
 
     document.getElementById('generateAiAnalysisReportBtn')?.addEventListener('click', generateAndOpenReport);
@@ -116,7 +115,7 @@
     generatingReport = true;
     if (button) {
       button.disabled = true;
-      button.innerHTML = 'Generating report…<small>Preparing execution rows before failed-only live AI analysis starts</small>';
+      button.textContent = 'Generate AI Analysis Report';
     }
 
     try {
@@ -165,9 +164,8 @@
 
     const button = document.getElementById('generateAiAnalysisReportBtn');
     if (button && !generatingReport) {
-      const failed = Number(lastSummary?.failed || document.getElementById('mFailed')?.textContent || 0);
       button.disabled = !completed;
-      button.innerHTML = `Generate AI Analysis Report<small>${failed > 0 ? `Report opens immediately · ${failed} failed case${failed === 1 ? '' : 's'} analyze live` : 'No failures — creates the execution report without AI calls'}</small>`;
+      button.textContent = 'Generate AI Analysis Report';
     }
   }
 
