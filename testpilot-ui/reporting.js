@@ -1,200 +1,30 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const token = sessionStorage.getItem('aiTestPilotToken') || '';
-  const filterIds = ['from','to','projectId','userId','role','category','outcome','environment','targetType'];
+  const filterIds = ['from','to','projectId','userId','role','scenarioType','category','priority','outcome','environment','targetType'];
 
-  function esc(value) {
-    return String(value ?? '')
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  function esc(value) { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+  function localDateTimeValue(date) { const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,'0'),d=String(date.getDate()).padStart(2,'0'),h=String(date.getHours()).padStart(2,'0'),min=String(date.getMinutes()).padStart(2,'0'); return `${y}-${m}-${d}T${h}:${min}`; }
+  function configureDateTimeInputs(){for(const id of ['from','to']){const input=$(id);if(!input)continue;input.type='datetime-local';input.step='60';const label=input.closest('.field')?.querySelector('label');if(label)label.textContent=id==='from'?'From date / time':'To date / time';}}
+  function setDefaultDates(){const now=new Date();const from=new Date(now);from.setDate(from.getDate()-29);from.setHours(0,0,0,0);$('from').value=localDateTimeValue(from);$('to').value=localDateTimeValue(now);}
+  function showError(message){$('error').textContent=message||'';$('error').classList.toggle('show',Boolean(message));}
+  function showNotice(message){$('dbNotice').textContent=message||'';$('dbNotice').classList.toggle('hidden',!message);}
+  async function api(url){const res=await fetch(url,{headers:token?{Authorization:`Bearer ${token}`}:{}});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.reply||`Request failed (${res.status}).`);return data;}
+  function fillSelect(id,values,mapper){const select=$(id);if(!select)return;const first=select.options[0]?.outerHTML||'<option value="">All</option>';select.innerHTML=first+(values||[]).map(item=>{const pair=mapper(item);return `<option value="${esc(pair.value)}">${esc(pair.label)}</option>`;}).join('');}
+  function table(headers,rows){if(!rows.length)return '<div class="empty">No matching data.</div>';return `<table class="table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;}
+  function number(value){return Number(value||0).toLocaleString();}
+  function simpleBreakdown(id,labelKey,rows){const el=$(id);if(!el)return;el.innerHTML=table(['Value','Tests','Passed','Failed'],(rows||[]).map(row=>`<tr><td><b>${esc(row[labelKey]||'—')}</b></td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td></tr>`));}
+  function renderBreakdowns(data){
+    simpleBreakdown('scenarioTypeTable','scenarioType',data.scenarioTypeBreakdown||[]);
+    $('categoryTable').innerHTML=table(['Category','Tests','Passed','Failed','Pass rate'],(data.categoryBreakdown||[]).map(row=>`<tr><td><b>${esc(row.category)}</b></td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td><td>${Number(row.passRate||0).toFixed(2)}%</td></tr>`));
+    simpleBreakdown('priorityTable','priority',data.priorityBreakdown||[]);
+    $('userTable').innerHTML=table(['User','Role','Tests','Passed','Failed'],(data.userBreakdown||[]).map(row=>`<tr><td><b>${esc(row.displayName)}</b></td><td>${esc(row.role||'—')}</td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td></tr>`));
+    $('roleTable').innerHTML=table(['Role','Tests','Passed','Failed'],(data.roleBreakdown||[]).map(row=>`<tr><td><b>${esc(row.role)}</b></td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td></tr>`));
   }
-
-  function localDateTimeValue(date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    const h = String(date.getHours()).padStart(2, '0');
-    const min = String(date.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${d}T${h}:${min}`;
-  }
-
-  function configureDateTimeInputs() {
-    for (const id of ['from','to']) {
-      const input = $(id);
-      if (!input) continue;
-      input.type = 'datetime-local';
-      input.step = '60';
-      const label = input.closest('.field')?.querySelector('label');
-      if (label) label.textContent = id === 'from' ? 'From date / time' : 'To date / time';
-    }
-  }
-
-  function setDefaultDates() {
-    const now = new Date();
-    const from = new Date(now);
-    from.setDate(from.getDate() - 29);
-    from.setHours(0, 0, 0, 0);
-    $('from').value = localDateTimeValue(from);
-    $('to').value = localDateTimeValue(now);
-  }
-
-  function showError(message) {
-    $('error').textContent = message || '';
-    $('error').classList.toggle('show', Boolean(message));
-  }
-
-  function showNotice(message) {
-    $('dbNotice').textContent = message || '';
-    $('dbNotice').classList.toggle('hidden', !message);
-  }
-
-  async function api(url) {
-    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.reply || `Request failed (${res.status}).`);
-    return data;
-  }
-
-  function fillSelect(id, values, mapper) {
-    const select = $(id);
-    const first = select.options[0]?.outerHTML || '<option value="">All</option>';
-    select.innerHTML = first + (values || []).map((item) => {
-      const pair = mapper(item);
-      return `<option value="${esc(pair.value)}">${esc(pair.label)}</option>`;
-    }).join('');
-  }
-
-  function table(headers, rows) {
-    if (!rows.length) return '<div class="empty">No matching data.</div>';
-    return `<table class="table"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
-  }
-
-  function number(value) {
-    return Number(value || 0).toLocaleString();
-  }
-
-  function renderBreakdowns(data) {
-    $('categoryTable').innerHTML = table(
-      ['Category','Tests','Passed','Failed','Pass rate'],
-      (data.categoryBreakdown || []).map((row) => `<tr><td><b>${esc(row.category)}</b></td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td><td>${Number(row.passRate || 0).toFixed(2)}%</td></tr>`)
-    );
-
-    $('userTable').innerHTML = table(
-      ['User','Role','Tests','Passed','Failed'],
-      (data.userBreakdown || []).map((row) => `<tr><td><b>${esc(row.displayName)}</b></td><td>${esc(row.role || '—')}</td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td></tr>`)
-    );
-
-    $('roleTable').innerHTML = table(
-      ['Role','Tests','Passed','Failed'],
-      (data.roleBreakdown || []).map((row) => `<tr><td><b>${esc(row.role)}</b></td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td></tr>`)
-    );
-  }
-
-  function renderTrend(rows) {
-    const trend = $('trend');
-    if (!rows?.length) {
-      trend.innerHTML = '<div class="empty" style="width:100%">No matching trend data.</div>';
-      return;
-    }
-    const max = Math.max(...rows.map((row) => Number(row.total || 0)), 1);
-    trend.innerHTML = rows.map((row) => {
-      const height = Math.max(2, Math.round(Number(row.total || 0) / max * 115));
-      const title = `${row.date}: ${row.total} tests · ${row.passed} passed · ${row.failed} failed`;
-      return `<div class="trend-col" title="${esc(title)}"><div class="trend-bar" style="height:${height}px"></div><span>${esc(String(row.date || '').slice(5))}</span></div>`;
-    }).join('');
-  }
-
-  function renderRuns(rows) {
-    $('runTable').innerHTML = table(
-      ['Completed','Run','Project','Environment','Target','Executed by','Role','Tests','Passed','Failed','Duration'],
-      (rows || []).map((row) => {
-        const completed = row.completedAt ? new Date(row.completedAt).toLocaleString() : '—';
-        const duration = row.durationMs == null ? '—' : `${Math.round(Number(row.durationMs) / 1000)}s`;
-        return `<tr><td>${esc(completed)}</td><td>#${esc(row.runNumber)}</td><td>${esc(row.projectName || 'Unassigned')}</td><td>${esc(row.environment || '—')}</td><td>${esc(row.targetType || 'WEB')}</td><td>${esc(row.executedByName || 'Unknown')}</td><td>${esc(row.executedByRole || '—')}</td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td><td>${esc(duration)}</td></tr>`;
-      })
-    );
-  }
-
-  function queryString() {
-    const params = new URLSearchParams();
-    filterIds.forEach((id) => {
-      const value = $(id)?.value?.trim();
-      if (!value) return;
-      if (id === 'from' || id === 'to') {
-        const instant = new Date(value);
-        if (Number.isNaN(instant.getTime())) throw new Error(`${id} date/time is invalid.`);
-        params.set(id, instant.toISOString());
-      } else {
-        params.set(id, value);
-      }
-    });
-    params.set('limit', '200');
-    return params.toString();
-  }
-
-  async function loadSummary() {
-    showError('');
-    $('applyBtn').disabled = true;
-    $('loading').textContent = 'Loading persisted results…';
-    try {
-      const data = await api(`/api/reporting/summary?${queryString()}`);
-      const m = data.metrics || {};
-      $('mRuns').textContent = number(m.runs);
-      $('mTests').textContent = number(m.tests);
-      $('mPassed').textContent = number(m.passed);
-      $('mFailed').textContent = number(m.failed);
-      $('mPassRate').textContent = `${Number(m.passRate || 0).toFixed(2)}%`;
-      $('mAvg').textContent = number(Math.round(Number(m.avgDurationMs || 0)));
-      $('generatedAt').textContent = data.generatedAt ? `Generated ${new Date(data.generatedAt).toLocaleString()}` : '';
-      renderBreakdowns(data);
-      renderTrend(data.dailyTrend || []);
-      renderRuns(data.runs || []);
-    } catch (err) {
-      showError(err.message);
-    } finally {
-      $('applyBtn').disabled = false;
-      $('loading').textContent = '';
-    }
-  }
-
-  async function init() {
-    configureDateTimeInputs();
-    setDefaultDates();
-    if (!token) {
-      showNotice('Historical reports require a signed-in platform user. Return to AI TestPilot, sign in, then reopen Reports.');
-      $('applyBtn').disabled = true;
-      return;
-    }
-
-    try {
-      const health = await fetch('/health').then((r) => r.json());
-      if (!health.database?.configured) {
-        showNotice('PostgreSQL is disabled. Test execution can continue in demo mode, but historical role/user/date-time reporting requires DATABASE_ENABLED=true and a configured DATABASE_URL.');
-        $('applyBtn').disabled = true;
-        return;
-      }
-
-      const filters = await api('/api/reporting/filters');
-      $('viewerScope').textContent = `${filters.viewer?.role || 'USER'} reporting scope`;
-      fillSelect('projectId', filters.projects, (v) => ({ value: v.id, label: v.name || 'Unassigned' }));
-      fillSelect('userId', filters.users, (v) => ({ value: v.id, label: `${v.displayName || v.email || 'User'} · ${v.role || '—'}` }));
-      fillSelect('role', filters.roles, (v) => ({ value: v, label: v }));
-      fillSelect('category', filters.categories, (v) => ({ value: v, label: v }));
-      fillSelect('outcome', filters.outcomes, (v) => ({ value: v, label: v }));
-      fillSelect('environment', filters.environments, (v) => ({ value: v, label: v }));
-      fillSelect('targetType', filters.targetTypes, (v) => ({ value: v, label: v }));
-      await loadSummary();
-    } catch (err) {
-      showError(err.message);
-    }
-  }
-
-  $('applyBtn')?.addEventListener('click', loadSummary);
-  $('resetBtn')?.addEventListener('click', () => {
-    filterIds.forEach((id) => { if (!['from','to'].includes(id)) $(id).value = ''; });
-    setDefaultDates();
-    loadSummary();
-  });
-
-  init();
+  function renderTrend(rows){const trend=$('trend');if(!rows?.length){trend.innerHTML='<div class="empty" style="width:100%">No matching trend data.</div>';return;}const max=Math.max(...rows.map(row=>Number(row.total||0)),1);trend.innerHTML=rows.map(row=>{const height=Math.max(2,Math.round(Number(row.total||0)/max*115));const title=`${row.date}: ${row.total} tests · ${row.passed} passed · ${row.failed} failed`;return `<div class="trend-col" title="${esc(title)}"><div class="trend-bar" style="height:${height}px"></div><span>${esc(String(row.date||'').slice(5))}</span></div>`;}).join('');}
+  function renderRuns(rows){$('runTable').innerHTML=table(['Completed','Run','Project','Environment','Target','Executed by','Role','Tests','Passed','Failed','Duration'],(rows||[]).map(row=>{const completed=row.completedAt?new Date(row.completedAt).toLocaleString():'—';const duration=row.durationMs==null?'—':`${Math.round(Number(row.durationMs)/1000)}s`;return `<tr><td>${esc(completed)}</td><td>#${esc(row.runNumber)}</td><td>${esc(row.projectName||'Unassigned')}</td><td>${esc(row.environment||'—')}</td><td>${esc(row.targetType||'WEB')}</td><td>${esc(row.executedByName||'Unknown')}</td><td>${esc(row.executedByRole||'—')}</td><td>${number(row.total)}</td><td class="good">${number(row.passed)}</td><td class="bad">${number(row.failed)}</td><td>${esc(duration)}</td></tr>`;}));}
+  function queryString(){const params=new URLSearchParams();filterIds.forEach(id=>{const value=$(id)?.value?.trim();if(!value)return;if(id==='from'||id==='to'){const instant=new Date(value);if(Number.isNaN(instant.getTime()))throw new Error(`${id} date/time is invalid.`);params.set(id,instant.toISOString());}else params.set(id,value);});params.set('limit','200');return params.toString();}
+  async function loadSummary(){showError('');$('applyBtn').disabled=true;$('loading').textContent='Loading persisted results…';try{const data=await api(`/api/reporting/summary?${queryString()}`);const m=data.metrics||{};$('mRuns').textContent=number(m.runs);$('mTests').textContent=number(m.tests);$('mPassed').textContent=number(m.passed);$('mFailed').textContent=number(m.failed);$('mPassRate').textContent=`${Number(m.passRate||0).toFixed(2)}%`;$('mAvg').textContent=number(Math.round(Number(m.avgDurationMs||0)));$('generatedAt').textContent=data.generatedAt?`Generated ${new Date(data.generatedAt).toLocaleString()}`:'';renderBreakdowns(data);renderTrend(data.dailyTrend||[]);renderRuns(data.runs||[]);}catch(err){showError(err.message);}finally{$('applyBtn').disabled=false;$('loading').textContent='';}}
+  async function init(){configureDateTimeInputs();setDefaultDates();if(!token){showNotice('Historical reports require a signed-in platform user. Return to AI TestPilot, sign in, then reopen Reports.');$('applyBtn').disabled=true;return;}try{const health=window.aiTestPilotHealth?await window.aiTestPilotHealth:await fetch('/health').then(r=>r.json());if(!health.database?.configured){showNotice('PostgreSQL is disabled. Test execution can continue in demo mode, but historical role/user/date-time reporting requires DATABASE_ENABLED=true and a configured DATABASE_URL.');$('applyBtn').disabled=true;return;}const filters=await api('/api/reporting/filters');$('viewerScope').textContent=`${filters.viewer?.role||'USER'} reporting scope`;fillSelect('projectId',filters.projects,v=>({value:v.id,label:v.name||'Unassigned'}));fillSelect('userId',filters.users,v=>({value:v.id,label:`${v.displayName||v.email||'User'} · ${v.role||'—'}`}));fillSelect('role',filters.roles,v=>({value:v,label:v}));fillSelect('scenarioType',filters.scenarioTypes,v=>({value:v,label:v}));fillSelect('category',filters.categories,v=>({value:v,label:v}));fillSelect('priority',filters.priorities,v=>({value:v,label:v}));fillSelect('outcome',filters.outcomes,v=>({value:v,label:v}));fillSelect('environment',filters.environments,v=>({value:v,label:v}));fillSelect('targetType',filters.targetTypes,v=>({value:v,label:v}));await loadSummary();}catch(err){showError(err.message);}}
+  $('applyBtn')?.addEventListener('click',loadSummary);$('resetBtn')?.addEventListener('click',()=>{filterIds.forEach(id=>{if(!['from','to'].includes(id))$(id).value='';});setDefaultDates();loadSummary();});init();
 })();
