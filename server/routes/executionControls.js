@@ -4,6 +4,7 @@ const path = require("path");
 const router = express.Router();
 
 const { getSession } = require("../data/sessionStore");
+const { READY } = require("../services/testCaseFeasibility");
 const { cancelActiveExecution, getActiveExecution } = require("../services/singleSpecRunner");
 const {
   REPORT_DIR,
@@ -168,7 +169,9 @@ router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) 
 });
 
 // Any new execution invalidates a previously requested/generated report for this session.
-// The next report is created only after the user explicitly clicks Generate AI Analysis Report again.
+// Execution eligibility is based on the CURRENTLY SELECTED reviewed cases, not on the
+// aggregate generation/readiness state of unselected cases. This also repairs older
+// partial-generation sessions that ended in IDLE while retaining valid reviewed cases.
 router.use((req, _res, next) => {
   if (req.method === "POST" && req.path === "/api/test-runs/start") {
     const sessionId = String(req.body?.sessionId || "default");
@@ -179,6 +182,31 @@ router.use((req, _res, next) => {
     session.reportGeneratedAt = null;
     session.reportGeneratedForRun = null;
     session.reportGenerationError = null;
+
+    const approvedIds = Array.isArray(req.body?.approvedIds)
+      ? req.body.approvedIds.map((id) => String(id || "").toUpperCase()).filter(Boolean)
+      : [];
+    const approvedSet = new Set(approvedIds);
+    const selectedCases = (Array.isArray(session.testCases) ? session.testCases : [])
+      .filter((testCase) => approvedSet.has(String(testCase?.id || "").toUpperCase()));
+    const selectedReadinessTerminal = selectedCases.length > 0 && selectedCases.every((testCase) => Boolean(testCase?.automationReadiness?.status));
+    const selectedReady = selectedCases.length > 0 && selectedCases.every((testCase) => testCase?.automationReadiness?.status === READY);
+
+    if (session.state !== "RUNNING" && selectedReadinessTerminal) {
+      const previousState = session.state;
+      session.state = "AWAITING_APPROVAL";
+      // The isolated execution route still has a legacy aggregate readiness gate. Once
+      // every SELECTED case has a terminal readiness result, mark the reviewed subset as
+      // validated so unselected/pending/failed cases cannot block the approved subset.
+      session.readinessValidated = true;
+      session.executionSelectionPrepared = {
+        at: new Date().toISOString(),
+        previousState,
+        approvedIds: selectedCases.map((testCase) => testCase.id),
+        selectedReady,
+        ignoredUnselectedCount: Math.max(0, (session.testCases?.length || 0) - selectedCases.length),
+      };
+    }
   }
   next();
 });
