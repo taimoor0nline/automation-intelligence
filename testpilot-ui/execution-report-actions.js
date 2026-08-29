@@ -4,6 +4,7 @@
 
   let lastSummary = null;
   let lastReportUrl = '';
+  let generatingReport = false;
 
   function sid() {
     try {
@@ -11,6 +12,15 @@
       if (typeof sessionId !== 'undefined') return sessionId;
     } catch {}
     return '';
+  }
+
+  function authHeaders(extra) {
+    const headers = { ...(extra || {}) };
+    try {
+      const token = sessionStorage.getItem('aiTestPilotToken') || '';
+      if (token) headers.Authorization = `Bearer ${token}`;
+    } catch {}
+    return headers;
   }
 
   function statusText() {
@@ -57,32 +67,54 @@
 
     box = document.createElement('div');
     box.id = 'executionReportActions';
-    box.innerHTML = '<button id="generateAiAnalysisReportBtn" class="btn secondary" type="button">Generate AI Analysis Report<small>Opens the report and analyzes failed cases only</small></button>';
+    box.innerHTML = '<button id="generateAiAnalysisReportBtn" class="btn secondary" type="button">Generate AI Analysis Report<small>Creates the report now; failed cases analyze live inside it</small></button>';
     (analysis || results).insertAdjacentElement('afterend', box);
 
-    document.getElementById('generateAiAnalysisReportBtn')?.addEventListener('click', openReport);
+    document.getElementById('generateAiAnalysisReportBtn')?.addEventListener('click', generateAndOpenReport);
     return box;
   }
 
-  function reportUrl() {
+  async function generateAndOpenReport() {
     const id = sid();
-    if (!id) return '';
-    const link = document.getElementById('reportLink');
-    const href = link?.getAttribute('href') || '';
-    if (lastReportUrl) return lastReportUrl;
-    if (href && href !== '#') return href;
-    return `/api/reports/${encodeURIComponent(id)}`;
+    if (!id || generatingReport) return;
+
+    const button = document.getElementById('generateAiAnalysisReportBtn');
+    const popup = window.open('', '_blank', 'noopener');
+    if (popup) {
+      try {
+        popup.document.write('<!doctype html><title>Generating report…</title><body style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#334155">Generating AI analysis report…</body>');
+      } catch {}
+    }
+
+    generatingReport = true;
+    if (button) {
+      button.disabled = true;
+      button.innerHTML = 'Generating report…<small>Execution rows will open immediately; failed-case AI continues over SSE</small>';
+    }
+
+    try {
+      const response = await fetch(`/api/reports/${encodeURIComponent(id)}/generate`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: '{}',
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.reply || 'Could not generate the AI analysis report.');
+
+      lastReportUrl = data.reportUrl || `/api/reports/${encodeURIComponent(id)}`;
+      if (popup) popup.location.replace(lastReportUrl);
+      else window.open(lastReportUrl, '_blank', 'noopener');
+    } catch (err) {
+      try { if (popup && !popup.closed) popup.close(); } catch {}
+      if (typeof showError === 'function') showError(err.message || 'Could not generate the AI analysis report.');
+    } finally {
+      generatingReport = false;
+      refresh();
+    }
   }
 
-  function openReport() {
-    const url = reportUrl();
-    if (!url) return;
-    window.open(url, '_blank', 'noopener');
-  }
-
-  function capture(summary, reportUrlValue) {
+  function capture(summary) {
     if (summary) lastSummary = summary;
-    if (reportUrlValue) lastReportUrl = reportUrlValue;
     refresh();
   }
 
@@ -97,9 +129,10 @@
     box.style.display = completed && total > 0 ? 'block' : 'none';
 
     const button = document.getElementById('generateAiAnalysisReportBtn');
-    if (button) {
+    if (button && !generatingReport) {
       const failed = Number(lastSummary?.failed || document.getElementById('mFailed')?.textContent || 0);
-      button.innerHTML = `Generate AI Analysis Report<small>${failed > 0 ? `${failed} failed case${failed === 1 ? '' : 's'} will be analyzed live` : 'No failures — opens the execution report without AI calls'}</small>`;
+      button.disabled = false;
+      button.innerHTML = `Generate AI Analysis Report<small>${failed > 0 ? `Report opens immediately · ${failed} failed case${failed === 1 ? '' : 's'} analyze live` : 'No failures — creates the execution report without AI calls'}</small>`;
     }
   }
 
@@ -108,7 +141,7 @@
     if (typeof original !== 'function' || original.__reportActionWrapped) return;
     function wrapped(summary) {
       const out = original.apply(this, arguments);
-      capture(summary, null);
+      capture(summary);
       return out;
     }
     wrapped.__reportActionWrapped = true;
@@ -126,22 +159,13 @@
       lastReportUrl = '';
       refresh();
     });
-    window.addEventListener('testnexus:execution-completed', (event) => {
-      const detail = event.detail || {};
-      capture(detail.summary, detail.reportUrl);
-    });
+    window.addEventListener('testnexus:execution-completed', (event) => capture(event.detail?.summary));
     window.addEventListener('testnexus:execution-failed', refresh);
 
     const status = document.getElementById('runStatus');
     if (status) new MutationObserver(refresh).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
     const results = document.getElementById('results');
     if (results) new MutationObserver(refresh).observe(results, { childList: true, subtree: true });
-    const reportLink = document.getElementById('reportLink');
-    if (reportLink) new MutationObserver(() => {
-      const href = reportLink.getAttribute('href');
-      if (href && href !== '#') lastReportUrl = href;
-      refresh();
-    }).observe(reportLink, { attributes: true, attributeFilter: ['href'] });
 
     let attempts = 0;
     const timer = setInterval(() => {
