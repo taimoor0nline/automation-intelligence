@@ -40,7 +40,8 @@
     const style = document.createElement('style');
     style.id = 'testCategoryStyle';
     style.textContent = `
-      .test-category-field{margin-top:13px}
+      .test-classification-row{grid-template-columns:repeat(3,minmax(0,1fr))!important;align-items:start}
+      .test-classification-row>.field,.test-classification-row>.test-category-field{margin-top:13px}
       .test-category-field label{display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#4b5563;font-size:12px;font-weight:700}
       .test-category-field select{width:100%;border:1px solid var(--border);border-radius:9px;padding:10px 11px;background:#fff}
       .test-category-field small{display:block;color:var(--muted);margin-top:5px;font-size:10.5px;line-height:1.45}
@@ -52,21 +53,33 @@
       .tag.category-accessibility{background:#f3e8ff;color:#7e22ce}
       .tag.category-api,.tag.category-integration{background:#e0f2fe;color:#075985}
       .tag.category-ui,.tag.category-compatibility{background:#f1f5f9;color:#334155}
+      @media(max-width:760px){.test-classification-row{grid-template-columns:1fr!important}}
     `;
     document.head.appendChild(style);
   }
 
+  function relabelScenarioType() {
+    const type = document.getElementById('editType');
+    const label = type?.closest('.field')?.querySelector('label');
+    if (label) label.textContent = 'Scenario Type';
+  }
+
   function ensureEditorField() {
     const modal = document.getElementById('editorModal');
-    if (!modal || document.getElementById('editTestCategory')) return;
+    if (!modal) return;
+    relabelScenarioType();
+    if (document.getElementById('editTestCategory')) return;
+
+    const type = document.getElementById('editType');
     const priority = document.getElementById('editPriority');
-    const anchor = priority?.closest('.two') || priority?.closest('.field') || document.getElementById('editType')?.closest('.two');
-    if (!anchor) return;
+    const row = type?.closest('.two') || priority?.closest('.two');
+    if (!row) return;
+    row.classList.add('test-classification-row');
 
     const field = document.createElement('div');
     field.className = 'test-category-field';
-    field.innerHTML = `<label for="editTestCategory">Test Category</label><select id="editTestCategory">${CATEGORIES.map(x => `<option value="${x}">${x.replaceAll('_',' ')}</option>`).join('')}</select><small>Category describes the testing purpose. It is separate from Type (for example: Negative + Security, or Boundary + Performance). Load and Stress categories require their dedicated load-execution engine.</small>`;
-    anchor.insertAdjacentElement('afterend', field);
+    field.innerHTML = `<label for="editTestCategory">Test Category</label><select id="editTestCategory">${CATEGORIES.map(x => `<option value="${x}">${x.replaceAll('_',' ')}</option>`).join('')}</select><small>Testing purpose; separate from Scenario Type and Priority.</small>`;
+    row.appendChild(field);
 
     const select = field.querySelector('select');
     select.addEventListener('change', () => {
@@ -127,7 +140,7 @@
     const section = document.createElement('div');
     section.className = 'automation-section';
     section.dataset.testCategoryDetail = 'true';
-    section.innerHTML = `<h4>Test Classification</h4><div style="font-size:10.5px;color:#475569"><b>Type:</b> ${String(tc.type || 'functional').toUpperCase()} &nbsp; <b>Category:</b> ${inferCategory(tc).replaceAll('_',' ')}</div>`;
+    section.innerHTML = `<h4>Test Classification</h4><div style="font-size:10.5px;color:#475569"><b>Scenario Type:</b> ${String(tc.type || 'functional').toUpperCase()} &nbsp; <b>Category:</b> ${inferCategory(tc).replaceAll('_',' ')} &nbsp; <b>Priority:</b> ${String(tc.priority || 'medium').toUpperCase()}</div>`;
     const head = view.querySelector('.automation-head');
     if (head) head.insertAdjacentElement('afterend', section); else view.prepend(section);
   }
@@ -141,6 +154,7 @@
   function init() {
     ensureStyle();
     ensureEditorField();
+    relabelScenarioType();
 
     document.getElementById('saveEditorBtn')?.addEventListener('click', persistEditorCategory, true);
     document.getElementById('editorViewTabs')?.addEventListener('click', (event) => {
@@ -152,6 +166,7 @@
     if (modal) new MutationObserver(() => {
       if (modal.classList.contains('show')) {
         ensureEditorField();
+        relabelScenarioType();
         syncEditorCategory();
         syncFieldVisibility('human');
         setTimeout(decorateAutomationDetails, 0);
