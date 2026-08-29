@@ -202,7 +202,7 @@ function validateRuntimeContext(executionContext = {}) {
   }
 }
 
-async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, runId, progressFile, expectedTotal, onProgress }) {
+async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, screenshotEachTest, completionPauseMs, runId, progressFile, expectedTotal, onProgress }) {
   const cypressBin = path.join(AUTOMATION_DIR, "node_modules", "cypress", "bin", "cypress");
   if (!fs.existsSync(cypressBin)) throw new Error("Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install.");
   if (!fs.existsSync(REPORTER_PATH)) throw new Error(`Automation result reporter is missing: ${REPORTER_PATH}`);
@@ -230,6 +230,8 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     AUTOMATION_BASE_URL: executionContext.baseUrl || process.env.TEST_BASE_URL || "http://localhost:4000",
     AUTOMATION_VIDEO: String(video),
     AUTOMATION_SCREENSHOT_ON_FAILURE: String(screenshotOnRunFailure),
+    AUTOMATION_SCREENSHOT_EACH_TEST: String(screenshotEachTest),
+    AUTOMATION_TEST_COMPLETION_PAUSE_MS: String(completionPauseMs),
     TEST_USERNAME: executionContext.credentials?.username || "",
     TEST_PASSWORD: executionContext.credentials?.password || "",
     LOGIN_PATH: executionContext.loginPath || "/",
@@ -315,11 +317,13 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
   const progressFile = path.join(PROGRESS_DIR, `${runId}.json`);
   try {
     prepared = prepareSpec(generated);
-    const headed = boolEnv(process.env.AUTOMATION_HEADED, true);
-    const browser = process.env.AUTOMATION_BROWSER || "chrome";
-    const demoStepDelayMs = Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_STEP_DELAY_MS, 0), 3000));
-    const video = boolEnv(process.env.AUTOMATION_VIDEO, true);
-    const screenshotOnRunFailure = boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true);
+    const headed = options.headed == null ? boolEnv(process.env.AUTOMATION_HEADED, true) : Boolean(options.headed);
+    const browser = options.browser || process.env.AUTOMATION_BROWSER || "chrome";
+    const demoStepDelayMs = Math.max(0, Math.min(numberEnv(options.demoStepDelayMs, numberEnv(process.env.AUTOMATION_STEP_DELAY_MS, 0)), 3000));
+    const video = options.video == null ? boolEnv(process.env.AUTOMATION_VIDEO, true) : Boolean(options.video);
+    const screenshotOnRunFailure = options.screenshotOnRunFailure == null ? boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true) : Boolean(options.screenshotOnRunFailure);
+    const screenshotEachTest = options.screenshotEachTest == null ? boolEnv(process.env.AUTOMATION_SCREENSHOT_EACH_TEST, true) : Boolean(options.screenshotEachTest);
+    const completionPauseMs = Math.max(0, Math.min(numberEnv(options.completionPauseMs, numberEnv(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS, 5000)), 30000));
     const expectedTotal = Array.isArray(options.approvedIds) ? options.approvedIds.length : 0;
 
     removeOldArtifacts(progressFile);
@@ -338,6 +342,8 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
       demoStepDelayMs,
       video,
       screenshotOnRunFailure,
+      screenshotEachTest,
+      completionPauseMs,
       runId,
       progressFile,
       expectedTotal,
