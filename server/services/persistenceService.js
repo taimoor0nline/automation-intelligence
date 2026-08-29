@@ -1,5 +1,11 @@
 const db = require('../db');
 const { normalizeTestCategory } = require('./testCategories');
+const {
+  normalizeSecuritySubcategory,
+  normalizeSecuritySeverity,
+  inferSecuritySubcategory,
+  inferSecuritySeverity,
+} = require('./securityTaxonomy');
 
 const SCENARIO_TYPES = new Set(['positive','negative','boundary','functional','custom']);
 const PRIORITIES = new Set(['low','medium','high']);
@@ -23,6 +29,14 @@ function scenarioTypeOf(testCase) {
 function priorityOf(testCase) {
   const value = String(testCase?.priority || 'medium').trim().toLowerCase();
   return PRIORITIES.has(value) ? value : 'medium';
+}
+
+function securityOf(testCase) {
+  if (categoryOf(testCase) !== 'SECURITY') return { subcategory: null, severity: null };
+  return {
+    subcategory: normalizeSecuritySubcategory(testCase?.securitySubcategory, inferSecuritySubcategory(testCase)),
+    severity: normalizeSecuritySeverity(testCase?.severity || testCase?.securitySeverity, inferSecuritySeverity(testCase)),
+  };
 }
 
 async function persistSession(sessionId, session, context = {}) {
@@ -76,13 +90,23 @@ async function persistTestCases(sessionId, testCases = []) {
       const testCategory = categoryOf(tc);
       const scenarioType = scenarioTypeOf(tc);
       const priority = priorityOf(tc);
+      const security = securityOf(tc);
+      const normalizedCase = {
+        ...tc,
+        type: scenarioType,
+        testCategory,
+        priority,
+        securitySubcategory: security.subcategory,
+        severity: security.severity,
+      };
       await client.query(
-        `insert into test_cases(session_id,external_case_id,title,type,test_category,priority,source,case_json)
-         values($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+        `insert into test_cases(session_id,external_case_id,title,type,test_category,priority,security_subcategory,severity,source,case_json)
+         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
          on conflict(session_id,external_case_id) do update set
            title=excluded.title,type=excluded.type,test_category=excluded.test_category,
-           priority=excluded.priority,source=excluded.source,case_json=excluded.case_json`,
-        [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, tc.source || null, JSON.stringify({ ...tc, type: scenarioType, testCategory, priority })]
+           priority=excluded.priority,security_subcategory=excluded.security_subcategory,severity=excluded.severity,
+           source=excluded.source,case_json=excluded.case_json`,
+        [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, security.subcategory, security.severity, tc.source || null, JSON.stringify(normalizedCase)]
       );
     }
   });
@@ -122,23 +146,28 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
     );
     const runId = run.rows[0].id;
     const classificationByCaseId = new Map(
-      (session.testCases || []).map((testCase) => [String(testCase.id || '').toUpperCase(), {
-        category: categoryOf(testCase),
-        scenarioType: scenarioTypeOf(testCase),
-        priority: priorityOf(testCase),
-      }])
+      (session.testCases || []).map((testCase) => {
+        const security = securityOf(testCase);
+        return [String(testCase.id || '').toUpperCase(), {
+          category: categoryOf(testCase),
+          scenarioType: scenarioTypeOf(testCase),
+          priority: priorityOf(testCase),
+          securitySubcategory: security.subcategory,
+          severity: security.severity,
+        }];
+      })
     );
 
     await client.query('delete from test_results where run_id=$1', [runId]);
     for (const result of summary.tests || []) {
       const caseId = result.testCaseId || String(result.title || '').match(/TC(?:\d{3}|-H\d{3})/)?.[0] || null;
       const classification = classificationByCaseId.get(String(caseId || '').toUpperCase()) || {
-        category: 'FUNCTIONAL', scenarioType: 'functional', priority: 'medium',
+        category: 'FUNCTIONAL', scenarioType: 'functional', priority: 'medium', securitySubcategory: null, severity: null,
       };
       await client.query(
-        `insert into test_results(run_id,external_case_id,title,test_category,scenario_type,priority,passed,duration_ms,error_message,evidence_json)
-         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-        [runId, caseId, result.title || caseId || 'Test', classification.category, classification.scenarioType, classification.priority, Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
+        `insert into test_results(run_id,external_case_id,title,test_category,scenario_type,priority,security_subcategory,severity,passed,duration_ms,error_message,evidence_json)
+         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
+        [runId, caseId, result.title || caseId || 'Test', classification.category, classification.scenarioType, classification.priority, classification.securitySubcategory, classification.severity, Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
       );
     }
     return runId;
