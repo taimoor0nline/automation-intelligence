@@ -41,21 +41,44 @@
     if (document.querySelector(`script[${marker}]`)) return;
     const script = document.createElement('script');
     script.src = src;
-    script.defer = true;
+    script.async = true;
     script.setAttribute(marker, 'true');
     document.head.appendChild(script);
   }
 
-  // This tiny navigation script is intentionally loaded immediately. It must never wait
-  // for database, auth, AI, health, readiness, or the larger testing UI extensions.
+  function ensureClickThrough() {
+    if (document.getElementById('testNexusStartupInteractionGuard')) return;
+    const style = document.createElement('style');
+    style.id = 'testNexusStartupInteractionGuard';
+    style.textContent = `
+      html,body{pointer-events:auto!important}
+      body{cursor:auto!important}
+      .modal:not(.show),.platform-modal:not(.show){pointer-events:none!important;display:none!important}
+      #testModeSwitch,#testModeSwitch *{pointer-events:auto!important}
+    `;
+    document.head.appendChild(style);
+  }
+
+  ensureClickThrough();
+
+  // The mode switch is the only startup enhancement allowed to load before first paint.
+  // It is intentionally independent of health, auth, database and AI readiness.
   loadUiExtension('/fast-mode-navigation.js', 'data-fast-mode-navigation');
 
-  function loadExtensions() {
+  function loadOptionalExtensions() {
     loadUiExtension('/test-case-help.js', 'data-ai-testpilot-help');
     loadUiExtension('/test-category-ui.js', 'data-ai-testpilot-category-ui');
     loadUiExtension('/generation-options.js', 'data-ai-testpilot-generation-options');
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadExtensions, { once: true });
-  else loadExtensions();
+  function scheduleOptionalExtensions() {
+    const run = () => {
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(loadOptionalExtensions, { timeout: 1200 });
+      else setTimeout(loadOptionalExtensions, 150);
+    };
+    if (document.readyState === 'complete') run();
+    else window.addEventListener('load', run, { once: true });
+  }
+
+  scheduleOptionalExtensions();
 })();
