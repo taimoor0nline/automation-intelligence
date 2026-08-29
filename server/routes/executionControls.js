@@ -74,7 +74,7 @@ router.post("/api/reports/:sessionId/generate", allowQaManager, (req, res) => {
     clearReportGenerationRequest(sessionId);
     removeReportFile(sessionId);
 
-    if (!requestReportGeneration(sessionId, summary)) {
+    if (!requestReportGeneration(sessionId, summary, Array.isArray(session.testCases) ? session.testCases : [])) {
       throw new Error("The completed execution summary could not be registered for report generation.");
     }
 
