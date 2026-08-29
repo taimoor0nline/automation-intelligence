@@ -20,7 +20,9 @@
 
   async function start() {
     try {
-      const health = await fetch('/health').then((r) => r.json());
+      const health = window.aiTestPilotHealth
+        ? await window.aiTestPilotHealth
+        : await fetch('/health').then((r) => r.json());
       databaseConfigured = Boolean(health.database?.configured);
       if (!databaseConfigured) return;
 
@@ -54,6 +56,79 @@
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 
+  function evidenceUrl(test) {
+    if (test?.evidence?.screenshotUrl) return test.evidence.screenshotUrl;
+    const id = test?.testCaseId || String(test?.title || '').match(/TC(?:\d{3}|-H\d{3})/i)?.[0];
+    return id ? `/api/artifacts/${encodeURIComponent(sessionId)}/screenshot/${encodeURIComponent(id)}` : '';
+  }
+
+  async function openEvidence(url) {
+    if (!url) return;
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) {
+      let message = `Screenshot evidence is unavailable (${response.status}).`;
+      try {
+        const data = await response.json();
+        if (data?.reply) message = data.reply;
+      } catch {}
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const popup = window.open(objectUrl, '_blank', 'noopener');
+    if (!popup) {
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  }
+
+  function screenshotControl(test) {
+    if (!test?.evidence?.screenshotAvailable) return '';
+    const url = evidenceUrl(test);
+    if (!url) return '';
+    return `<div class="result-evidence"><button type="button" class="evidence-open" data-evidence-url="${esc(url)}" style="font-size:10.5px;font-weight:700;color:var(--blue);border:1px solid #dbe3ff;background:#f5f7ff;border-radius:6px;padding:4px 7px;cursor:pointer">Open screenshot</button></div>`;
+  }
+
+  function decorateFinalEvidence(summary) {
+    const results = document.getElementById('results');
+    if (!results || !Array.isArray(summary?.tests)) return;
+    const rows = [...results.querySelectorAll('.result')];
+    summary.tests.forEach((test, index) => {
+      if (!test?.evidence?.screenshotAvailable) return;
+      const row = rows[index];
+      if (!row || row.querySelector('.evidence-open')) return;
+      const title = row.querySelector('.result-title') || row.firstElementChild;
+      if (!title) return;
+      title.insertAdjacentHTML('beforeend', screenshotControl(test));
+    });
+  }
+
+  function installEvidenceHandler() {
+    if (window.__aiTestPilotEvidenceHandler) return;
+    window.__aiTestPilotEvidenceHandler = true;
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('.evidence-open[data-evidence-url]');
+      if (!button) return;
+      event.preventDefault();
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Opening…';
+      try {
+        await openEvidence(button.dataset.evidenceUrl);
+      } catch (err) {
+        if (typeof showError === 'function') showError(err.message);
+        else alert(err.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    });
+  }
+
   function renderLiveProgress(progress) {
     if (!progress) return;
     const total = Number(progress.total || 0);
@@ -84,10 +159,7 @@
     const rows = Array.isArray(progress.tests) ? progress.tests.map((test) => {
       const duration = test.durationMs == null ? '' : `<div class="expected">Duration: ${esc(test.durationMs)} ms</div>`;
       const error = test.err?.message ? `<div class="expected">${esc(test.err.message).slice(0, 260)}</div>` : '';
-      const evidence = test.evidence?.screenshotAvailable
-        ? '<div class="result-evidence"><span style="font-size:10.5px;font-weight:700;color:var(--green)">Screenshot captured</span></div>'
-        : '';
-      return `<div class="result"><div class="result-title">${esc(test.title)}${duration}${error}${evidence}</div><span class="badge ${test.pass ? 'pass' : 'fail'}">${test.pass ? 'PASS' : 'FAIL'}</span></div>`;
+      return `<div class="result"><div class="result-title">${esc(test.title)}${duration}${error}${screenshotControl(test)}</div><span class="badge ${test.pass ? 'pass' : 'fail'}">${test.pass ? 'PASS' : 'FAIL'}</span></div>`;
     }).join('') : '';
 
     const remaining = Math.max(0, total - completed);
@@ -117,9 +189,8 @@
       event.type = event.type || eventType;
       state.lastEvent = event;
       renderLiveProgress(event);
-      if (event.type === 'RUN_COMPLETED') {
-        state.completed = true;
-      } else if (event.type === 'RUN_FAILED') {
+      if (event.type === 'RUN_COMPLETED') state.completed = true;
+      else if (event.type === 'RUN_FAILED') {
         state.completed = true;
         state.error = event.error || 'Isolated execution failed.';
       }
@@ -130,18 +201,13 @@
 
   async function streamExecution(state) {
     const response = await fetch(`/api/test-runs/events/${encodeURIComponent(sessionId)}`, {
-      method: 'GET',
-      headers: { Accept: 'text/event-stream' },
-      cache: 'no-store',
-      signal: state.controller.signal,
+      method: 'GET', headers: { Accept: 'text/event-stream' }, cache: 'no-store', signal: state.controller.signal,
     });
     if (!response.ok) throw new Error(`Execution event stream failed (${response.status}).`);
     if (!response.body) throw new Error('Execution event stream is not supported by this browser.');
-
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -171,9 +237,9 @@
   }
 
   function install() {
+    installEvidenceHandler();
     const oldButton = document.getElementById('runBtn');
     if (!oldButton || oldButton.dataset.isolatedExecution === '1') return;
-
     const runButton = oldButton.cloneNode(true);
     runButton.dataset.isolatedExecution = '1';
     oldButton.replaceWith(runButton);
@@ -181,45 +247,26 @@
     runButton.addEventListener('click', async () => {
       clearError();
       const approved = [...document.querySelectorAll('.case-check:checked')].map((el) => el.value);
-      if (!approved.length) {
-        showError('Select at least one test case.');
-        return;
-      }
-
+      if (!approved.length) { showError('Select at least one test case.'); return; }
       setBusy(runButton, true, 'Starting isolated tests…');
       setActivityStatus('Starting run', true);
       const results = document.getElementById('results');
-      if (results) {
-        results.innerHTML = `<div class="activity-alert">Starting isolated browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will execute one-by-one. Each test captures evidence, pauses, closes its owned Chrome, then starts the next test in a fresh browser.</small></div>`;
-      }
+      if (results) results.innerHTML = `<div class="activity-alert">Starting isolated browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will execute one-by-one. Each test captures evidence, pauses, closes its owned Chrome, then starts the next test in a fresh browser.</small></div>`;
       const analysis = document.getElementById('analysis');
       if (analysis) analysis.innerHTML = '';
       const reportBox = document.getElementById('reportBox');
       if (reportBox) reportBox.style.display = 'none';
 
-      const streamState = {
-        controller: new AbortController(),
-        completed: false,
-        error: null,
-        lastEvent: null,
-      };
+      const streamState = { controller: new AbortController(), completed: false, error: null, lastEvent: null };
       let streamPromise = null;
-
       try {
         streamPromise = streamExecution(streamState);
-
         const startResponse = await fetch('/api/test-runs/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            approvedIds: approved,
-            reviewedTestCases: testCases,
-          }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, approvedIds: approved, reviewedTestCases: testCases }),
         });
         const startData = await startResponse.json();
         if (!startResponse.ok) throw new Error(startData.reply || 'Could not start isolated execution.');
-
         setActivityStatus(`Running 0/${startData.total}`, true);
         await streamPromise;
         if (streamState.error) throw new Error(streamState.error);
@@ -227,6 +274,7 @@
         const finalData = await loadFinalResult();
         if (typeof window.renderResults === 'function') window.renderResults(finalData.summary, finalData.failureAnalyses || []);
         else if (typeof renderResults === 'function') renderResults(finalData.summary, finalData.failureAnalyses || []);
+        setTimeout(() => decorateFinalEvidence(finalData.summary), 0);
 
         if (finalData.reportUrl) {
           const link = document.getElementById('reportLink');
