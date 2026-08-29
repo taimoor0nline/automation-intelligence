@@ -42,12 +42,19 @@ async function executeIsolatedSuite({
   testCases = [],
   executionContext = {},
   validateGenerated = null,
+  generateAutomation = null,
+  runnerOptions = null,
   onEvent = null,
   suiteRunId = null,
 } = {}) {
   if (!Array.isArray(testCases) || !testCases.length) {
     throw new Error('At least one Automation Ready test case is required for isolated execution.');
   }
+
+  const generateOne = typeof generateAutomation === 'function'
+    ? generateAutomation
+    : (testCase) => generateDeterministicAutomation([testCase]);
+  const executionOptions = runnerOptions && typeof runnerOptions === 'object' ? runnerOptions : {};
 
   const runId = safeToken(suiteRunId || `suite-${Date.now()}-${randomUUID().slice(0, 8)}`, 'suite');
   const evidenceDir = path.join(ISOLATED_EVIDENCE_DIR, runId);
@@ -60,7 +67,7 @@ async function executeIsolatedSuite({
   const videosByTestCase = {};
   const ownedRunIds = [];
   const cleanupResults = [];
-  let browser = process.env.AUTOMATION_BROWSER || 'chrome';
+  let browser = executionOptions.browser || process.env.AUTOMATION_BROWSER || 'chrome';
 
   const emit = (type, payload = {}) => {
     if (typeof onEvent === 'function') {
@@ -85,7 +92,7 @@ async function executeIsolatedSuite({
   for (let index = 0; index < testCases.length; index += 1) {
     const testCase = testCases[index];
     const testStartedAt = Date.now();
-    const generated = generateDeterministicAutomation([testCase]);
+    const generated = generateOne(testCase, index);
 
     if (typeof validateGenerated === 'function') {
       const validation = validateGenerated(generated, testCase);
@@ -115,6 +122,7 @@ async function executeIsolatedSuite({
     });
 
     const execResult = await executeSingleGeneratedSpec(generated, executionContext, {
+      ...executionOptions,
       approvedIds: [testCase.id],
     });
     if (execResult?.runId) ownedRunIds.push(execResult.runId);
