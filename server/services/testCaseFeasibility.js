@@ -33,6 +33,7 @@ function result({
   automationPlan = null,
   assertionSuggestions = [],
   uncompiledExpectations = [],
+  expectationCoverage = null,
 }) {
   return {
     status,
@@ -47,8 +48,7 @@ function result({
     automationPlan,
     assertionSuggestions: Array.isArray(assertionSuggestions) ? assertionSuggestions : [],
     uncompiledExpectations: Array.isArray(uncompiledExpectations) ? uncompiledExpectations : [],
-    // A READY test is already executable. Optional narrative-strengthening ideas remain
-    // available in metadata, but they should not be presented as another repair action.
+    expectationCoverage,
     canSuggestAssertion: status !== READY && Boolean((assertionSuggestions || []).length || (uncompiledExpectations || []).length || resolutionType === RESOLUTION_FRAMEWORK_CHANGE_REQUIRED),
     validationSource: "deterministic",
   };
@@ -132,7 +132,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       automatable: false,
       reasonCode: compiled.reasonCode || "AUTOMATION_CONTRACT_INCOMPLETE",
       reason: assertionGap
-        ? "The expected behavior is valid, but the deterministic Cypress assertion registry does not yet contain a matching assertion capability."
+        ? "The expected behavior is valid, but the deterministic assertion registry does not yet contain a matching assertion capability."
         : compiled.reason || "The test case could not be compiled into the supported automation contract.",
       reasons: compiled.errors || [],
       resolutionType: userInput ? RESOLUTION_USER_INPUT_REQUIRED : assertionGap ? RESOLUTION_FRAMEWORK_CHANGE_REQUIRED : RESOLUTION_AI_REPAIRABLE,
@@ -140,29 +140,40 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       evidence: compiled.supportedAssertions || compiled.supportedOperations || [],
       assertionSuggestions: compiled.assertionSuggestions || [],
       uncompiledExpectations: compiled.uncompiledExpectations || [],
+      expectationCoverage: compiled.expectationCoverage || null,
     });
   }
 
   const suggestions = compiled.plan.assertionSuggestions || [];
   const narratives = compiled.plan.narrativeExpectations || [];
+  const coverage = compiled.expectationCoverage || compiled.plan.expectationCoverage || null;
+  const partialCoverage = coverage && coverage.total > 0 && coverage.compiled < coverage.total;
   return result({
     status: READY,
     automatable: true,
-    reasonCode: suggestions.length ? "SUPPORTED_WITH_ASSERTION_SUGGESTIONS" : "SUPPORTED_GROUNDED_AND_COMPILED",
+    reasonCode: suggestions.length
+      ? "SUPPORTED_WITH_ASSERTION_SUGGESTIONS"
+      : partialCoverage
+        ? "SUPPORTED_WITH_PARTIAL_EXPECTATION_COVERAGE"
+        : "SUPPORTED_GROUNDED_AND_COMPILED",
     reason: suggestions.length
       ? "The test has deterministic assertions and can run. Some narrative expectations also have optional assertion-capability suggestions for stronger coverage. Execution PASS/FAIL is determined only when the browser runs the test."
-      : "The test case is grounded and compiled successfully into the deterministic Cypress contract. Automation Ready means executable; it does not predict PASS/FAIL. The execution outcome is determined only when the browser runs the test.",
+      : partialCoverage
+        ? `The test is executable and grounded. ${coverage.compiled} of ${coverage.total} human expectation(s) compile into deterministic assertions; unresolved narrative expectations remain visible for review. Automation Ready does not predict PASS/FAIL.`
+        : "The test case is grounded and compiled successfully into the deterministic automation contract. Automation Ready means executable; it does not predict PASS/FAIL. The execution outcome is determined only when the browser runs the test.",
     resolutionType: RESOLUTION_NONE,
     automationPlan: compiled.plan,
     assertionSuggestions: suggestions,
     uncompiledExpectations: narratives,
+    expectationCoverage: coverage,
     evidence: [
       `${compiled.plan.actions.length} deterministic action(s) compiled`,
       `${compiled.plan.assertions.length} deterministic assertion(s) compiled`,
+      coverage ? `${coverage.compiled}/${coverage.total} human expectation(s) compiled (${coverage.percent}%)` : null,
       `${discovery.selectors.size} discovered selector(s) available`,
       `${discovery.paths.size} discovered path(s) available`,
       hasCredentials ? "Runtime credentials available when required" : "No runtime credential dependency detected",
-    ],
+    ].filter(Boolean),
   });
 }
 
@@ -171,7 +182,7 @@ function assessTestCases(testCases = [], context = {}) {
 }
 
 function readinessSummary(testCases = []) {
-  const summary = { total: testCases.length, ready: 0, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0, assertionSuggestions: 0 };
+  const summary = { total: testCases.length, ready: 0, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0, assertionSuggestions: 0, expectationCoverage: { compiled: 0, total: 0 } };
   for (const tc of testCases) {
     const readiness = tc?.automationReadiness || {};
     if (readiness.status === READY) summary.ready += 1;
@@ -182,7 +193,14 @@ function readinessSummary(testCases = []) {
     if (readiness.resolutionType === RESOLUTION_AI_REPAIRABLE) summary.aiRepairable += 1;
     if (readiness.resolutionType === RESOLUTION_FRAMEWORK_CHANGE_REQUIRED) summary.frameworkChangeRequired += 1;
     if (readiness.canSuggestAssertion) summary.assertionSuggestions += 1;
+    if (readiness.expectationCoverage) {
+      summary.expectationCoverage.compiled += Number(readiness.expectationCoverage.compiled || 0);
+      summary.expectationCoverage.total += Number(readiness.expectationCoverage.total || 0);
+    }
   }
+  summary.expectationCoverage.percent = summary.expectationCoverage.total
+    ? Math.round((summary.expectationCoverage.compiled / summary.expectationCoverage.total) * 100)
+    : 0;
   return summary;
 }
 
