@@ -231,9 +231,9 @@ router.use((req, _res, next) => {
   next();
 });
 
-// Mount the active adaptive generator and deterministic execution routes through the
+// Mount scalable SSE batch generation and deterministic execution through the
 // already-mounted failure-analysis/control route tree.
-router.use(require("./progressiveGenerationAdaptive"));
+router.use(require("./progressiveGenerationScalable"));
 router.use(require("./isolatedExecution"));
 
 module.exports = router;
