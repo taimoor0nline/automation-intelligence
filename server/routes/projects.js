@@ -18,17 +18,19 @@ router.post('/api/projects', requireAuth, requireRole('MANAGER'), async (req, re
     const name = String(req.body?.name || '').trim();
     if (!name) return res.status(400).json({ reply: 'Project name is required.' });
     const result = await db.query(`insert into projects(name,description,created_by) values($1,$2,$3) returning *`, [name, String(req.body?.description || '').trim() || null, req.user.sub]);
-    await db.query(`insert into project_members(project_id,user_id,role) values($1,$2,'MANAGER') on conflict do nothing`, [result.rows[0].id, req.user.sub]);
+    await db.query(`insert into project_members(project_id,user_id,role,project_role) values($1,$2,'MANAGER','PROJECT_MANAGER') on conflict(project_id,user_id) do update set role='MANAGER',project_role='PROJECT_MANAGER'`, [result.rows[0].id, req.user.sub]);
     res.status(201).json({ ok: true, project: result.rows[0] });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
 router.post('/api/projects/:projectId/members', requireAuth, requireRole('MANAGER'), async (req, res) => {
   try {
-    const role = String(req.body?.role || '').toUpperCase();
-    if (!['DEV','QA','MANAGER'].includes(role)) return res.status(400).json({ reply: 'Role must be DEV, QA, or MANAGER.' });
-    await db.query(`insert into project_members(project_id,user_id,role) values($1,$2,$3) on conflict(project_id,user_id) do update set role=excluded.role`, [req.params.projectId, req.body?.userId, role]);
-    res.json({ ok: true });
+    const projectRole = String(req.body?.projectRole || req.body?.role || '').toUpperCase();
+    const normalized = projectRole === 'MANAGER' ? 'PROJECT_MANAGER' : projectRole === 'DEV' ? 'DEVELOPER' : projectRole;
+    if (!['PROJECT_MANAGER','QA','DEVELOPER','VIEWER'].includes(normalized)) return res.status(400).json({ reply: 'Project role must be PROJECT_MANAGER, QA, DEVELOPER, or VIEWER.' });
+    const legacyRole = normalized === 'PROJECT_MANAGER' ? 'MANAGER' : normalized === 'DEVELOPER' ? 'DEV' : normalized === 'VIEWER' ? 'DEV' : 'QA';
+    await db.query(`insert into project_members(project_id,user_id,role,project_role) values($1,$2,$3,$4) on conflict(project_id,user_id) do update set role=excluded.role,project_role=excluded.project_role`, [req.params.projectId, req.body?.userId, legacyRole, normalized]);
+    res.json({ ok: true, projectRole: normalized });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
@@ -110,6 +112,7 @@ router.patch('/api/defects/:id/resolve', requireAuth, requireRole('DEV','QA','MA
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
+router.use(require('./workManagement'));
 router.use(require('./readinessBatch'));
 router.use(require('./isolatedExecution'));
 router.use(require('./restDemo'));
