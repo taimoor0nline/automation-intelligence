@@ -21,103 +21,71 @@
     if ($('reportBox')) $('reportBox').style.display = 'none';
     if ($('reportLink')) $('reportLink').removeAttribute('href');
     if ($('runBtn')) $('runBtn').disabled = true;
-    setActivityStatus('Generating 0', true);
   }
 
-  function setGenerationUiState(active) {
+  function setGenerationUi(active) {
+    window.__aiTestPilotProgressiveGenerationActive = active;
+    window.__aiTestPilotSuspendReviewFilters = active;
     document.documentElement.classList.toggle('generation-active', active);
     document.body.classList.toggle('generation-active', active);
-    const filters = document.getElementById('reviewFilterShell');
-    if (filters) filters.style.display = active ? 'none' : '';
+    document.documentElement.style.overflowY = 'auto';
+    document.body.style.overflowY = 'auto';
+    if (!active) {
+      document.documentElement.style.removeProperty('overflow-y');
+      document.body.style.removeProperty('overflow-y');
+    }
   }
 
-  function queuedReadiness() {
-    return {
-      status: 'NEEDS_PREFLIGHT', automatable: false, reasonCode: 'READINESS_QUEUED',
-      reason: 'Generated successfully. Readiness validation will begin when generation finishes.',
-      reasons: ['Generated successfully. Readiness validation is queued.'], resolutionType: 'NONE', repairable: false,
-      requiredInputs: [], evidence: [], automationPlan: null, assertionSuggestions: [], uncompiledExpectations: [], canSuggestAssertion: false, validationSource: 'queued'
-    };
-  }
-
-  function escapeText(value) {
-    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-  }
-
-  function renderStreamingPreview() {
-    const casesEl = $('cases');
-    if (!casesEl) return;
-    const rows = (testCases || []).map((tc) => {
-      const category = String(tc.testCategory || 'FUNCTIONAL').replaceAll('_',' ');
-      const type = String(tc.type || 'functional');
-      return `<div class="case generation-preview-case">
-        <div></div><div><div class="case-title">${escapeText(tc.id)} — ${escapeText(tc.title)}</div>
-        <div class="case-meta"><span class="tag">${escapeText(type)}</span><span class="tag">${escapeText(category)}</span><span class="tag preflight">Readiness queued</span></div></div><div></div>
-      </div>`;
-    }).join('');
-    casesEl.innerHTML = rows || '<div class="empty">Generating first test case…</div>';
-    if ($('caseCount')) $('caseCount').textContent = String((testCases || []).length);
-  }
-
-  let previewFrame = 0;
-  function scheduleStreamingPreview() {
-    if (previewFrame) return;
-    previewFrame = requestAnimationFrame(() => { previewFrame = 0; renderStreamingPreview(); });
-  }
-
-  function mergeIncoming(cases) {
-    const existing = new Map((testCases || []).map((tc) => [String(tc.id || '').toUpperCase(), tc]));
-    for (const tc of cases || []) existing.set(String(tc.id || '').toUpperCase(), { ...tc, source: tc.source || 'ai', automationReadiness: queuedReadiness() });
-    testCases = [...existing.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    scheduleStreamingPreview();
-  }
-
-  function authTokenPresent() {
-    try { return Boolean(sessionStorage.getItem('aiTestPilotToken')); } catch { return false; }
+  function status(text) {
+    const subtitle = $('caseSubtitle');
+    if (subtitle && subtitle.textContent !== text) subtitle.textContent = text;
   }
 
   function consumeEventSource(url, onEvent) {
     return new Promise((resolve, reject) => {
       const source = new EventSource(url);
-      const eventNames = ['DISCOVERY_COMPLETED','GENERATION_PLAN','BATCH_STARTED','BATCH_COMPLETED','GENERATION_COMPLETED','GENERATION_FAILED'];
-      let finished = false;
-      const close = () => { if (!finished) finished = true; try { source.close(); } catch {} };
-      for (const name of eventNames) {
-        source.addEventListener(name, (event) => {
-          if (finished) return;
-          let data;
-          try { data = JSON.parse(event.data); } catch (err) { close(); reject(err); return; }
-          Promise.resolve(onEvent(name, data)).then(() => {
-            if (name === 'GENERATION_COMPLETED') { close(); resolve(); }
-            else if (name === 'GENERATION_FAILED') { close(); reject(new Error(data.message || 'Progressive generation failed.')); }
-          }).catch((err) => { close(); reject(err); });
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        source.close();
+        fn(value);
+      };
+      const types = ['GENERATION_STARTED','DISCOVERY_COMPLETED','GENERATION_PLAN','BATCH_STARTED','BATCH_COMPLETED','GENERATION_COMPLETED','GENERATION_FAILED'];
+      for (const type of types) {
+        source.addEventListener(type, async (event) => {
+          try {
+            const data = JSON.parse(event.data || '{}');
+            await onEvent(type, data);
+            if (type === 'GENERATION_COMPLETED') finish(resolve, data);
+            if (type === 'GENERATION_FAILED') finish(reject, new Error(data.message || 'Generation failed.'));
+          } catch (err) {
+            finish(reject, err);
+          }
         });
       }
       source.onerror = () => {
-        if (finished) return;
-        if (source.readyState === EventSource.CLOSED) { close(); reject(new Error('Generation event stream closed unexpectedly.')); }
+        if (settled) return;
+        // EventSource may briefly report a reconnect while the server is closing a completed stream.
+        // Completion/failure events above are authoritative, so wait for them rather than rebuilding UI.
       };
     });
   }
 
   async function consumeFetchStream(url, onEvent) {
-    const fetchFn = window.__aiTestPilotNativeFetch || window.fetch.bind(window);
-    const response = await fetchFn(url, { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
-    if (!response.ok) {
-      let message = `Generation stream failed (${response.status}).`;
-      try { const body = await response.json(); message = body.reply || message; } catch {}
-      throw new Error(message);
-    }
-    if (!response.body) throw new Error('Generation stream is unavailable in this browser.');
-    const reader = response.body.getReader();
+    const response = await fetch(url, { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
+    if (!response.ok) throw new Error(`Generation stream failed (${response.status}).`);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Generation stream is unavailable in this browser.');
     const decoder = new TextDecoder();
     let buffer = '';
+    let completed = null;
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let match;
-      while ((match = /\r?\n\r?\n/.exec(buffer))) {
+      while ((match = buffer.match(/\r?\n\r?\n/))) {
         const boundary = match.index;
         const frame = buffer.slice(0, boundary).trim();
         buffer = buffer.slice(boundary + match[0].length);
@@ -128,14 +96,13 @@
           else if (line.startsWith('data:')) dataText += line.slice(5).trim();
         }
         if (!dataText) continue;
-        await onEvent(eventType, JSON.parse(dataText));
+        const data = JSON.parse(dataText);
+        await onEvent(eventType, data);
+        if (eventType === 'GENERATION_COMPLETED') completed = data;
+        if (eventType === 'GENERATION_FAILED') throw new Error(data.message || 'Generation failed.');
       }
     }
-  }
-
-  async function consumeSse(url, onEvent) {
-    if (!authTokenPresent() && typeof EventSource !== 'undefined') return consumeEventSource(url, onEvent);
-    return consumeFetchStream(url, onEvent);
+    return completed;
   }
 
   async function progressiveGenerate(event) {
@@ -149,12 +116,10 @@
     sessionId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     humanCounter = 1;
     testCases = [];
-    window.__aiTestPilotProgressiveGenerationActive = true;
-    window.__aiTestPilotSuspendReviewFilters = true;
-    setGenerationUiState(true);
     resetExecutionState();
-    renderStreamingPreview();
-    if ($('caseSubtitle')) $('caseSubtitle').textContent = 'Starting generation · page remains fully interactive';
+    setGenerationUi(true);
+    renderCases();
+    status('Starting generation…');
     setBusy($('generateBtn'), true, 'Generating test cases…');
 
     const selection = generationSelection();
@@ -171,71 +136,62 @@
       selectedSecuritySeverities: securitySelected ? selection.securitySeverities : [],
     };
 
+    let generatedCount = 0;
+    let total = 0;
     try {
       const startResponse = await fetch('/api/generation/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const start = await startResponse.json();
-      if (!startResponse.ok) throw new Error(start.reply || 'Progressive generation could not start.');
-      const total = Number(start.totalRequested || 0);
-      if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generation started · 0/${total} cases · ${start.concurrency || 1} worker(s)`;
+      if (!startResponse.ok) throw new Error(start.reply || 'Generation could not start.');
+      total = Number(start.totalRequested || 0);
+      status(`Generation started · 0/${total} · ${start.concurrency || 1} AI worker(s)`);
 
-      let completed = false;
-      await consumeSse(start.eventsUrl, async (type, data) => {
+      const onEvent = async (type, data) => {
         if (type === 'DISCOVERY_COMPLETED') {
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Page discovery complete in ${data.durationMs || 0} ms · generating test cases…`;
-          return;
+          status(`Page discovery complete in ${data.durationMs || 0} ms · generating ${total} test case(s)…`);
+        } else if (type === 'GENERATION_PLAN') {
+          status(`${data.units?.length || total} generation unit(s) planned · AI generation in progress…`);
+        } else if (type === 'BATCH_COMPLETED') {
+          generatedCount = Math.max(generatedCount, Number(data.generatedSoFar || 0));
+          status(`AI generation in progress · ${generatedCount}/${data.totalRequested || total} completed`);
         }
-        if (type === 'GENERATION_PLAN') {
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${data.units?.length || total} generation unit(s) planned · results will appear as they complete`;
-          return;
-        }
-        if (type === 'BATCH_STARTED') {
-          setActivityStatus(`Generating ${data.generatedSoFar || 0}/${data.totalRequested || total}`, true);
-          return;
-        }
-        if (type === 'BATCH_COMPLETED') {
-          mergeIncoming(data.cases || []);
-          setActivityStatus(`Generating ${data.generatedSoFar || testCases.length}/${data.totalRequested || total}`, true);
-          const scope = `${String(data.category || '').replaceAll('_',' ').toLowerCase()} / ${String(data.scenarioType || 'functional').toLowerCase()}`;
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${data.generatedSoFar || testCases.length}/${data.totalRequested || total} generated · ${scope} completed in ${((data.durationMs || 0) / 1000).toFixed(1)}s`;
-          return;
-        }
-        if (type === 'GENERATION_COMPLETED') {
-          completed = true;
-          testCases = (data.cases || testCases).map((tc) => ({ ...tc, source: tc.source || 'ai', automationReadiness: null }));
-          window.__aiTestPilotProgressiveGenerationActive = false;
-          window.__aiTestPilotSuspendReviewFilters = false;
-          setGenerationUiState(false);
-          renderCases();
-          setActivityStatus('Checking readiness', true);
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${testCases.length} test case(s) generated in ${((data.durationMs || 0) / 1000).toFixed(1)}s · readiness validation starting…`;
-          return;
-        }
-        if (type === 'GENERATION_FAILED') throw new Error(data.message || 'Progressive generation failed.');
-      });
+      };
+
+      let completed;
+      // Native EventSource is the lightest path in DB-free/demo mode. Authenticated deployments
+      // keep the fetch-stream fallback because EventSource cannot attach an Authorization header.
+      const platformToken = sessionStorage.getItem('aiTestPilotToken') || '';
+      if (!platformToken && typeof EventSource === 'function') completed = await consumeEventSource(start.eventsUrl, onEvent);
+      else completed = await consumeFetchStream(start.eventsUrl, onEvent);
+
       if (!completed) throw new Error('Generation stream ended before the suite completed.');
+      testCases = (completed.cases || []).map((tc) => ({ ...tc, source: tc.source || 'ai', automationReadiness: null }));
+      setGenerationUi(false);
+      renderCases();
+      setActivityStatus('Checking readiness', true);
+      status(`${testCases.length} test case(s) generated in ${((completed.durationMs || 0) / 1000).toFixed(1)}s · readiness validation starting…`);
     } catch (err) {
-      window.__aiTestPilotProgressiveGenerationActive = false;
-      window.__aiTestPilotSuspendReviewFilters = false;
-      setGenerationUiState(false);
-      showError(err.message || 'Progressive generation failed.');
+      setGenerationUi(false);
+      showError(err.message || 'Generation failed.');
       setActivityStatus('Error', false);
-      if (testCases.length) testCases = testCases.map((tc) => ({ ...tc, automationReadiness: null }));
       renderCases();
     } finally {
-      window.__aiTestPilotSuspendReviewFilters = false;
-      setGenerationUiState(false);
+      setGenerationUi(false);
       setBusy($('generateBtn'), false, '');
     }
   }
 
   function install() {
-    const style = document.createElement('style');
-    style.textContent = `
-      html.generation-active,body.generation-active{overflow-y:auto!important;overflow-x:hidden!important;height:auto!important;position:static!important}
-      .generation-active #cases.cases{max-height:none!important;overflow:visible!important;overscroll-behavior:auto!important}
-      .generation-preview-case{min-height:64px}.generation-preview-case .preflight{background:#dbeafe;color:#1d4ed8;font-weight:800}
-    `;
-    document.head.appendChild(style);
+    if (!document.getElementById('generationStableStyles')) {
+      const style = document.createElement('style');
+      style.id = 'generationStableStyles';
+      style.textContent = `
+        html.generation-active,body.generation-active{overflow-y:auto!important;pointer-events:auto!important}
+        body.generation-active #reviewFilterBar{display:none!important}
+        body.generation-active #cases{max-height:none!important;overflow:visible!important}
+        body.generation-active .modal:not(.show){display:none!important}
+      `;
+      document.head.appendChild(style);
+    }
     const button = $('generateBtn');
     if (!button || button.dataset.progressiveGenerationInstalled === 'true') return;
     button.dataset.progressiveGenerationInstalled = 'true';
