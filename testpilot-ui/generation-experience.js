@@ -40,6 +40,7 @@
     loadScript('/testnexus-branding.js', 'data-testnexus-branding');
     loadScript('/generation-types.js', 'data-generation-types');
     loadScript('/selection-master-fix.js', 'data-selection-master-fix');
+    loadScript('/custom-generation-scopes.js', 'data-custom-generation-scopes');
     loadScript('/generation-loading-ux.js', 'data-generation-loading-ux');
     loadScript('/progressive-generation.js', 'data-progressive-generation');
     loadScript('/review-filters.js', 'data-review-filters');
