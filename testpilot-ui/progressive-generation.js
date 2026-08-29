@@ -27,6 +27,7 @@
     if ($('reportBox')) $('reportBox').style.display = 'none';
     if ($('reportLink')) $('reportLink').removeAttribute('href');
     if ($('runBtn')) $('runBtn').disabled = true;
+    document.getElementById('generationCoverageProposal')?.remove();
   }
 
   function setGenerationUi(active) {
@@ -49,6 +50,32 @@
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+  }
+
+  function renderCoverageProposal(data) {
+    const casesEl = $('cases');
+    if (!casesEl) return;
+    let box = document.getElementById('generationCoverageProposal');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'generationCoverageProposal';
+      box.className = 'generation-coverage-proposal';
+      casesEl.insertAdjacentElement('beforebegin', box);
+    }
+    const score = Math.max(0, Math.min(100, Number(data?.coverageScore ?? data?.score ?? 0) || 0));
+    const count = Number(data?.proposedTestCaseCount ?? data?.proposedTestCaseCount ?? 0) || 0;
+    const max = Number(data?.maxTestCases || 0) || 0;
+    const summary = String(data?.coverageSummary || data?.summary || '').trim();
+    const covered = Array.isArray(data?.coveredAreas) ? data.coveredAreas.filter(Boolean) : [];
+    const gaps = Array.isArray(data?.knownGaps) ? data.knownGaps.filter(Boolean) : [];
+    box.innerHTML = `
+      <div class="generation-coverage-head">
+        <div><strong>AI proposed requirement coverage</strong><span>This is an AI estimate of story/scenario coverage, not source-code coverage.</span></div>
+        <div class="generation-coverage-score">${Math.round(score)}%</div>
+      </div>
+      <div class="generation-coverage-meta"><span>${count} test${count === 1 ? '' : 's'} proposed</span>${max ? `<span>Maximum ${max}</span>` : ''}</div>
+      ${summary ? `<div class="generation-coverage-summary">${esc(summary)}</div>` : ''}
+      ${(covered.length || gaps.length) ? `<details class="generation-coverage-details"><summary>Coverage details</summary>${covered.length ? `<div><b>Covered:</b> ${covered.map(esc).join(' · ')}</div>` : ''}${gaps.length ? `<div><b>Known gaps:</b> ${gaps.map(esc).join(' · ')}</div>` : ''}</details>` : ''}`;
   }
 
   function mergeGeneratedCases(incoming) {
@@ -90,7 +117,7 @@
     const html = (testCases || []).map((tc) => {
       const category = String(tc.testCategory || 'FUNCTIONAL').replaceAll('_', ' ');
       const customCategory = tc.customCategory ? ` · ${tc.customCategory}` : '';
-      const scenarioType = String(tc.customScenarioType || tc.type || 'functional');
+      const scenarioType = String(tc.customScenarioType || tc.type || 'positive');
       const priority = String(tc.priority || 'medium');
       const readiness = readinessLabel(tc);
       return `<div class="generation-case-preview">
@@ -100,7 +127,7 @@
         </div>
       </div>`;
     }).join('');
-    casesEl.innerHTML = html || '<div class="empty">Waiting for the first generated test case…</div>';
+    casesEl.innerHTML = html || '<div class="empty">Discovering the application and planning the smallest useful test suite…</div>';
     if ($('caseCount')) $('caseCount').textContent = String((testCases || []).length);
   }
 
@@ -115,7 +142,7 @@
         fn(value);
       };
       const types = [
-        'GENERATION_STARTED','DISCOVERY_COMPLETED','GENERATION_PLAN','BATCH_STARTED','BATCH_COMPLETED',
+        'GENERATION_STARTED','DISCOVERY_COMPLETED','COVERAGE_PLANNING_STARTED','GENERATION_PLAN','BATCH_STARTED','BATCH_COMPLETED',
         'READINESS_STARTED','READINESS_COMPLETED','READINESS_FAILED','READINESS_DRAINING',
         'GENERATION_COMPLETED','GENERATION_FAILED'
       ];
@@ -182,9 +209,6 @@
     if (selection.categories.includes('CUSTOM') && !selection.customCategories.length) {
       showError('Enter at least one custom test category, separated by comma or |.'); return;
     }
-    if (selection.scenarioTypes.includes('custom') && !selection.customScenarioTypes.length) {
-      showError('Enter at least one custom scenario type, separated by comma or |.'); return;
-    }
 
     sessionId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     humanCounter = 1;
@@ -192,8 +216,8 @@
     resetExecutionState();
     setGenerationUi(true);
     renderGenerationPreview();
-    status('Starting generation…');
-    setBusy($('generateBtn'), true, 'Generating test cases…');
+    status('Discovering application and planning coverage…');
+    setBusy($('generateBtn'), true, 'Planning & generating tests…');
 
     const securitySelected = selection.categories.includes('SECURITY');
     const paths = $('additionalPaths').value.split(',').map((v) => v.trim()).filter(Boolean);
@@ -214,21 +238,33 @@
     let generatedCount = 0;
     let readinessCompleted = 0;
     let total = 0;
+    let maxCases = 0;
+    let coverageScore = null;
     try {
       const startResponse = await fetch('/api/generation/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const start = await startResponse.json();
       if (!startResponse.ok) throw new Error(start.reply || 'Generation could not start.');
-      total = Number(start.totalRequested || 0);
-      status(`Generation started · 0/${total} · ${start.concurrency || 1} AI worker(s) · ${start.readinessConcurrency || 1} readiness worker(s)`);
+      maxCases = Number(start.maxTestCases || 0);
+      status(`Discovery started · AI will choose the useful suite size${maxCases ? ` up to ${maxCases} cases` : ''}.`);
 
       const onEvent = async (type, data) => {
         if (type === 'DISCOVERY_COMPLETED') {
-          status(`Page discovery complete in ${data.durationMs || 0} ms · generating ${total} test case(s)…`);
+          status(`Page discovery complete in ${data.durationMs || 0} ms · AI planning requirement coverage…`);
+        } else if (type === 'COVERAGE_PLANNING_STARTED') {
+          maxCases = Number(data.maxTestCases || maxCases || 0);
+          status(`AI is deciding the smallest useful suite${maxCases ? ` within the ${maxCases}-case limit` : ''}…`);
+        } else if (type === 'GENERATION_PLAN') {
+          total = Number(data.proposedTestCaseCount || data.units?.length || 0);
+          maxCases = Number(data.maxTestCases || maxCases || 0);
+          coverageScore = Number(data.coverageScore ?? 0);
+          renderCoverageProposal(data);
+          status(`AI proposed ${total} test case${total === 1 ? '' : 's'} · estimated requirement coverage ${Math.round(coverageScore)}% · generating now…`);
         } else if (type === 'BATCH_COMPLETED') {
           mergeGeneratedCases(data.cases || []);
           generatedCount = Math.max((testCases || []).length, Number(data.generatedSoFar || 0));
+          total = Number(data.totalRequested || total || generatedCount);
           renderGenerationPreview();
-          status(`AI generation ${generatedCount}/${data.totalRequested || total} · readiness ${readinessCompleted}/${generatedCount} checked`);
+          status(`AI generation ${generatedCount}/${total} · readiness ${readinessCompleted}/${generatedCount} checked${coverageScore == null ? '' : ` · proposed coverage ${Math.round(coverageScore)}%`}`);
         } else if (type === 'READINESS_STARTED') {
           patchCase(data.testCaseId, { __readinessChecking: true, __readinessError: null });
           renderGenerationPreview();
@@ -237,7 +273,7 @@
           else patchCase(data.testCaseId, { automationReadiness: data.readiness, __readinessChecking: false });
           readinessCompleted = Math.max(readinessCompleted, Number(data.completed || 0));
           renderGenerationPreview();
-          status(`AI generation ${generatedCount}/${total} · readiness ${readinessCompleted}/${Math.max(generatedCount, readinessCompleted)} checked`);
+          status(`AI generation ${generatedCount}/${total || generatedCount} · readiness ${readinessCompleted}/${Math.max(generatedCount, readinessCompleted)} checked${coverageScore == null ? '' : ` · proposed coverage ${Math.round(coverageScore)}%`}`);
         } else if (type === 'READINESS_FAILED') {
           patchCase(data.testCaseId, { __readinessChecking: false, __readinessError: data.message || 'Readiness validation failed.' });
           renderGenerationPreview();
@@ -253,11 +289,22 @@
 
       if (!completed) throw new Error('Generation stream ended before the suite completed.');
       mergeGeneratedCases(completed.cases || []);
+      if (completed.coverageProposal) {
+        coverageScore = Number(completed.coverageProposal.score ?? coverageScore ?? 0);
+        renderCoverageProposal({
+          coverageScore,
+          coverageSummary: completed.coverageProposal.summary,
+          coveredAreas: completed.coverageProposal.coveredAreas,
+          knownGaps: completed.coverageProposal.knownGaps,
+          proposedTestCaseCount: completed.coverageProposal.proposedTestCaseCount || completed.totalGenerated,
+          maxTestCases: completed.coverageProposal.maxTestCases || completed.maxTestCases || maxCases,
+        });
+      }
       setGenerationUi(false);
       renderCases();
       const ready = (testCases || []).filter((tc) => String(tc?.automationReadiness?.status || '').toUpperCase() === 'READY').length;
       setActivityStatus('Review required', false);
-      status(`${testCases.length} test case(s) generated in ${((completed.durationMs || 0) / 1000).toFixed(1)}s · ${ready}/${testCases.length} Automation Ready`);
+      status(`${testCases.length} AI-proposed test case(s) generated in ${((completed.durationMs || 0) / 1000).toFixed(1)}s · ${ready}/${testCases.length} Automation Ready${coverageScore == null ? '' : ` · proposed coverage ${Math.round(coverageScore)}%`}`);
     } catch (err) {
       setGenerationUi(false);
       showError(err.message || 'Generation failed.');
@@ -278,6 +325,8 @@
         body.generation-active #reviewFilterBar,body.generation-active .review-filter-bar,body.generation-active [data-review-filter-bar]{display:none!important}
         body.generation-active #cases{max-height:none!important;overflow:visible!important}
         body.generation-active .modal:not(.show){display:none!important}
+        .generation-coverage-proposal{margin:0 18px 10px;padding:12px 14px;border:1px solid #cfe0ff;border-radius:12px;background:linear-gradient(135deg,#f8fbff,#f4f7ff);box-shadow:0 4px 14px rgba(47,91,255,.04)}
+        .generation-coverage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.generation-coverage-head strong{display:block;color:#172033;font-size:11.5px}.generation-coverage-head span{display:block;margin-top:3px;color:#667085;font-size:9.5px}.generation-coverage-score{min-width:58px;text-align:center;padding:7px 9px;border-radius:10px;background:#eaf0ff;color:#3155c8;font-size:17px;font-weight:900}.generation-coverage-meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.generation-coverage-meta span{padding:3px 7px;border-radius:999px;background:#fff;border:1px solid #dce5ff;color:#475569;font-size:9.5px;font-weight:800}.generation-coverage-summary{margin-top:8px;color:#475569;font-size:10.5px;line-height:1.45}.generation-coverage-details{margin-top:7px;color:#667085;font-size:9.8px;line-height:1.5}.generation-coverage-details summary{cursor:pointer;color:#3857c8;font-weight:800}.generation-coverage-details div{margin-top:4px}
         .generation-case-preview{padding:13px 14px;border-bottom:1px solid #eef1f6;background:#fff}
         .generation-case-preview-title{font-size:12px;font-weight:800;color:#111827}
         .generation-case-preview-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
