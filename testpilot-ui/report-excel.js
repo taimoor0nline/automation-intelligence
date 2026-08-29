@@ -70,6 +70,27 @@
       .join('\n');
   }
 
+  function hasFailedRows() {
+    return Boolean(document.querySelector('[data-analysis-failed="true"]'));
+  }
+
+  function canExport() {
+    return !hasFailedRows() || document.body.dataset.aiAnalysisTerminal === 'true';
+  }
+
+  function analysisStatus(analysis, outcome) {
+    if (String(outcome || '').toUpperCase() === 'PASS') return 'NOT_REQUIRED';
+    const classification = text(analysis?.querySelector('.classification')).toUpperCase();
+    if (classification === 'ANALYSIS_ERROR' || analysis?.querySelector('.analysis-live.error')) return 'AI_ANALYSIS_ERROR';
+    if (classification) return 'COMPLETED';
+    if (document.body.dataset.aiAnalysisTerminal === 'true') return 'AI_ANALYSIS_ERROR';
+    return 'PENDING';
+  }
+
+  function analysisSummary(analysis) {
+    return text(analysis?.querySelector('.analysis-summary')) || text(analysis?.querySelector('.analysis-live-note'));
+  }
+
   function reportMetadata() {
     const meta = text(document.querySelector('.hero .meta'));
     const cards = [...document.querySelectorAll('.cards .card')];
@@ -90,6 +111,7 @@
       target: text(targetCard?.querySelector('strong')),
       environment: text(targetCard?.querySelector('.muted')),
       story: text(storyCard),
+      aiState: text(document.getElementById('reportAiLiveStatus')) || String(document.body.dataset.aiAnalysisState || 'UNKNOWN').replaceAll('_', ' '),
     };
   }
 
@@ -99,13 +121,16 @@
       const analysis = cells[5];
       const developer = analysis?.querySelector('.developer-box');
       const resolution = analysis?.querySelector('.resolution-box');
+      const outcome = text(cells[2]?.querySelector('.status')) || text(cells[2]);
+      const classification = text(analysis?.querySelector('.classification')) || (analysis?.querySelector('.analysis-live.error') ? 'ANALYSIS_ERROR' : '');
       return [
         text(cells[0]),
         text(cells[1]),
-        text(cells[2]?.querySelector('.status')) || text(cells[2]),
+        outcome,
         text(cells[3]),
-        text(analysis?.querySelector('.classification')),
-        text(analysis?.querySelector('.analysis-summary')),
+        analysisStatus(analysis, outcome),
+        classification,
+        analysisSummary(analysis),
         labeledDetail(analysis, 'Expected'),
         labeledDetail(analysis, 'Observed'),
         labeledDetail(analysis, 'Probable cause'),
@@ -131,6 +156,7 @@
     rows.push(rowXml(row++, ['AI TestPilot — Execution & AI Analysis'], 2));
     rows.push(rowXml(row++, ['Exported At', new Date().toISOString()]));
     rows.push(rowXml(row++, ['Run / Generated', meta.meta]));
+    rows.push(rowXml(row++, ['AI Analysis State', meta.aiState]));
     rows.push(rowXml(row++, ['Target', meta.target]));
     rows.push(rowXml(row++, ['Environment / Browser', meta.environment]));
     rows.push(rowXml(row++, ['Business Story', meta.story]));
@@ -139,7 +165,7 @@
 
     const headerRow = row;
     const headers = [
-      'Case','Test','Outcome','Duration','Failure Classification','AI Analysis Summary',
+      'Case','Test','Outcome','Duration','AI Analysis Status','Failure Classification','AI Analysis Summary',
       'Expected','Observed','Probable Cause','AI Resolution Guidance','Recommended Fix','Suggested Owner',
       'Source Guidance Level','Source Candidate Files','Developer Review Area','Implementation Hint',
       'Illustrative / Proposed Fix','Verification Steps','Regression Checks','Evidence Links'
@@ -150,14 +176,14 @@
     const lastRow = Math.max(headerRow, row - 1);
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <dimension ref="A1:T${lastRow}"/>
+  <dimension ref="A1:U${lastRow}"/>
   <sheetViews><sheetView workbookViewId="0"><pane ySplit="${headerRow}" topLeftCell="A${headerRow + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <cols>
     <col min="1" max="1" width="14" customWidth="1"/><col min="2" max="2" width="42" customWidth="1"/>
-    <col min="3" max="5" width="20" customWidth="1"/><col min="6" max="20" width="45" customWidth="1"/>
+    <col min="3" max="6" width="20" customWidth="1"/><col min="7" max="21" width="45" customWidth="1"/>
   </cols>
   <sheetData>${rows.join('')}</sheetData>
-  <autoFilter ref="A${headerRow}:T${lastRow}"/>
+  <autoFilter ref="A${headerRow}:U${lastRow}"/>
 </worksheet>`;
   }
 
@@ -234,6 +260,10 @@
   }
 
   function exportReport() {
+    if (!canExport()) {
+      window.alert('Excel export becomes available when AI analysis finishes or reaches an error state.');
+      return;
+    }
     const bytes = zipStore(workbookFiles());
     const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
@@ -248,9 +278,23 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
+  function syncButton(detail) {
+    const button = document.getElementById('exportAnalysisExcel');
+    if (!button) return;
+    const ready = detail?.busy === true ? false : canExport();
+    button.disabled = !ready;
+    button.style.opacity = ready ? '' : '.55';
+    button.style.cursor = ready ? '' : 'not-allowed';
+    button.title = ready
+      ? 'Export the execution report and current terminal AI-analysis state.'
+      : 'Excel becomes available when AI analysis finishes or reaches an error state.';
+  }
+
   function install() {
     const button = document.getElementById('exportAnalysisExcel');
     if (button) button.addEventListener('click', exportReport);
+    syncButton();
+    window.addEventListener('testnexus:report-ai-state', (event) => syncButton(event.detail || {}));
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
