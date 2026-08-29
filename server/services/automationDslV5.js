@@ -1,10 +1,70 @@
 const v4 = require("./automationDslV4");
 
+function humanizeActionName(value) {
+  return String(value || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeActionAlias(step) {
+  if (!step || typeof step !== "object") return step;
+  let action = humanizeActionName(step.action);
+  const aliases = new Map([
+    ["navigate to", "navigate"],
+    ["go to", "navigate"],
+    ["fill input", "fill"],
+    ["fill textarea", "fill"],
+    ["enter input", "fill"],
+    ["type input", "fill"],
+    ["click element", "click"],
+    ["select option", "select"],
+    ["choose option", "select"],
+    ["check checkbox", "choose"],
+    ["check radio", "choose"],
+    ["check", "choose"],
+  ]);
+  action = aliases.get(action) || action;
+  return { ...step, action };
+}
+
+function assertionFromVerificationStep(step) {
+  const action = humanizeActionName(step?.action);
+  const target = String(step?.target || "").trim();
+  const value = step?.value === null || step?.value === undefined ? "" : String(step.value);
+  if (!/^verify\b|^assert\b|^expect\b/.test(action)) return "";
+
+  if (/\burl\b|\bpath\b|navigation|redirect/.test(action)) {
+    const destination = value || target;
+    if (!destination) return "";
+    if (/^https?:\/\//i.test(destination)) return `URL equals "${destination}"`;
+    if (destination.startsWith("/")) return `Path equals "${destination}"`;
+    return `URL includes "${destination}"`;
+  }
+
+  if (target && (target.startsWith("[") || target.startsWith("#") || target.startsWith("."))) {
+    if (/not visible|hidden/.test(action)) return `Element ${target} is hidden`;
+    if (/not exist|absent/.test(action)) return `Element ${target} does not exist`;
+    if (/text/.test(action) && value) {
+      if (/contains|include/.test(action)) return `Text contains "${value}" in ${target}`;
+      return `Text equals "${value}" in ${target}`;
+    }
+    if (/checked/.test(action)) return `Element ${target} is checked`;
+    if (/enabled/.test(action)) return `Element ${target} is enabled`;
+    if (/disabled/.test(action)) return `Element ${target} is disabled`;
+    return `Element ${target} is visible`;
+  }
+  return "";
+}
+
 function normalizeKeyStep(step) {
-  const action = String(step?.action || "");
+  const aliased = normalizeActionAlias(step);
+  const action = String(aliased?.action || "");
   const match = action.match(/\bpress\s+(?:the\s+)?(?:key\s+)?["']?(Enter|Escape|Esc|UpArrow|DownArrow|LeftArrow|RightArrow|Home|End|Backspace|Delete|Del)["']?\b/i);
-  if (!match) return step;
-  return { ...step, action: "Press key", value: step?.value || match[1] };
+  if (!match) return aliased;
+  return { ...aliased, action: "Press key", value: aliased?.value || match[1] };
 }
 
 function normalizeExpectedResult(value) {
@@ -17,10 +77,6 @@ function normalizeExpectedResult(value) {
     /http\s+status(?:\s*code)?\s+for\s+(["'`][^"'`]+["'`])\s+(?:is|equals?|=)\s+(\d{3})/gi,
     "HTTP status is $2 for $1"
   );
-
-  // The V3 parser recognizes `Text contains "..."` directly. Human/AI test
-  // cases also commonly use `Text in <selector> contains "..."`; normalize
-  // that phrasing while keeping the grounded selector in the sentence.
   text = text.replace(
     /^\s*text\s+in\s+(\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\[name=(?:"[^"]+"|'[^']+')\])\s+(contains?|includes?)\s+(["'`][\s\S]+["'`])\s*$/i,
     (_all, selector, verb, expected) => `Text ${verb} ${expected} in ${selector}`
@@ -30,10 +86,28 @@ function normalizeExpectedResult(value) {
 
 function normalizeTestCase(testCase) {
   if (!testCase || typeof testCase !== "object") return testCase;
+  const sourceSteps = Array.isArray(testCase.steps) ? testCase.steps : [];
+  const normalizedSteps = [];
+  const promotedAssertions = [];
+
+  for (const sourceStep of sourceSteps) {
+    const verification = assertionFromVerificationStep(sourceStep);
+    if (verification) {
+      promotedAssertions.push(verification);
+      continue;
+    }
+    normalizedSteps.push(normalizeKeyStep(sourceStep));
+  }
+
+  const expectedResults = [
+    ...(Array.isArray(testCase.expectedResults) ? testCase.expectedResults.map(normalizeExpectedResult) : []),
+    ...promotedAssertions,
+  ];
+
   return {
     ...testCase,
-    steps: Array.isArray(testCase.steps) ? testCase.steps.map(normalizeKeyStep) : testCase.steps,
-    expectedResults: Array.isArray(testCase.expectedResults) ? testCase.expectedResults.map(normalizeExpectedResult) : testCase.expectedResults,
+    steps: normalizedSteps,
+    expectedResults,
   };
 }
 
@@ -128,6 +202,8 @@ module.exports = {
   ...v4,
   compileTestCase,
   normalizeTestCase,
+  normalizeActionAlias,
+  assertionFromVerificationStep,
   semanticAssertionText,
   hasStructuralIntent,
   removeFalseStructuralAssertions,
