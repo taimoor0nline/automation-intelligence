@@ -16,8 +16,9 @@
       });
       no.style.display=shown?'none':'block';
     });
-    const observer=new MutationObserver(()=>{if(!menu.contains(box))return;});observer.observe(menu,{childList:true});
   }
-  function scan(){document.querySelectorAll('.generation-category-menu').forEach(enhance)}
-  const observer=new MutationObserver(scan);observer.observe(document.documentElement,{childList:true,subtree:true});scan();
+  function scan(){if(window.__aiTestPilotProgressiveGenerationActive)return;document.querySelectorAll('.generation-category-menu').forEach(enhance)}
+  let scheduled=false;
+  function schedule(){if(window.__aiTestPilotProgressiveGenerationActive||scheduled)return;scheduled=true;setTimeout(()=>{scheduled=false;scan();},50)}
+  const observer=new MutationObserver(schedule);observer.observe(document.documentElement,{childList:true,subtree:true});scan();
 })();
