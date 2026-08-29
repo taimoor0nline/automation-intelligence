@@ -44,8 +44,8 @@
 })();
 
 (function () {
-  if (window.__aiTestPilotIncrementalExecution) return;
-  window.__aiTestPilotIncrementalExecution = true;
+  if (window.__aiTestPilotIsolatedExecution) return;
+  window.__aiTestPilotIsolatedExecution = true;
 
   const esc = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -72,8 +72,11 @@
 
     const status = document.getElementById('runStatus');
     if (status) {
-      status.textContent = progress.complete ? 'Finalizing' : `Running ${completed}/${total}`;
-      status.classList.add('activity-pill');
+      if (progress.status === 'FINALIZING') status.textContent = 'Finalizing';
+      else if (progress.status === 'DONE') status.textContent = 'Completed';
+      else if (progress.status === 'FAILED') status.textContent = 'Error';
+      else status.textContent = `Running ${completed}/${total}`;
+      status.classList.toggle('activity-pill', !['DONE', 'FAILED'].includes(progress.status));
     }
 
     const results = document.getElementById('results');
@@ -81,38 +84,98 @@
     const rows = Array.isArray(progress.tests) ? progress.tests.map((test) => {
       const duration = test.durationMs == null ? '' : `<div class="expected">Duration: ${esc(test.durationMs)} ms</div>`;
       const error = test.err?.message ? `<div class="expected">${esc(test.err.message).slice(0, 260)}</div>` : '';
-      return `<div class="result"><div class="result-title">${esc(test.title)}${duration}${error}</div><span class="badge ${test.pass ? 'pass' : 'fail'}">${test.pass ? 'PASS' : 'FAIL'}</span></div>`;
+      const evidence = test.evidence?.screenshotAvailable
+        ? '<div class="result-evidence"><span style="font-size:10.5px;font-weight:700;color:var(--green)">Screenshot captured</span></div>'
+        : '';
+      return `<div class="result"><div class="result-title">${esc(test.title)}${duration}${error}${evidence}</div><span class="badge ${test.pass ? 'pass' : 'fail'}">${test.pass ? 'PASS' : 'FAIL'}</span></div>`;
     }).join('') : '';
+
     const remaining = Math.max(0, total - completed);
-    const waiting = remaining > 0
-      ? `<div class="empty" style="padding:18px 12px">${remaining} test${remaining === 1 ? '' : 's'} remaining · same controlled browser session continues…</div>`
-      : '';
+    let waiting = '';
+    if (progress.type === 'TEST_STARTED' && progress.currentTestCaseId) {
+      waiting = `<div class="empty" style="padding:18px 12px">Executing ${esc(progress.currentTestCaseId)} in a fresh controlled Chrome instance…</div>`;
+    } else if (progress.status === 'FINALIZING') {
+      waiting = '<div class="empty" style="padding:18px 12px">All tests executed · verifying final Chromium cleanup and building analytics…</div>';
+    } else if (remaining > 0) {
+      waiting = `<div class="empty" style="padding:18px 12px">${remaining} test${remaining === 1 ? '' : 's'} remaining · next test starts in a fresh Chrome instance after evidence capture and cleanup.</div>`;
+    }
     results.innerHTML = rows + waiting;
   }
 
-  async function pollProgress(activeRef) {
-    let lastCompleted = -1;
-    while (activeRef.active) {
-      try {
-        const response = await fetch(`/api/test-runs/progress/${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
-        const data = await response.json();
-        const progress = data?.progress;
-        if (response.ok && progress && Number(progress.completed || 0) !== lastCompleted) {
-          lastCompleted = Number(progress.completed || 0);
-          renderLiveProgress(progress);
-        }
-        if (progress?.complete && data.state !== 'RUNNING') break;
-      } catch {}
-      await new Promise((resolve) => setTimeout(resolve, 500));
+  function processSseBlock(block, state) {
+    const lines = String(block || '').split(/\r?\n/);
+    let eventType = 'message';
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith(':')) continue;
+      if (line.startsWith('event:')) eventType = line.slice(6).trim();
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
     }
+    if (!dataLines.length) return;
+    try {
+      const event = JSON.parse(dataLines.join('\n'));
+      event.type = event.type || eventType;
+      state.lastEvent = event;
+      renderLiveProgress(event);
+      if (event.type === 'RUN_COMPLETED') {
+        state.completed = true;
+      } else if (event.type === 'RUN_FAILED') {
+        state.completed = true;
+        state.error = event.error || 'Isolated execution failed.';
+      }
+    } catch (err) {
+      console.warn('[execution-sse] Could not parse event', err);
+    }
+  }
+
+  async function streamExecution(state) {
+    const response = await fetch(`/api/test-runs/events/${encodeURIComponent(sessionId)}`, {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
+      cache: 'no-store',
+      signal: state.controller.signal,
+    });
+    if (!response.ok) throw new Error(`Execution event stream failed (${response.status}).`);
+    if (!response.body) throw new Error('Execution event stream is not supported by this browser.');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          processSseBlock(block, state);
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+      if (buffer.trim()) processSseBlock(buffer, state);
+    } catch (err) {
+      if (err?.name !== 'AbortError') throw err;
+    } finally {
+      try { reader.releaseLock(); } catch {}
+    }
+  }
+
+  async function loadFinalResult() {
+    const response = await fetch(`/api/test-runs/result/${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.reply || 'Final execution result is unavailable.');
+    return data;
   }
 
   function install() {
     const oldButton = document.getElementById('runBtn');
-    if (!oldButton || oldButton.dataset.incrementalExecution === '1') return;
+    if (!oldButton || oldButton.dataset.isolatedExecution === '1') return;
 
     const runButton = oldButton.cloneNode(true);
-    runButton.dataset.incrementalExecution = '1';
+    runButton.dataset.isolatedExecution = '1';
     oldButton.replaceWith(runButton);
 
     runButton.addEventListener('click', async () => {
@@ -123,50 +186,62 @@
         return;
       }
 
-      setBusy(runButton, true, 'Running tests…');
-      setActivityStatus('Starting browser', true);
+      setBusy(runButton, true, 'Starting isolated tests…');
+      setActivityStatus('Starting run', true);
       const results = document.getElementById('results');
-      if (results) results.innerHTML = `<div class="activity-alert">Starting controlled browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will report results one-by-one while Chrome remains open for the run.</small></div>`;
+      if (results) {
+        results.innerHTML = `<div class="activity-alert">Starting isolated browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will execute one-by-one. Each test captures evidence, pauses, closes its owned Chrome, then starts the next test in a fresh browser.</small></div>`;
+      }
       const analysis = document.getElementById('analysis');
       if (analysis) analysis.innerHTML = '';
       const reportBox = document.getElementById('reportBox');
       if (reportBox) reportBox.style.display = 'none';
 
-      const activeRef = { active: true };
-      const pollPromise = pollProgress(activeRef);
+      const streamState = {
+        controller: new AbortController(),
+        completed: false,
+        error: null,
+        lastEvent: null,
+      };
+      let streamPromise = null;
 
       try {
-        const response = await fetch('/api/chat', {
+        streamPromise = streamExecution(streamState);
+
+        const startResponse = await fetch('/api/test-runs/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId,
-            message: 'approve reviewed cases',
             approvedIds: approved,
             reviewedTestCases: testCases,
           }),
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.reply || 'Execution failed.');
+        const startData = await startResponse.json();
+        if (!startResponse.ok) throw new Error(startData.reply || 'Could not start isolated execution.');
 
-        activeRef.active = false;
-        await pollPromise;
-        if (typeof window.renderResults === 'function') window.renderResults(data.summary, data.failureAnalyses || []);
-        else if (typeof renderResults === 'function') renderResults(data.summary, data.failureAnalyses || []);
+        setActivityStatus(`Running 0/${startData.total}`, true);
+        await streamPromise;
+        if (streamState.error) throw new Error(streamState.error);
 
-        if (data.reportUrl) {
+        const finalData = await loadFinalResult();
+        if (typeof window.renderResults === 'function') window.renderResults(finalData.summary, finalData.failureAnalyses || []);
+        else if (typeof renderResults === 'function') renderResults(finalData.summary, finalData.failureAnalyses || []);
+
+        if (finalData.reportUrl) {
           const link = document.getElementById('reportLink');
           const box = document.getElementById('reportBox');
-          if (link) link.href = data.reportUrl;
+          if (link) link.href = finalData.reportUrl;
           if (box) box.style.display = 'block';
         }
         setActivityStatus('Completed', false);
       } catch (err) {
-        activeRef.active = false;
-        await pollPromise;
+        streamState.controller.abort();
+        if (streamPromise) await streamPromise.catch(() => {});
         showError(err.message || 'Execution failed.');
         setActivityStatus('Error', false);
       } finally {
+        streamState.controller.abort();
         setBusy(runButton, false, '');
       }
     });
