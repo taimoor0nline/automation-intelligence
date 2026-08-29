@@ -7,10 +7,11 @@
   if (!window.__aiTestPilotNativeFetch) window.__aiTestPilotNativeFetch = window.fetch.bind(window);
 
   // Readiness batching is an internal execution concern. Testers should review business test
-  // cases rather than tune request orchestration. readiness.js owns the fixed internal batch size.
-  window.__aiTestPilotReadinessBatchSize = 5;
+  // cases rather than tune request orchestration. readiness.js reads this internal cookie.
+  const INTERNAL_READINESS_BATCH_SIZE = 5;
+  window.__aiTestPilotReadinessBatchSize = INTERNAL_READINESS_BATCH_SIZE;
   try {
-    document.cookie = 'aiTestPilotReadinessBatchSize=; Max-Age=0; Path=/; SameSite=Lax';
+    document.cookie = `aiTestPilotReadinessBatchSize=${INTERNAL_READINESS_BATCH_SIZE}; Path=/; SameSite=Lax`;
   } catch {}
 
   // Keep generation deliberately simple and non-invasive.
