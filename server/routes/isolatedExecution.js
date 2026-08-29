@@ -11,9 +11,11 @@ const { validateGroundedScript } = require('../services/scriptValidator');
 const { executeIsolatedSuite } = require('../services/isolatedSuiteRunner');
 const { buildAnalyticsReport } = require('../services/reportGenerator');
 const { publishExecutionEvent, subscribeExecutionEvents } = require('../services/executionEventBus');
+const { assessRestTestCases, generateRestAutomation, readinessSummary: restReadinessSummary } = require('../services/restAutomationService');
 const persistence = require('../services/persistenceService');
 
 const TEST_ID_REGEX = /TC(?:\d{3}|-H\d{3})/i;
+const TEST_ID_STRICT = /^TC(?:\d{3}|-H\d{3})$/;
 const RUNNABLE_STATES = new Set(['AWAITING_APPROVAL', 'DONE']);
 const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || 'false').toLowerCase() === 'true';
 const ARTIFACT_ROOT = path.resolve(__dirname, '..', '..', 'automation-system', 'artifacts');
@@ -28,6 +30,10 @@ function qaManagerOnly(req, res, next) {
 
 function safeRunId(value) {
   return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
+}
+
+function clean(value, max = 1000) {
+  return String(value ?? '').trim().slice(0, max);
 }
 
 function selectorFor(item) {
@@ -78,6 +84,45 @@ function resolveLoginRuntime(pageDiscoveries = []) {
   };
 }
 
+function normalizeReviewedRestCases(input, fallback = []) {
+  if (!Array.isArray(input)) return fallback;
+  const seen = new Set();
+  return input.slice(0, 50).map((raw, index) => {
+    let id = clean(raw?.id, 20).toUpperCase();
+    if (!TEST_ID_STRICT.test(id) || seen.has(id)) id = `TC-H${String(index + 1).padStart(3, '0')}`;
+    seen.add(id);
+    return {
+      ...raw,
+      id,
+      title: clean(raw?.title, 300),
+      type: ['positive','negative','boundary','functional','custom'].includes(String(raw?.type || '').toLowerCase()) ? String(raw.type).toLowerCase() : 'functional',
+      priority: ['low','medium','high'].includes(String(raw?.priority || '').toLowerCase()) ? String(raw.priority).toLowerCase() : 'medium',
+      preconditions: Array.isArray(raw?.preconditions) ? raw.preconditions.slice(0, 20).map((value) => clean(value, 500)) : [],
+      testData: raw?.testData && typeof raw.testData === 'object' && !Array.isArray(raw.testData) ? raw.testData : {},
+      steps: Array.isArray(raw?.steps) ? raw.steps.slice(0, 30) : [],
+      expectedResults: Array.isArray(raw?.expectedResults) ? raw.expectedResults.slice(0, 20).map((value) => clean(value, 700)) : [],
+      apiRequest: raw?.apiRequest && typeof raw.apiRequest === 'object' ? raw.apiRequest : null,
+      apiAssertions: Array.isArray(raw?.apiAssertions) ? raw.apiAssertions.slice(0, 30) : [],
+      source: raw?.source || 'ai-reviewed',
+    };
+  }).filter((testCase) => testCase.title && testCase.apiRequest);
+}
+
+function normalizeRuntimeRestAuth(input = {}, fallback = {}) {
+  const type = String(input?.type || fallback?.type || 'NONE').toUpperCase();
+  if (!['NONE','BASIC','BEARER','API_KEY_HEADER'].includes(type)) throw new Error(`Unsupported REST authentication type: ${type}.`);
+  const auth = {
+    type,
+    username: type === 'BASIC' ? String(input?.username ?? fallback?.username ?? '') : '',
+    secret: type === 'NONE' ? '' : String(input?.secret ?? fallback?.secret ?? ''),
+    headerName: type === 'API_KEY_HEADER' ? String(input?.headerName ?? fallback?.headerName ?? '') : '',
+  };
+  if (type !== 'NONE' && !auth.secret) throw new Error('REST authentication secret is required for execution.');
+  if (type === 'BASIC' && !auth.username) throw new Error('REST basic-auth username is required for execution.');
+  if (type === 'API_KEY_HEADER' && !auth.headerName) throw new Error('REST API-key header name is required for execution.');
+  return auth;
+}
+
 function evidenceUrls(summary, sessionId, artifacts) {
   const encodedSession = encodeURIComponent(sessionId);
   return {
@@ -101,6 +146,7 @@ function evidenceUrls(summary, sessionId, artifacts) {
 }
 
 function deterministicFindings(session, summary) {
+  const rest = String(session.targetType || 'WEB').toUpperCase() === 'REST';
   return (summary.tests || [])
     .filter((test) => test.fail)
     .map((test) => {
@@ -108,9 +154,9 @@ function deterministicFindings(session, summary) {
       const testCase = (session.testCases || []).find((item) => item.id === testCaseId) || null;
       return {
         testCase: testCaseId,
-        category: 'ASSERTION_FAILURE',
+        category: rest ? 'API_RESPONSE_MISMATCH' : 'ASSERTION_FAILURE',
         expected: Array.isArray(testCase?.expectedResults) ? testCase.expectedResults.join('; ') : '',
-        observed: test.err?.message || 'The deterministic browser test failed.',
+        observed: test.err?.message || (rest ? 'The deterministic REST assertion failed.' : 'The deterministic browser test failed.'),
         failedAssertion: null,
         aiRecommended: true,
       };
@@ -225,6 +271,8 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
   const {
     sessionId = 'default',
     approvedIds = [],
+    reviewedTestCases = null,
+    apiAuth = null,
   } = req.body || {};
   const session = getSession(sessionId);
   const userId = req.user?.sub || session.createdBy || null;
@@ -240,6 +288,16 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
         reply: 'Automation readiness is still being checked. Run Approved Tests is locked until readiness validation completes.',
         readinessPending: true,
       });
+    }
+
+    const targetType = String(session.targetType || 'WEB').toUpperCase() === 'REST' ? 'REST' : 'WEB';
+    if (targetType === 'REST') {
+      const operations = Array.isArray(session.apiOperations) ? session.apiOperations : [];
+      if (!operations.length) throw new Error('REST session has no grounded API operations.');
+      session.testCases = assessRestTestCases(normalizeReviewedRestCases(reviewedTestCases, session.testCases), operations);
+      session.automationReadiness = restReadinessSummary(session.testCases);
+      session.readinessValidated = true;
+      session.apiAuth = normalizeRuntimeRestAuth(apiAuth || {}, session.apiAuth || {});
     }
 
     const approvedSet = new Set((Array.isArray(approvedIds) ? approvedIds : []).map((id) => String(id).toUpperCase()));
@@ -258,34 +316,68 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
       });
     }
 
-    const base = new URL(session.targetUrl);
-    const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
-    const loginRuntime = resolveLoginRuntime(session.pageDiscoveries || []);
-    const executionContext = {
-      baseUrl: `${base.protocol}//${base.host}`,
-      hasCredentials,
-      credentials: session.credentials,
-      loginPath: loginRuntime.path,
-      loginSelectors: loginRuntime.selectors,
-    };
+    let executionContext;
+    let generateAutomation = null;
+    let validateGenerated = null;
+    let runnerOptions = null;
+
+    if (targetType === 'REST') {
+      executionContext = {
+        targetType: 'REST',
+        baseUrl: session.targetUrl,
+        apiAuth: session.apiAuth,
+      };
+      generateAutomation = (testCase) => generateRestAutomation([testCase]);
+      runnerOptions = {
+        headed: false,
+        demoStepDelayMs: 0,
+        screenshotEachTest: false,
+        screenshotOnRunFailure: false,
+        completionPauseMs: 0,
+        video: false,
+      };
+    } else {
+      const base = new URL(session.targetUrl);
+      const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
+      const loginRuntime = resolveLoginRuntime(session.pageDiscoveries || []);
+      executionContext = {
+        baseUrl: `${base.protocol}//${base.host}`,
+        hasCredentials,
+        credentials: session.credentials,
+        loginPath: loginRuntime.path,
+        loginSelectors: loginRuntime.selectors,
+      };
+      validateGenerated = (generated, testCase) => validateGroundedScript(generated.script, {
+        approvedTestCases: [testCase],
+        pageDiscoveries: session.pageDiscoveries || [],
+        hasCredentials,
+        loginSelectors: loginRuntime.selectors,
+        frameworkOwnedSelectors: ['body'],
+      });
+    }
 
     const runNumber = (session.runHistory?.length || 0) + 1;
     const suiteRunId = safeRunId(`suite-${runNumber}-${Date.now()}-${randomUUID().slice(0, 6)}`);
     session.approvedIds = approvedTestCases.map((testCase) => testCase.id);
     session.failureAnalyses = [];
     session.state = 'RUNNING';
+    const screenshotEachTest = targetType === 'WEB' && String(process.env.AUTOMATION_SCREENSHOT_EACH_TEST ?? 'true').toLowerCase() !== 'false';
+    const completionPauseMs = targetType === 'WEB'
+      ? Math.max(0, Math.min(Number(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS || 5000), 30000))
+      : 0;
     session.executionProgress = {
       runId: suiteRunId,
       runNumber,
       status: 'STARTING',
+      targetType,
       total: approvedTestCases.length,
       completed: 0,
       passed: 0,
       failed: 0,
       tests: [],
       executionMode: 'isolated-per-test',
-      screenshotEachTest: String(process.env.AUTOMATION_SCREENSHOT_EACH_TEST ?? 'true').toLowerCase() !== 'false',
-      completionPauseMs: Math.max(0, Math.min(Number(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS || 5000), 30000)),
+      screenshotEachTest,
+      completionPauseMs,
     };
 
     res.status(202).json({
@@ -293,10 +385,12 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
       accepted: true,
       runId: suiteRunId,
       runNumber,
+      targetType,
       total: approvedTestCases.length,
       executionMode: 'isolated-per-test',
       eventUrl: `/api/test-runs/events/${encodeURIComponent(sessionId)}`,
-      completionPauseMs: session.executionProgress.completionPauseMs,
+      completionPauseMs,
+      screenshotEachTest,
     });
 
     setImmediate(async () => {
@@ -305,30 +399,27 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
           testCases: approvedTestCases,
           executionContext,
           suiteRunId,
-          validateGenerated: (generated, testCase) => validateGroundedScript(generated.script, {
-            approvedTestCases: [testCase],
-            pageDiscoveries: session.pageDiscoveries || [],
-            hasCredentials,
-            loginSelectors: loginRuntime.selectors,
-            frameworkOwnedSelectors: ['body'],
-          }),
+          generateAutomation,
+          validateGenerated,
+          runnerOptions,
           onEvent: (type, payload) => {
             if (type === 'RUN_COMPLETED') {
               session.executionProgress = {
                 ...(session.executionProgress || {}),
                 ...payload,
+                targetType,
                 status: 'FINALIZING',
                 type: 'RUN_FINALIZING',
               };
               publishExecutionEvent(sessionId, 'RUN_FINALIZING', session.executionProgress);
               return;
             }
-            publishProgress(sessionId, session, type, payload);
+            publishProgress(sessionId, session, type, { ...payload, targetType });
           },
         });
 
         session.artifacts = result.artifacts || null;
-        const summary = evidenceUrls(result.summary, sessionId, session.artifacts);
+        const summary = evidenceUrls({ ...result.summary, targetType }, sessionId, session.artifacts);
         const findings = deterministicFindings(session, summary);
         const completedAt = new Date().toISOString();
         const historyEntry = {
@@ -362,6 +453,7 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
           ...(session.executionProgress || {}),
           runId: suiteRunId,
           runNumber,
+          targetType,
           status: 'DONE',
           total: summary.total,
           completed: summary.total,
@@ -375,11 +467,12 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
 
         await persistCompletedRun(sessionId, session, userId);
         publishExecutionEvent(sessionId, 'RUN_COMPLETED', session.executionProgress);
-        console.log(`[isolated-execution] Run #${runNumber} completed: ${summary.passed} passed, ${summary.failed} failed; final Chromium cleanup=${result.finalCleanup?.verifiedGone ? 'verified' : 'warning'}.`);
+        console.log(`[isolated-execution] ${targetType} run #${runNumber} completed: ${summary.passed} passed, ${summary.failed} failed; owned Chromium cleanup=${result.finalCleanup?.verifiedGone ? 'verified' : 'warning'}.`);
       } catch (err) {
         session.state = 'AWAITING_APPROVAL';
         session.executionProgress = {
           ...(session.executionProgress || {}),
+          targetType,
           status: 'FAILED',
           complete: true,
           error: err.message || String(err),
@@ -407,6 +500,7 @@ router.get('/api/test-runs/result/:sessionId', qaManagerOnly, (req, res) => {
     analysisPending: Number(session.lastResults.summary.failed || 0) > 0,
     reportUrl: `/api/reports/${encodeURIComponent(req.params.sessionId || 'default')}`,
     executionMode: session.lastResults.summary.executionMode || 'isolated-per-test',
+    targetType: String(session.targetType || 'WEB').toUpperCase() === 'REST' ? 'REST' : 'WEB',
   });
 });
 
