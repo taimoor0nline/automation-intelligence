@@ -28,6 +28,13 @@ function scheduleExpiry(job) {
   timer.unref?.();
 }
 
+function closeClients(job) {
+  for (const client of job.clients) {
+    try { client.end(); } catch {}
+  }
+  job.clients.clear();
+}
+
 function send(job, type, payload = {}) {
   const event = { type, at: new Date().toISOString(), ...payload };
   job.events.push(event);
@@ -101,6 +108,7 @@ function liveItems(session, results) {
 }
 
 function updateReport(sessionId, session, analyses) {
+  if (!session.lastResults?.summary) return;
   session.failureAnalyses = analyses;
   session.reportHtml = buildAnalyticsReport({
     sessionId,
@@ -111,6 +119,25 @@ function updateReport(sessionId, session, analyses) {
     analyses,
     model: session.aiModelTier || "strong",
   });
+}
+
+function cancelAnalysisForSession(sessionId, reason = "AI failure analysis cancelled.") {
+  const job = [...jobs.values()].find((item) =>
+    item.sessionId === sessionId && ["QUEUED", "RUNNING", "CANCELLING"].includes(item.state)
+  );
+  if (!job) return { cancelled: false, jobId: null };
+  job.cancelRequested = true;
+  job.cancelReason = reason;
+  if (job.state !== "CANCELLING") {
+    job.state = "CANCELLING";
+    send(job, "ANALYSIS_CANCEL_REQUESTED", {
+      runNumber: job.runNumber,
+      completed: job.completed,
+      totalFailed: job.totalFailed,
+      reason,
+    });
+  }
+  return { cancelled: true, jobId: job.jobId, runNumber: job.runNumber };
 }
 
 async function analyzeOne(session, test) {
@@ -138,6 +165,7 @@ async function runJob(job, sessionId, session, failures) {
   let cursor = 0;
   const workers = Array.from({ length: Math.min(job.concurrency, failures.length) }, (_, workerIndex) => (async () => {
     while (true) {
+      if (job.cancelRequested) break;
       const index = cursor++;
       if (index >= failures.length) break;
       const test = failures[index];
@@ -153,6 +181,7 @@ async function runJob(job, sessionId, session, failures) {
       });
       try {
         const analysis = await analyzeOne(session, test);
+        if (job.cancelRequested) break;
         job.results.push(analysis);
         job.completed += 1;
         send(job, "ANALYSIS_ITEM_COMPLETED", {
@@ -167,6 +196,7 @@ async function runJob(job, sessionId, session, failures) {
           totalFailed: failures.length,
         });
       } catch (err) {
+        if (job.cancelRequested) break;
         job.completed += 1;
         job.failedAnalysisCount += 1;
         const fallback = {
@@ -193,10 +223,7 @@ async function runJob(job, sessionId, session, failures) {
         });
       }
 
-      // Live report/UI cells receive every result immediately through SSE.
-      // The server-side HTML file is checkpointed every five results so large
-      // reports do not trigger a full file rewrite for every AI completion.
-      if (job.completed % 5 === 0 || job.completed === failures.length) {
+      if (!job.cancelRequested && (job.completed % 5 === 0 || job.completed === failures.length)) {
         updateReport(sessionId, session, job.results);
         send(job, "ANALYSIS_CHECKPOINT", {
           runNumber: job.runNumber,
@@ -209,6 +236,21 @@ async function runJob(job, sessionId, session, failures) {
   })());
 
   await Promise.all(workers);
+
+  if (job.cancelRequested) {
+    job.state = "CANCELLED";
+    job.completedAt = new Date().toISOString();
+    send(job, "ANALYSIS_CANCELLED", {
+      runNumber: job.runNumber,
+      completed: job.completed,
+      totalFailed: failures.length,
+      reason: job.cancelReason || "AI failure analysis cancelled.",
+    });
+    closeClients(job);
+    scheduleExpiry(job);
+    return;
+  }
+
   updateReport(sessionId, session, job.results);
 
   const history = (session.runHistory || []).find((item) => item.runNumber === job.runNumber);
@@ -230,10 +272,7 @@ async function runJob(job, sessionId, session, failures) {
     reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
   });
 
-  for (const client of job.clients) {
-    try { client.end(); } catch {}
-  }
-  job.clients.clear();
+  closeClients(job);
   scheduleExpiry(job);
 }
 
@@ -252,7 +291,7 @@ router.post("/api/test-results/analyze/start", (req, res) => {
   const active = [...jobs.values()].find((item) =>
     item.sessionId === sessionId &&
     Number(item.runNumber) === Number(runNumber) &&
-    ["QUEUED", "RUNNING"].includes(item.state)
+    ["QUEUED", "RUNNING", "CANCELLING"].includes(item.state)
   );
   if (active) {
     return res.status(202).json({
@@ -280,6 +319,8 @@ router.post("/api/test-results/analyze/start", (req, res) => {
     events: [],
     clients: new Set(),
     startedAt: new Date().toISOString(),
+    cancelRequested: false,
+    cancelReason: null,
   };
   jobs.set(key(sessionId, jobId), job);
   session.failureAnalyses = [];
@@ -287,10 +328,7 @@ router.post("/api/test-results/analyze/start", (req, res) => {
   setImmediate(() => runJob(job, sessionId, session, failures).catch((err) => {
     job.state = "FAILED";
     send(job, "ANALYSIS_FAILED", { runNumber: job.runNumber, error: err.message, completed: job.completed, totalFailed: failures.length });
-    for (const client of job.clients) {
-      try { client.end(); } catch {}
-    }
-    job.clients.clear();
+    closeClients(job);
     scheduleExpiry(job);
   }));
 
@@ -365,7 +403,7 @@ router.get("/api/test-results/analyze/events/:sessionId/:jobId", (req, res) => {
     res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   }
 
-  if (["COMPLETED", "FAILED"].includes(job.state)) return res.end();
+  if (["COMPLETED", "FAILED", "CANCELLED"].includes(job.state)) return res.end();
   job.clients.add(res);
   const keepAlive = setInterval(() => {
     try { res.write(": keep-alive\n\n"); } catch {}
@@ -392,4 +430,5 @@ router.get("/api/test-results/analyze/status/:sessionId/:jobId", (req, res) => {
   });
 });
 
+router.cancelAnalysisForSession = cancelAnalysisForSession;
 module.exports = router;
