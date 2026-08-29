@@ -5,6 +5,7 @@ const { randomUUID } = require('crypto');
 const { executeSingleGeneratedSpec } = require('./singleSpecRunner');
 const { cleanupAutomationBrowsers } = require('./browserProcessCleanup');
 const { generateDeterministicAutomation } = require('./deterministicAutomationGenerator');
+const { normalizeTestCategory } = require('./testCategories');
 
 const ARTIFACT_DIR = path.join(__dirname, '..', '..', 'automation-system', 'artifacts');
 const ISOLATED_EVIDENCE_DIR = path.join(ARTIFACT_DIR, 'isolated');
@@ -18,6 +19,10 @@ function safeToken(value, fallback = 'item') {
   return safe || fallback;
 }
 
+function categoryOf(testCase) {
+  return normalizeTestCategory(testCase?.testCategory || testCase?.category || testCase?.testData?.__testCategory || 'FUNCTIONAL');
+}
+
 function copyEvidence(sourcePath, destinationPath) {
   if (!sourcePath || !fs.existsSync(sourcePath)) return null;
   fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
@@ -29,6 +34,8 @@ function syntheticFailure(testCase, message, durationMs) {
   return {
     title: `${testCase.id} — ${testCase.title}`,
     testCaseId: testCase.id,
+    testCategory: categoryOf(testCase),
+    testType: testCase.type || 'functional',
     pass: false,
     fail: true,
     state: 'failed',
@@ -118,6 +125,8 @@ async function executeIsolatedSuite({
       status: 'RUNNING',
       currentIndex: index + 1,
       currentTestCaseId: testCase.id,
+      testCategory: categoryOf(testCase),
+      testType: testCase.type || 'functional',
       title: testCase.title,
     });
 
@@ -131,6 +140,10 @@ async function executeIsolatedSuite({
     let result = execResult?.summary?.tests?.[0] || null;
     if (!execResult?.ok || !result) {
       result = syntheticFailure(testCase, execResult?.error || 'Automation execution produced no test result.', Date.now() - testStartedAt);
+    } else {
+      result.testCaseId = result.testCaseId || testCase.id;
+      result.testCategory = categoryOf(testCase);
+      result.testType = testCase.type || 'functional';
     }
 
     const sourceScreenshot = execResult?.artifacts?.screenshotsByTestCase?.[testCase.id] || null;
