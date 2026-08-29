@@ -37,6 +37,7 @@
       generateBtn.addEventListener('click', () => setFastProfile(), true);
     }
 
+    loadScript('/testnexus-branding.js', 'data-testnexus-branding');
     loadScript('/generation-types.js', 'data-generation-types');
     loadScript('/selection-master-fix.js', 'data-selection-master-fix');
     loadScript('/generation-loading-ux.js', 'data-generation-loading-ux');
