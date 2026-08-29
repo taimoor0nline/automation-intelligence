@@ -430,5 +430,7 @@ router.get("/api/test-results/analyze/status/:sessionId/:jobId", (req, res) => {
   });
 });
 
+global.__testNexusCancelFailureAnalysis = cancelAnalysisForSession;
 router.cancelAnalysisForSession = cancelAnalysisForSession;
+router.use(require("./executionControls"));
 module.exports = router;
