@@ -16,6 +16,11 @@ const jobs = new Map();
 const MAX_CASE_LIMIT = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 6) || 6, 50));
 const GENERATION_CONCURRENCY = Math.max(1, Math.min(Number(process.env.AI_GENERATION_CONCURRENCY || 2) || 2, 4));
 const READINESS_CONCURRENCY = Math.max(1, Math.min(Number(process.env.READINESS_CONCURRENCY || 2) || 2, 8));
+// A single planned case must not inherit a several-minute provider timeout and make the
+// whole suite appear frozen. The provider request can still finish in the background,
+// but this orchestration unit becomes terminal and the remaining generated suite is kept.
+const GENERATION_UNIT_TIMEOUT_MS = Math.max(30000, Math.min(Number(process.env.AI_GENERATION_UNIT_TIMEOUT_MS || 120000) || 120000, 300000));
+const GENERATION_UNIT_MAX_ATTEMPTS = Math.max(1, Math.min(Number(process.env.AI_GENERATION_UNIT_MAX_ATTEMPTS || 1) || 1, 3));
 const JOB_TTL_MS = 30 * 60 * 1000;
 const SCENARIO_TYPES = ['positive', 'negative', 'boundary'];
 
@@ -75,6 +80,19 @@ function pendingSummary(cases) {
     aiRepairable: 0,
     frameworkChangeRequired: 0,
   };
+}
+
+function withUnitTimeout(promise, unit) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`AI generation for planned case ${unit.index + 1} timed out after ${Math.round(GENERATION_UNIT_TIMEOUT_MS / 1000)} seconds.`);
+      error.code = 'AI_GENERATION_UNIT_TIMEOUT';
+      reject(error);
+    }, GENERATION_UNIT_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
 function newJob(sessionId) {
@@ -147,6 +165,8 @@ function createReadinessPool(job, session, slots) {
             generated: slots.filter(Boolean).length,
           });
         } catch (err) {
+          completed += 1;
+          updateSession();
           emit(job, 'READINESS_FAILED', { testCaseId: tc.id, message: err.message, completed, generated: slots.filter(Boolean).length });
         } finally {
           active -= 1;
@@ -175,6 +195,8 @@ async function runGeneration(job, input) {
       planning: true,
       concurrency: GENERATION_CONCURRENCY,
       readinessConcurrency: READINESS_CONCURRENCY,
+      generationUnitTimeoutMs: GENERATION_UNIT_TIMEOUT_MS,
+      generationUnitMaxAttempts: GENERATION_UNIT_MAX_ATTEMPTS,
     });
 
     const urls = discoveryUrls(input.targetUrl, input.additionalPaths);
@@ -235,6 +257,9 @@ async function runGeneration(job, input) {
       proposedTestCaseCount: plannedCount,
       maxTestCases: MAX_CASE_LIMIT,
       storyDiscoveryEvidenceRatio: compatibility.evidenceRatio,
+      generationComplete: null,
+      generatedTestCaseCount: 0,
+      generationFailures: [],
     };
 
     emit(job, 'GENERATION_PLAN', {
@@ -250,6 +275,7 @@ async function runGeneration(job, input) {
     });
 
     const slots = Array(plannedCount).fill(null);
+    const generationFailures = [];
     const readinessPool = createReadinessPool(job, session, slots);
     let nextUnit = 0;
     let completedCount = 0;
@@ -258,7 +284,7 @@ async function runGeneration(job, input) {
     async function generateUnit(unit, workerNumber) {
       const securityScope = unit.category === 'SECURITY';
       let lastError = null;
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
+      for (let attempt = 1; attempt <= GENERATION_UNIT_MAX_ATTEMPTS; attempt += 1) {
         const batchStarted = Date.now();
         emit(job, 'BATCH_STARTED', {
           batchNumber: unit.index + 1,
@@ -269,9 +295,12 @@ async function runGeneration(job, input) {
           requested: 1,
           generatedSoFar: completedCount,
           totalRequested: plannedCount,
+          attempt,
+          maxAttempts: GENERATION_UNIT_MAX_ATTEMPTS,
+          timeoutMs: GENERATION_UNIT_TIMEOUT_MS,
         });
         try {
-          const generated = await generateBatch({
+          const generated = await withUnitTimeout(generateBatch({
             story: input.story,
             pageDiscoveries: compact,
             environment: 'Test',
@@ -284,15 +313,12 @@ async function runGeneration(job, input) {
             securitySubcategories: securityScope ? input.securitySubcategories : [],
             securitySeverities: securityScope ? input.securitySeverities : [],
             modelTier: input.aiModelTier,
-          });
+          }), unit);
           feature ||= generated.feature;
           const raw = generated.testCases?.[0];
           if (!raw) throw new Error(`AI returned no ${unit.category}/${unit.scenarioType} test case.`);
           const duplicate = slots.some((existing) => existing && existing.title.trim().toLowerCase() === raw.title.trim().toLowerCase());
-          if (duplicate) {
-            lastError = new Error(`Duplicate test title returned for ${unit.category}/${unit.scenarioType}.`);
-            continue;
-          }
+          if (duplicate) throw new Error(`Duplicate test title returned for ${unit.category}/${unit.scenarioType}.`);
 
           const tc = {
             ...raw,
@@ -306,6 +332,7 @@ async function runGeneration(job, input) {
           const available = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
           session.testCases = available;
           session.automationReadiness = pendingSummary(available);
+          session.coverageProposal.generatedTestCaseCount = completedCount;
           emit(job, 'BATCH_COMPLETED', {
             batchNumber: unit.index + 1,
             workerNumber,
@@ -315,15 +342,42 @@ async function runGeneration(job, input) {
             cases: [tc],
             generatedSoFar: completedCount,
             totalRequested: plannedCount,
+            attempt,
           });
           readinessPool.enqueue(tc);
-          return;
+          return true;
         } catch (err) {
           lastError = err;
-          if (attempt === 2) throw err;
+          if (attempt < GENERATION_UNIT_MAX_ATTEMPTS) {
+            emit(job, 'BATCH_RETRY', {
+              batchNumber: unit.index + 1,
+              workerNumber,
+              category: unit.category,
+              scenarioType: unit.scenarioType,
+              attempt,
+              nextAttempt: attempt + 1,
+              maxAttempts: GENERATION_UNIT_MAX_ATTEMPTS,
+              message: err.message,
+            });
+          }
         }
       }
-      throw lastError || new Error('Generation unit failed.');
+
+      const failure = {
+        batchNumber: unit.index + 1,
+        category: unit.category,
+        scenarioType: unit.scenarioType,
+        rationale: unit.rationale || null,
+        code: lastError?.code || 'AI_GENERATION_UNIT_FAILED',
+        message: lastError?.message || 'AI generation unit failed.',
+      };
+      generationFailures.push(failure);
+      emit(job, 'BATCH_FAILED', {
+        ...failure,
+        generatedSoFar: completedCount,
+        totalRequested: plannedCount,
+      });
+      return false;
     }
 
     async function worker(workerNumber) {
@@ -340,10 +394,34 @@ async function runGeneration(job, input) {
     await Promise.all(Array.from({ length: workerCount }, (_, i) => worker(i + 1)));
 
     const generatedCases = slots.filter(Boolean);
-    if (generatedCases.length !== plannedCount) throw new Error(`Generation completed with ${generatedCases.length}/${plannedCount} AI-planned test cases.`);
+    if (!generatedCases.length) {
+      const firstFailure = generationFailures[0];
+      const error = new Error(firstFailure?.message || 'AI could not generate any of the planned test cases.');
+      error.code = firstFailure?.code || 'AI_GENERATION_ALL_UNITS_FAILED';
+      throw error;
+    }
+
+    if (generationFailures.length) {
+      const failureGaps = generationFailures.map((item) => `Planned case ${item.batchNumber} (${item.category}/${item.scenarioType}) was not generated: ${item.message}`);
+      session.coverageProposal = {
+        ...session.coverageProposal,
+        generationComplete: false,
+        generatedTestCaseCount: generatedCases.length,
+        generationFailures,
+        knownGaps: [...new Set([...(session.coverageProposal.knownGaps || []), ...failureGaps])],
+      };
+    } else {
+      session.coverageProposal.generationComplete = true;
+      session.coverageProposal.generatedTestCaseCount = generatedCases.length;
+    }
 
     job.state = 'VALIDATING';
-    emit(job, 'READINESS_DRAINING', { generated: generatedCases.length, completed: readinessPool.completed() });
+    emit(job, 'READINESS_DRAINING', {
+      generated: generatedCases.length,
+      planned: plannedCount,
+      generationFailed: generationFailures.length,
+      completed: readinessPool.completed(),
+    });
     await readinessPool.drain();
 
     const cases = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
@@ -357,6 +435,9 @@ async function runGeneration(job, input) {
       automationReadiness: session.automationReadiness,
       pageCount: pages.length,
       totalGenerated: cases.length,
+      plannedTestCases: plannedCount,
+      partialGeneration: generationFailures.length > 0,
+      generationFailures,
       maxTestCases: MAX_CASE_LIMIT,
       coverageProposal: session.coverageProposal,
       storyDiscoveryCompatibility: compatibility,
@@ -366,7 +447,7 @@ async function runGeneration(job, input) {
       concurrency: workerCount,
       readinessConcurrency: READINESS_CONCURRENCY,
     });
-    console.log(`[progressive-generation] session=${job.sessionId} planned=${plannedCount}/${MAX_CASE_LIMIT} coverage=${coveragePlan.coverageScore}% evidence=${compatibility.evidenceRatio}% cases=${cases.length} total=${Date.now() - startedAt}ms`);
+    console.log(`[progressive-generation] session=${job.sessionId} planned=${plannedCount}/${MAX_CASE_LIMIT} generated=${cases.length} generationFailures=${generationFailures.length} coverage=${coveragePlan.coverageScore}% evidence=${compatibility.evidenceRatio}% total=${Date.now() - startedAt}ms`);
   } catch (err) {
     job.error = err.message;
     session.state = 'IDLE';
@@ -441,6 +522,8 @@ router.post('/api/generation/start', allowQaManager, (req, res) => {
       batchSize: 1,
       concurrency: GENERATION_CONCURRENCY,
       readinessConcurrency: READINESS_CONCURRENCY,
+      generationUnitTimeoutMs: GENERATION_UNIT_TIMEOUT_MS,
+      generationUnitMaxAttempts: GENERATION_UNIT_MAX_ATTEMPTS,
       eventsUrl: `/api/generation/events/${encodeURIComponent(sessionId)}`,
     });
   } catch (err) { res.status(400).json({ reply: err.message }); }
