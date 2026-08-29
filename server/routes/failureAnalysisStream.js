@@ -68,6 +68,28 @@ function failedTestsFor(session) {
   return (session.lastResults?.summary?.tests || []).filter((test) => test.fail);
 }
 
+function testCaseIdFor(session, test) {
+  return String(testCaseFor(session, test)?.id || "").toUpperCase();
+}
+
+function isAnalysisError(analysis) {
+  return String(analysis?.classification || "").toUpperCase() === "ANALYSIS_ERROR";
+}
+
+function upsertAnalysis(results, analysis) {
+  const id = String(analysis?.testCase || "").toUpperCase();
+  if (!id) return [...(results || []), analysis];
+  return [...(results || []).filter((item) => String(item?.testCase || "").toUpperCase() !== id), analysis];
+}
+
+function mergeAnalyses(...groups) {
+  let merged = [];
+  for (const group of groups) {
+    for (const analysis of group || []) merged = upsertAnalysis(merged, analysis);
+  }
+  return merged;
+}
+
 function testForAnalysis(session, analysis) {
   const id = String(analysis?.testCase || "").toUpperCase();
   return failedTestsFor(session).find((test) => {
@@ -80,6 +102,11 @@ function latestJobForSession(sessionId, runNumber) {
   return [...jobs.values()]
     .filter((item) => item.sessionId === sessionId && Number(item.runNumber) === Number(runNumber))
     .sort((a, b) => Date.parse(b.startedAt || 0) - Date.parse(a.startedAt || 0))[0] || null;
+}
+
+function priorAnalysesForRun(sessionId, runNumber, session) {
+  const latest = latestJobForSession(sessionId, runNumber);
+  return mergeAnalyses(session.failureAnalyses || [], latest?.results || []);
 }
 
 function startedButIncomplete(job) {
@@ -159,7 +186,9 @@ async function runJob(job, sessionId, session, failures) {
   send(job, "ANALYSIS_STARTED", {
     runNumber: job.runNumber,
     totalFailed: failures.length,
+    totalExecutionFailures: job.totalExecutionFailures,
     concurrency: job.concurrency,
+    retryErrorsOnly: job.retryErrorsOnly,
   });
 
   let cursor = 0;
@@ -178,11 +207,12 @@ async function runJob(job, sessionId, session, failures) {
         title: tc.title,
         completed: job.completed,
         totalFailed: failures.length,
+        retryErrorsOnly: job.retryErrorsOnly,
       });
       try {
         const analysis = await analyzeOne(session, test);
         if (job.cancelRequested) break;
-        job.results.push(analysis);
+        job.results = upsertAnalysis(job.results, analysis);
         job.completed += 1;
         send(job, "ANALYSIS_ITEM_COMPLETED", {
           runNumber: job.runNumber,
@@ -194,6 +224,7 @@ async function runJob(job, sessionId, session, failures) {
           analysisHtml: analysisHtml(analysis, test),
           completed: job.completed,
           totalFailed: failures.length,
+          retryErrorsOnly: job.retryErrorsOnly,
         });
       } catch (err) {
         if (job.cancelRequested) break;
@@ -208,7 +239,7 @@ async function runJob(job, sessionId, session, failures) {
           severity: "medium",
           confidence: 0,
         };
-        job.results.push(fallback);
+        job.results = upsertAnalysis(job.results, fallback);
         send(job, "ANALYSIS_ITEM_FAILED", {
           runNumber: job.runNumber,
           index,
@@ -220,6 +251,7 @@ async function runJob(job, sessionId, session, failures) {
           error: err.message,
           completed: job.completed,
           totalFailed: failures.length,
+          retryErrorsOnly: job.retryErrorsOnly,
         });
       }
 
@@ -229,6 +261,7 @@ async function runJob(job, sessionId, session, failures) {
           runNumber: job.runNumber,
           completed: job.completed,
           totalFailed: failures.length,
+          retryErrorsOnly: job.retryErrorsOnly,
           reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
         });
       }
@@ -244,6 +277,7 @@ async function runJob(job, sessionId, session, failures) {
       runNumber: job.runNumber,
       completed: job.completed,
       totalFailed: failures.length,
+      retryErrorsOnly: job.retryErrorsOnly,
       reason: job.cancelReason || "AI failure analysis cancelled.",
     });
     closeClients(job);
@@ -253,9 +287,10 @@ async function runJob(job, sessionId, session, failures) {
 
   updateReport(sessionId, session, job.results);
 
+  const remainingErrors = job.results.filter(isAnalysisError).length;
   const history = (session.runHistory || []).find((item) => item.runNumber === job.runNumber);
   if (history) {
-    history.analysisStatus = "COMPLETED";
+    history.analysisStatus = remainingErrors > 0 ? "COMPLETED_WITH_ERRORS" : "COMPLETED";
     history.failureAnalyses = job.results;
     history.analyzedAt = new Date().toISOString();
   }
@@ -266,7 +301,9 @@ async function runJob(job, sessionId, session, failures) {
     runNumber: job.runNumber,
     completed: job.completed,
     totalFailed: failures.length,
-    failedAnalysisCount: job.failedAnalysisCount,
+    totalExecutionFailures: job.totalExecutionFailures,
+    failedAnalysisCount: remainingErrors,
+    retryErrorsOnly: job.retryErrorsOnly,
     failureAnalyses: job.results,
     summary: session.lastResults.summary,
     reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
@@ -277,13 +314,13 @@ async function runJob(job, sessionId, session, failures) {
 }
 
 router.post("/api/test-results/analyze/start", (req, res) => {
-  const { sessionId = "default" } = req.body || {};
+  const { sessionId = "default", retryErrorsOnly = false } = req.body || {};
   const session = getSession(sessionId);
   if (!session.lastResults?.summary) return res.status(409).json({ reply: "Run approved tests before requesting AI result analysis." });
   if (session.state === "RUNNING") return res.status(409).json({ reply: "Automation is still running. AI analysis starts only after execution completes." });
 
-  const failures = failedTestsFor(session);
-  if (!failures.length) {
+  const allFailures = failedTestsFor(session);
+  if (!allFailures.length) {
     return res.json({ ok: true, analysisNeeded: false, totalFailed: 0, failureAnalyses: [] });
   }
 
@@ -300,9 +337,40 @@ router.post("/api/test-results/analyze/start", (req, res) => {
       jobId: active.jobId,
       runNumber: active.runNumber,
       totalFailed: active.totalFailed,
+      totalExecutionFailures: active.totalExecutionFailures,
       concurrency: active.concurrency,
+      retryErrorsOnly: active.retryErrorsOnly,
       eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(active.jobId)}`,
     });
+  }
+
+  const prior = priorAnalysesForRun(sessionId, runNumber, session);
+  const priorById = new Map(prior.map((analysis) => [String(analysis?.testCase || "").toUpperCase(), analysis]));
+  let failures = allFailures;
+  let retainedResults = [];
+
+  if (retryErrorsOnly) {
+    retainedResults = prior.filter((analysis) => !isAnalysisError(analysis));
+    failures = allFailures.filter((test) => {
+      const previous = priorById.get(testCaseIdFor(session, test));
+      return !previous || isAnalysisError(previous);
+    });
+
+    if (!failures.length) {
+      session.failureAnalyses = retainedResults;
+      return res.json({
+        ok: true,
+        analysisNeeded: false,
+        retryNeeded: false,
+        totalFailed: 0,
+        totalExecutionFailures: allFailures.length,
+        failureAnalyses: retainedResults,
+      });
+    }
+
+    updateReport(sessionId, session, retainedResults);
+  } else {
+    session.failureAnalyses = [];
   }
 
   const jobId = `analysis-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -313,9 +381,11 @@ router.post("/api/test-results/analyze/start", (req, res) => {
     state: "QUEUED",
     concurrency: analysisConcurrency(),
     totalFailed: failures.length,
+    totalExecutionFailures: allFailures.length,
     completed: 0,
     failedAnalysisCount: 0,
-    results: [],
+    results: retainedResults,
+    retryErrorsOnly: Boolean(retryErrorsOnly),
     events: [],
     clients: new Set(),
     startedAt: new Date().toISOString(),
@@ -323,11 +393,17 @@ router.post("/api/test-results/analyze/start", (req, res) => {
     cancelReason: null,
   };
   jobs.set(key(sessionId, jobId), job);
-  session.failureAnalyses = [];
 
   setImmediate(() => runJob(job, sessionId, session, failures).catch((err) => {
     job.state = "FAILED";
-    send(job, "ANALYSIS_FAILED", { runNumber: job.runNumber, error: err.message, completed: job.completed, totalFailed: failures.length });
+    send(job, "ANALYSIS_FAILED", {
+      runNumber: job.runNumber,
+      error: err.message,
+      completed: job.completed,
+      totalFailed: failures.length,
+      totalExecutionFailures: allFailures.length,
+      retryErrorsOnly: job.retryErrorsOnly,
+    });
     closeClients(job);
     scheduleExpiry(job);
   }));
@@ -337,7 +413,9 @@ router.post("/api/test-results/analyze/start", (req, res) => {
     jobId,
     runNumber,
     totalFailed: failures.length,
+    totalExecutionFailures: allFailures.length,
     concurrency: job.concurrency,
+    retryErrorsOnly: job.retryErrorsOnly,
     eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(jobId)}`,
   });
 });
@@ -353,6 +431,7 @@ router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
       runNumber: session.lastResults?.runNumber || null,
       totalFailed: 0,
       completed: 0,
+      failedAnalysisCount: 0,
       items: [],
       startedTestCases: [],
     });
@@ -362,12 +441,14 @@ router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
   const job = latestJobForSession(sessionId, runNumber);
   if (!job) {
     const stored = Array.isArray(session.failureAnalyses) ? session.failureAnalyses : [];
+    const failedAnalysisCount = stored.filter(isAnalysisError).length;
     return res.json({
       ok: true,
       state: stored.length >= failures.length ? "COMPLETED" : "PENDING",
       runNumber,
       totalFailed: failures.length,
       completed: stored.length,
+      failedAnalysisCount,
       items: liveItems(session, stored),
       startedTestCases: [],
       eventsUrl: null,
@@ -381,9 +462,11 @@ router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
     runNumber: job.runNumber,
     state: job.state,
     totalFailed: job.totalFailed,
+    totalExecutionFailures: job.totalExecutionFailures,
     completed: job.completed,
-    failedAnalysisCount: job.failedAnalysisCount,
+    failedAnalysisCount: job.results.filter(isAnalysisError).length,
     concurrency: job.concurrency,
+    retryErrorsOnly: job.retryErrorsOnly,
     items: liveItems(session, job.results),
     startedTestCases: startedButIncomplete(job),
     eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(job.jobId)}`,
@@ -423,9 +506,11 @@ router.get("/api/test-results/analyze/status/:sessionId/:jobId", (req, res) => {
     runNumber: job.runNumber,
     state: job.state,
     totalFailed: job.totalFailed,
+    totalExecutionFailures: job.totalExecutionFailures,
     completed: job.completed,
-    failedAnalysisCount: job.failedAnalysisCount,
+    failedAnalysisCount: job.results.filter(isAnalysisError).length,
     concurrency: job.concurrency,
+    retryErrorsOnly: job.retryErrorsOnly,
     failureAnalyses: job.results,
   });
 });
