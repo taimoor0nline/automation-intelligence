@@ -2,9 +2,12 @@
   if (window.__testNexusExecutionControls) return;
   window.__testNexusExecutionControls = true;
 
+  const START_LABEL = 'Start Tests';
+  const RETEST_LABEL = 'Re-test Approved Tests';
   let cancellationRequested = false;
   let resetting = false;
   let lastApprovedIds = [];
+  let hasCompletedExecution = false;
 
   function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -26,7 +29,9 @@
   }
 
   function checkedIds() {
-    return Array.from(document.querySelectorAll('.case-check:checked')).map((el) => String(el.value || '')).filter(Boolean);
+    return Array.from(document.querySelectorAll('.case-check:checked'))
+      .map((el) => String(el.value || ''))
+      .filter(Boolean);
   }
 
   function applyApprovedIds(ids) {
@@ -43,6 +48,15 @@
 
   function isRunningStatus(value = statusText()) {
     return value.startsWith('starting') || value.startsWith('running') || value === 'finalizing' || value === 'stopping' || value === 'cancelling';
+  }
+
+  function hasReviewedCases() {
+    try { return Array.isArray(testCases) && testCases.length > 0; } catch { return false; }
+  }
+
+  function hasExecutionData() {
+    if (document.querySelector('#results .result')) return true;
+    return Number(document.getElementById('mTotal')?.textContent || 0) > 0;
   }
 
   function ensureStyles() {
@@ -63,22 +77,11 @@
     document.head.appendChild(style);
   }
 
-  function setRunLabel(text) {
+  function setRunLabel(text, force = false) {
     const button = document.getElementById('runBtn');
     if (!button) return;
     button.dataset.oldText = text;
-    if (!button.disabled) button.textContent = text;
-  }
-
-  function hasReviewedCases() {
-    try { return Array.isArray(testCases) && testCases.length > 0; } catch { return false; }
-  }
-
-  function hasExecutionData() {
-    const current = statusText();
-    if (!['', 'idle', 'ready', 'review required'].includes(current)) return true;
-    if (document.querySelector('#results .result')) return true;
-    return Number(document.getElementById('mTotal')?.textContent || 0) > 0;
+    if (force || !button.disabled) button.textContent = text;
   }
 
   function clearExecutionUi() {
@@ -104,7 +107,6 @@
 
   function ensureControls() {
     ensureStyles();
-
     const runBtn = document.getElementById('runBtn');
     const runbar = runBtn?.closest('.runbar');
     if (!runBtn || !runbar) return;
@@ -169,15 +171,15 @@
   async function stopExecution() {
     const session = sid();
     if (!session || cancellationRequested || resetting) return;
-    if (!window.confirm('Stop the currently running execution? Any unfinished test cases will stop, while the reviewed test suite will remain available for re-run.')) return;
+    if (!window.confirm('Stop the currently running execution? Any unfinished test cases will stop, while the reviewed test suite will remain available for re-test.')) return;
 
     const button = document.getElementById('stopExecutionBtn');
     cancellationRequested = true;
     if (button) { button.disabled = true; button.textContent = 'Stopping…'; }
     try {
       try { if (typeof setActivityStatus === 'function') setActivityStatus('Stopping', true); } catch {}
-      const data = await requestStopUntilAccepted(session);
-      if (!data?.cancelled) finishStopped();
+      await requestStopUntilAccepted(session);
+      finishStopped();
     } catch (err) {
       cancellationRequested = false;
       try { if (typeof showError === 'function') showError(err.message); } catch {}
@@ -188,15 +190,16 @@
 
   function finishStopped() {
     cancellationRequested = false;
+    hasCompletedExecution = true;
     const stop = document.getElementById('stopExecutionBtn');
     if (stop) { stop.disabled = false; stop.textContent = 'Stop Execution'; stop.style.display = 'none'; }
     try { if (typeof clearError === 'function') clearError(); } catch {}
     try { if (typeof setActivityStatus === 'function') setActivityStatus('Stopped', false); } catch {}
     const results = document.getElementById('results');
-    if (results) results.innerHTML = '<div class="empty">Execution stopped. Reviewed test cases remain available for re-run.</div>';
+    if (results) results.innerHTML = '<div class="empty">Execution stopped. Reviewed test cases remain available for re-test.</div>';
     const runBtn = document.getElementById('runBtn');
-    if (runBtn && hasReviewedCases()) runBtn.disabled = false;
-    setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
+    if (runBtn && hasReviewedCases()) runBtn.disabled = checkedIds().length === 0;
+    setRunLabel(RETEST_LABEL, true);
     refreshControls();
   }
 
@@ -245,10 +248,11 @@
       if (Array.isArray(data.approvedIds) && data.approvedIds.length) lastApprovedIds = [...data.approvedIds];
       clearExecutionUi();
       applyApprovedIds(lastApprovedIds);
+      hasCompletedExecution = false;
       try { if (typeof setActivityStatus === 'function') setActivityStatus(hasReviewedCases() ? 'Ready' : 'Idle', false); } catch {}
       const runBtn = document.getElementById('runBtn');
-      if (runBtn) runBtn.disabled = !hasReviewedCases();
-      setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
+      if (runBtn) runBtn.disabled = !hasReviewedCases() || checkedIds().length === 0;
+      setRunLabel(START_LABEL, true);
     } catch (err) {
       try { if (typeof showError === 'function') showError(err.message); } catch {}
     } finally {
@@ -263,12 +267,15 @@
     const current = statusText();
     const running = isRunningStatus(current);
     const generating = current === 'generating';
-    const completed = current.startsWith('completed') || current === 'analysis complete';
+    const completed = current.startsWith('completed') || current === 'done' || current === 'analysis complete';
     const stopped = current === 'stopped' || current === 'cancelled';
     const errored = current === 'error';
+    const ready = current === 'ready';
     const stop = document.getElementById('stopExecutionBtn');
     const reset = document.getElementById('resetExecutionBtn');
     const runBtn = document.getElementById('runBtn');
+
+    if (completed || stopped || (errored && hasExecutionData())) hasCompletedExecution = true;
 
     if (stop) {
       stop.style.display = running ? 'inline-flex' : 'none';
@@ -276,74 +283,93 @@
     }
 
     if (reset) {
-      const showReset = running || completed || stopped || errored || hasExecutionData();
+      const showReset = running || hasCompletedExecution || hasExecutionData();
       reset.style.display = showReset ? 'inline-flex' : 'none';
       reset.disabled = generating || resetting;
     }
 
     if (runBtn) {
       runBtn.style.display = running ? 'none' : 'inline-flex';
-      if (completed || stopped) setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
+      if (!running) {
+        if (hasCompletedExecution) {
+          setRunLabel(RETEST_LABEL, true);
+          runBtn.disabled = !hasReviewedCases() || checkedIds().length === 0;
+        } else if (ready || hasReviewedCases()) {
+          setRunLabel(START_LABEL, true);
+          // Readiness code may temporarily keep the button locked. Only explicitly unlock when all visible checked cases are already enabled.
+          const checked = checkedIds();
+          const readinessPending = Array.from(document.querySelectorAll('.case-check')).some((box) => box.disabled && box.checked);
+          if (!readinessPending) runBtn.disabled = checked.length === 0;
+        }
+      }
     }
 
     if (cancellationRequested && current === 'error' && !resetting) finishStopped();
   }
 
   function bindLifecycle() {
-    const runBtn = document.getElementById('runBtn');
-    if (runBtn && runBtn.dataset.executionControlsBound !== '1') {
-      runBtn.dataset.executionControlsBound = '1';
-      runBtn.addEventListener('click', () => {
-        const rerun = /re-run approved tests/i.test(String(runBtn.dataset.oldText || runBtn.textContent || ''));
-        if (rerun && lastApprovedIds.length) applyApprovedIds(lastApprovedIds);
-        else lastApprovedIds = checkedIds();
-        cancellationRequested = false;
-        setTimeout(refreshControls, 0);
-      }, true);
-    }
+    if (document.body.dataset.executionLifecycleBound === '1') return;
+    document.body.dataset.executionLifecycleBound = '1';
+
+    document.addEventListener('click', (event) => {
+      const runBtn = event.target.closest('#runBtn');
+      if (!runBtn) return;
+      const approved = hasCompletedExecution && lastApprovedIds.length ? lastApprovedIds : checkedIds();
+      if (approved.length) {
+        lastApprovedIds = [...approved];
+        if (hasCompletedExecution) applyApprovedIds(lastApprovedIds);
+      }
+      cancellationRequested = false;
+      setTimeout(refreshControls, 0);
+    }, true);
 
     const generateBtn = document.getElementById('generateBtn');
-    if (generateBtn && generateBtn.dataset.executionControlsBound !== '1') {
-      generateBtn.dataset.executionControlsBound = '1';
+    if (generateBtn) {
       generateBtn.addEventListener('click', () => {
         cancellationRequested = false;
+        hasCompletedExecution = false;
         lastApprovedIds = [];
-        setRunLabel('Run Approved Tests');
+        setRunLabel(START_LABEL, true);
         setTimeout(refreshControls, 0);
       }, true);
     }
 
+    window.addEventListener('testnexus:execution-starting', (event) => {
+      const approvedIds = event.detail?.approvedIds;
+      if (Array.isArray(approvedIds) && approvedIds.length) lastApprovedIds = [...approvedIds];
+      hasCompletedExecution = false;
+      setTimeout(refreshControls, 0);
+    });
+    window.addEventListener('testnexus:execution-started', refreshControls);
+    window.addEventListener('testnexus:execution-completed', (event) => {
+      const approvedIds = event.detail?.approvedIds;
+      if (Array.isArray(approvedIds) && approvedIds.length) lastApprovedIds = [...approvedIds];
+      hasCompletedExecution = true;
+      const runBtn = document.getElementById('runBtn');
+      if (runBtn) runBtn.disabled = false;
+      setRunLabel(RETEST_LABEL, true);
+      setTimeout(refreshControls, 0);
+    });
+    window.addEventListener('testnexus:execution-failed', (event) => {
+      if (event.detail?.executionStarted) hasCompletedExecution = true;
+      setTimeout(refreshControls, 0);
+    });
+
     const status = document.getElementById('runStatus');
-    if (status && status.dataset.executionControlsObserved !== '1') {
-      status.dataset.executionControlsObserved = '1';
-      new MutationObserver(refreshControls).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
-    }
-
+    if (status) new MutationObserver(refreshControls).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
     const results = document.getElementById('results');
-    if (results && results.dataset.executionControlsObserved !== '1') {
-      results.dataset.executionControlsObserved = '1';
-      new MutationObserver(refreshControls).observe(results, { childList: true, subtree: true });
-    }
-
-    const errorBox = document.getElementById('errorBox');
-    if (errorBox && errorBox.dataset.executionControlsObserved !== '1') {
-      errorBox.dataset.executionControlsObserved = '1';
-      new MutationObserver(() => {
-        if (!cancellationRequested || resetting) return;
-        if (/cancel|stop/i.test(String(errorBox.textContent || ''))) finishStopped();
-      }).observe(errorBox, { childList: true, characterData: true, subtree: true, attributes: true });
-    }
+    if (results) new MutationObserver(refreshControls).observe(results, { childList: true, subtree: true });
   }
 
   function start() {
     ensureControls();
     bindLifecycle();
+    setRunLabel(START_LABEL, true);
     let attempts = 0;
     const timer = setInterval(() => {
       ensureControls();
-      bindLifecycle();
       refreshControls();
-      if (++attempts > 80) clearInterval(timer);
+      if (++attempts > 120) clearInterval(timer);
     }, 250);
   }
 
