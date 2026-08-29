@@ -22,13 +22,15 @@
     const apiInput = document.querySelector(`#generationCategoryMenu input[data-test-category][value="${WEB_EXCLUDED_CATEGORY}"]`);
     if (apiInput) {
       apiInput.checked = false;
-      apiInput.closest('.generation-category-option')?.setAttribute('hidden', '');
+      const option = apiInput.closest('.generation-category-option');
+      if (option && !option.hidden) option.hidden = true;
     }
 
     const apiSecurityInput = document.querySelector(`#securitySubcategoryMenu input[data-security-subcategory][value="${WEB_EXCLUDED_SECURITY_AREA}"]`);
     if (apiSecurityInput) {
       apiSecurityInput.checked = false;
-      apiSecurityInput.closest('.generation-category-option')?.setAttribute('hidden', '');
+      const option = apiSecurityInput.closest('.generation-category-option');
+      if (option && !option.hidden) option.hidden = true;
     }
   }
 
@@ -54,7 +56,8 @@
     const text = all ? 'All available test categories' : `${selected.length} categor${selected.length === 1 ? 'y' : 'ies'} selected`;
     const expectedHtml = `<span>${text}</span><span class="generation-chevron">⌄</span>`;
     if (button.innerHTML !== expectedHtml) button.innerHTML = expectedHtml;
-    button.title = selected.map((input) => pretty(input.value)).join(', ');
+    const title = selected.map((input) => pretty(input.value)).join(', ');
+    if (button.title !== title) button.title = title;
     if (count) count.textContent = all ? 'All' : String(selected.length);
   }
 
@@ -74,7 +77,8 @@
     const text = all ? 'All security areas' : `${selected.length} selected`;
     const expectedHtml = `<span>${text}</span><span class="generation-chevron">⌄</span>`;
     if (button.innerHTML !== expectedHtml) button.innerHTML = expectedHtml;
-    button.title = selected.map((input) => pretty(input.value)).join(', ');
+    const title = selected.map((input) => pretty(input.value)).join(', ');
+    if (button.title !== title) button.title = title;
   }
 
   function enforceWebOnlyUi() {
@@ -110,19 +114,14 @@
   document.addEventListener('change', (event) => {
     const target = event.target;
     if (!target?.matches?.('#generationCategoryMenu input, #securitySubcategoryMenu input')) return;
-    setTimeout(() => {
-      hideGenerationApiOptions();
-      syncCategorySummary();
-      syncSecuritySummary();
-    }, 0);
+    setTimeout(enforceWebOnlyUi, 0);
   });
 
-  const observer = new MutationObserver(() => enforceWebOnlyUi());
-
   function start() {
-    enforceWebOnlyUi();
-    observer.observe(document.body, { childList: true, subtree: true });
-    setTimeout(() => observer.disconnect(), 8000);
+    // Bounded retries replace the previous whole-document MutationObserver.
+    // The category/review widgets are injected during startup, so checking a few times is sufficient
+    // and avoids repeatedly scanning the DOM while all other UI modules are loading.
+    [0, 80, 220, 600, 1200].forEach((delay) => setTimeout(enforceWebOnlyUi, delay));
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
