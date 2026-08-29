@@ -12,7 +12,8 @@
     "db:migrate": "node server/db/migrate.js",
     "test:platform": "node scripts/platform-smoke.js",
     "test:rest": "node scripts/rest-smoke.js",
-    "test:capabilities": "node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js"
+    "test:assertion-grounding": "node scripts/assertion-grounding-regression-smoke.js",
+    "test:capabilities": "node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
