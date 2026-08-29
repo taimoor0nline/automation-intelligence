@@ -1,4 +1,5 @@
-const MAX_GENERATED_CASES = 5;
+const configuredMax = Number(process.env.AI_TEST_CASE_COUNT || 5);
+const MAX_GENERATED_CASES = Math.max(1, Math.min(Number.isFinite(configuredMax) ? Math.trunc(configuredMax) : 5, 50));
 
 function evidenceText(story, pageDiscoveries) {
   return `${String(story || "")}\n${JSON.stringify(pageDiscoveries || [])}`.toLowerCase();
@@ -61,7 +62,6 @@ function pruneGeneratedTestCases(testCases, { story = "", pageDiscoveries = [], 
     if (retained.length >= Math.max(1, Math.min(Number(maxCases) || MAX_GENERATED_CASES, MAX_GENERATED_CASES))) break;
   }
 
-  // Never turn a valid AI response into an empty suite solely because of conservative pruning.
   const safe = retained.length ? retained : (Array.isArray(testCases) ? testCases.slice(0, 1) : []);
   return safe.map((testCase, index) => ({ ...testCase, id: `TC${String(index + 1).padStart(3, "0")}` }));
 }
