@@ -1,6 +1,9 @@
 const db = require('../db');
 const { normalizeTestCategory } = require('./testCategories');
 
+const SCENARIO_TYPES = new Set(['positive','negative','boundary','functional','custom']);
+const PRIORITIES = new Set(['low','medium','high']);
+
 function enabled() { return db.isConfigured(); }
 
 function categoryOf(testCase) {
@@ -10,6 +13,16 @@ function categoryOf(testCase) {
     testCase?.testData?.__testCategory ||
     'FUNCTIONAL'
   );
+}
+
+function scenarioTypeOf(testCase) {
+  const value = String(testCase?.type || 'functional').trim().toLowerCase();
+  return SCENARIO_TYPES.has(value) ? value : 'functional';
+}
+
+function priorityOf(testCase) {
+  const value = String(testCase?.priority || 'medium').trim().toLowerCase();
+  return PRIORITIES.has(value) ? value : 'medium';
 }
 
 async function persistSession(sessionId, session, context = {}) {
@@ -44,7 +57,6 @@ async function persistSession(sessionId, session, context = {}) {
       deterministicFindings: session.lastResults.deterministicFindings || [],
     } : null,
   };
-  // Browser credentials and REST authentication secrets are deliberately excluded from safeSession.
   await db.query(
     `insert into test_sessions(id,project_id,created_by,state,story,target_url,environment,ai_model_tier,repository_id,target_type,api_target_id,api_operation_ids,session_json)
      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)
@@ -62,13 +74,15 @@ async function persistTestCases(sessionId, testCases = []) {
   await db.withTransaction(async (client) => {
     for (const tc of testCases) {
       const testCategory = categoryOf(tc);
+      const scenarioType = scenarioTypeOf(tc);
+      const priority = priorityOf(tc);
       await client.query(
         `insert into test_cases(session_id,external_case_id,title,type,test_category,priority,source,case_json)
          values($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
          on conflict(session_id,external_case_id) do update set
            title=excluded.title,type=excluded.type,test_category=excluded.test_category,
            priority=excluded.priority,source=excluded.source,case_json=excluded.case_json`,
-        [sessionId, tc.id, tc.title, tc.type || null, testCategory, tc.priority || null, tc.source || null, JSON.stringify({ ...tc, testCategory })]
+        [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, tc.source || null, JSON.stringify({ ...tc, type: scenarioType, testCategory, priority })]
       );
     }
   });
@@ -107,18 +121,24 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
       ]
     );
     const runId = run.rows[0].id;
-    const categoryByCaseId = new Map(
-      (session.testCases || []).map((testCase) => [String(testCase.id || '').toUpperCase(), categoryOf(testCase)])
+    const classificationByCaseId = new Map(
+      (session.testCases || []).map((testCase) => [String(testCase.id || '').toUpperCase(), {
+        category: categoryOf(testCase),
+        scenarioType: scenarioTypeOf(testCase),
+        priority: priorityOf(testCase),
+      }])
     );
 
     await client.query('delete from test_results where run_id=$1', [runId]);
     for (const result of summary.tests || []) {
       const caseId = result.testCaseId || String(result.title || '').match(/TC(?:\d{3}|-H\d{3})/)?.[0] || null;
-      const testCategory = categoryByCaseId.get(String(caseId || '').toUpperCase()) || 'FUNCTIONAL';
+      const classification = classificationByCaseId.get(String(caseId || '').toUpperCase()) || {
+        category: 'FUNCTIONAL', scenarioType: 'functional', priority: 'medium',
+      };
       await client.query(
-        `insert into test_results(run_id,external_case_id,title,test_category,passed,duration_ms,error_message,evidence_json)
-         values($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
-        [runId, caseId, result.title || caseId || 'Test', testCategory, Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
+        `insert into test_results(run_id,external_case_id,title,test_category,scenario_type,priority,passed,duration_ms,error_message,evidence_json)
+         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+        [runId, caseId, result.title || caseId || 'Test', classification.category, classification.scenarioType, classification.priority, Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
       );
     }
     return runId;
