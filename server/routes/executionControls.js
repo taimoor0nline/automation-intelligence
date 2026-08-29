@@ -63,40 +63,67 @@ router.post("/api/reports/:sessionId/generate", allowQaManager, (req, res) => {
   const session = getSession(sessionId);
   const summary = session.lastResults?.summary;
 
-  if (!summary) {
-    return res.status(409).json({ ok: false, reply: "Complete a test execution before generating the AI analysis report." });
+  try {
+    if (!summary) {
+      return res.status(409).json({ ok: false, reply: "Complete a test execution before generating the AI analysis report." });
+    }
+    if (session.state === "RUNNING") {
+      return res.status(409).json({ ok: false, reply: "Wait for the current execution to complete before generating the report." });
+    }
+
+    // A report exists only after this explicit endpoint is called.
+    // Remove any stale file first so the URL can never serve a previous run accidentally.
+    clearReportGenerationRequest(sessionId);
+    removeReportFile(sessionId);
+
+    if (!requestReportGeneration(sessionId, summary)) {
+      throw new Error("The completed execution summary could not be registered for report generation.");
+    }
+
+    const html = buildAnalyticsReport({
+      sessionId,
+      story: session.story,
+      targetUrl: session.targetUrl,
+      environment: session.environment,
+      summary,
+      analyses: Array.isArray(session.failureAnalyses) ? session.failureAnalyses : [],
+    });
+
+    if (!html) {
+      throw new Error("The report renderer rejected the completed execution summary.");
+    }
+
+    const reportPath = path.join(REPORT_DIR, reportFileName(sessionId));
+    if (!fs.existsSync(reportPath) || fs.statSync(reportPath).size <= 0) {
+      throw new Error("The report HTML was rendered but the report file was not written successfully.");
+    }
+
+    session.reportHtml = html;
+    session.reportGeneratedAt = new Date().toISOString();
+    session.reportGeneratedForRun = session.lastResults?.runNumber || null;
+    session.reportGenerationError = null;
+
+    return res.json({
+      ok: true,
+      runNumber: session.lastResults?.runNumber || null,
+      total: Number(summary.total || 0),
+      failed: Number(summary.failed || 0),
+      analysisNeeded: Number(summary.failed || 0) > 0,
+      reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
+      analysisStartUrl: Number(summary.failed || 0) > 0 ? "/api/test-results/analyze/start" : null,
+      generatedAt: session.reportGeneratedAt,
+    });
+  } catch (err) {
+    session.reportHtml = null;
+    session.reportGenerationError = err.message || String(err);
+    clearReportGenerationRequest(sessionId);
+    removeReportFile(sessionId);
+    console.error(`[report-generation] session=${sessionId} failed:`, err);
+    return res.status(500).json({
+      ok: false,
+      reply: `AI analysis report generation failed: ${err.message || String(err)}`,
+    });
   }
-  if (session.state === "RUNNING") {
-    return res.status(409).json({ ok: false, reply: "Wait for the current execution to complete before generating the report." });
-  }
-
-  requestReportGeneration(sessionId, summary);
-  const html = buildAnalyticsReport({
-    sessionId,
-    story: session.story,
-    targetUrl: session.targetUrl,
-    environment: session.environment,
-    summary,
-    analyses: Array.isArray(session.failureAnalyses) ? session.failureAnalyses : [],
-  });
-
-  if (!html) {
-    return res.status(500).json({ ok: false, reply: "The analytics report could not be generated." });
-  }
-
-  session.reportHtml = html;
-  session.reportGeneratedAt = new Date().toISOString();
-  session.reportGeneratedForRun = session.lastResults?.runNumber || null;
-
-  return res.json({
-    ok: true,
-    runNumber: session.lastResults?.runNumber || null,
-    total: Number(summary.total || 0),
-    failed: Number(summary.failed || 0),
-    analysisNeeded: Number(summary.failed || 0) > 0,
-    reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
-    generatedAt: session.reportGeneratedAt,
-  });
 });
 
 router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) => {
@@ -122,6 +149,7 @@ router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) 
   session.reportHtml = null;
   session.reportGeneratedAt = null;
   session.reportGeneratedForRun = null;
+  session.reportGenerationError = null;
   session.generatedScript = [];
   session.state = Array.isArray(session.testCases) && session.testCases.length ? "AWAITING_APPROVAL" : "NEW";
 
@@ -141,7 +169,7 @@ router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) 
 });
 
 // Generation is mounted here as part of the already-active failure-analysis/control route tree.
-// This keeps /api/generation/* available without adding startup coupling to the main server bootstrap.
-router.use(require("./progressiveGeneration"));
+// Use the adaptive planner so AI_TEST_CASE_COUNT remains a ceiling rather than a required count.
+router.use(require("./progressiveGenerationAdaptive"));
 
 module.exports = router;
