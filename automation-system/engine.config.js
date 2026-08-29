@@ -1,6 +1,7 @@
 const { defineConfig } = require("cypress");
 const fs = require("fs");
 const path = require("path");
+const { createAdvancedTasks } = require("./advanced-capabilities");
 
 function boolEnv(value, fallback) {
   if (value == null || value === "") return fallback;
@@ -124,12 +125,19 @@ module.exports = defineConfig({
           });
           return null;
         },
+        ...createAdvancedTasks(),
       });
 
       on("before:browser:launch", (browser, launchOptions) => {
         if (browser.family === "chromium" && AUTOMATION_RUN_ID) {
           const marker = `--ai-testpilot-run-id=${AUTOMATION_RUN_ID}`;
           if (!launchOptions.args.includes(marker)) launchOptions.args.push(marker);
+        }
+
+        if (browser.family === "chromium" && boolEnv(process.env.AUTOMATION_FAKE_MEDIA_PERMISSIONS, false)) {
+          for (const arg of ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]) {
+            if (!launchOptions.args.includes(arg)) launchOptions.args.push(arg);
+          }
         }
 
         const streamingEnabled = boolEnv(process.env.AUTOMATION_LIVE_STREAM, false);
