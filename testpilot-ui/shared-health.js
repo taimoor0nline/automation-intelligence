@@ -46,6 +46,10 @@
     document.head.appendChild(script);
   }
 
+  // This tiny navigation script is intentionally loaded immediately. It must never wait
+  // for database, auth, AI, health, readiness, or the larger testing UI extensions.
+  loadUiExtension('/fast-mode-navigation.js', 'data-fast-mode-navigation');
+
   function loadExtensions() {
     loadUiExtension('/test-case-help.js', 'data-ai-testpilot-help');
     loadUiExtension('/test-category-ui.js', 'data-ai-testpilot-category-ui');
