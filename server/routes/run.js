@@ -350,6 +350,25 @@ router.get("/api/test-results/history/:sessionId", (req, res) => {
   });
 });
 
+router.get("/api/test-runs/progress/:sessionId", (req, res) => {
+  const session = getSession(req.params.sessionId || "default");
+  const progress = session.executionProgress || null;
+  return res.json({
+    ok: true,
+    state: session.state,
+    progress: progress || {
+      runId: null,
+      total: Array.isArray(session.approvedIds) ? session.approvedIds.length : 0,
+      completed: 0,
+      passed: 0,
+      failed: 0,
+      pending: Array.isArray(session.approvedIds) ? session.approvedIds.length : 0,
+      tests: [],
+      complete: session.state === "DONE",
+    },
+  });
+});
+
 router.post("/api/chat", async (req, res, next) => {
   const { sessionId = "default", message = "", reviewedTestCases = null, approvedIds = [] } = req.body || {};
   const isRunRequest = message === "approve reviewed cases" || Array.isArray(req.body?.approvedIds);
@@ -442,16 +461,64 @@ router.post("/api/chat", async (req, res, next) => {
     }];
     session.approvedIds = approved;
     session.failureAnalyses = [];
+    session.executionProgress = {
+      runId: null,
+      total: approved.length,
+      completed: 0,
+      passed: 0,
+      failed: 0,
+      pending: approved.length,
+      tests: [],
+      complete: false,
+      startedAt: new Date().toISOString(),
+    };
     session.state = "RUNNING";
 
-    const execResult = await executeSingleGeneratedSpec(generated, executionContext);
+    const execResult = await executeSingleGeneratedSpec(generated, executionContext, {
+      approvedIds: approved,
+      onStart: ({ runId, browser, total }) => {
+        session.executionProgress = {
+          ...(session.executionProgress || {}),
+          runId,
+          browser,
+          total: total || approved.length,
+          pending: total || approved.length,
+          complete: false,
+        };
+      },
+      onProgress: (progress) => {
+        session.executionProgress = {
+          ...(session.executionProgress || {}),
+          ...progress,
+          runId: session.executionProgress?.runId || execResult?.runId || null,
+        };
+      },
+    });
     if (!execResult.ok || !execResult.summary) {
+      session.executionProgress = {
+        ...(session.executionProgress || {}),
+        complete: true,
+        error: execResult.error || "unknown error",
+        updatedAt: new Date().toISOString(),
+      };
       session.state = "AWAITING_APPROVAL";
       return res.status(500).json({ reply: `Automation execution could not complete: ${execResult.error || "unknown error"}` });
     }
 
     session.artifacts = execResult.artifacts || null;
     const summary = addEvidenceUrls(execResult.summary, sessionId, session.artifacts);
+    session.executionProgress = {
+      ...(session.executionProgress || {}),
+      runId: execResult.runId || session.executionProgress?.runId || null,
+      total: summary.total,
+      completed: summary.tests.length,
+      passed: summary.passed,
+      failed: summary.failed,
+      pending: 0,
+      tests: summary.tests,
+      complete: true,
+      updatedAt: new Date().toISOString(),
+    };
     const deterministicFindings = summary.tests
       .filter((test) => test.fail)
       .map((test) => {
@@ -503,6 +570,12 @@ router.post("/api/chat", async (req, res, next) => {
     });
   } catch (err) {
     console.error("[single-spec]", err);
+    session.executionProgress = {
+      ...(session.executionProgress || {}),
+      complete: true,
+      error: err.message,
+      updatedAt: new Date().toISOString(),
+    };
     session.state = session.state === "RUNNING" ? "AWAITING_APPROVAL" : session.state;
     return res.status(500).json({ reply: `Error: ${err.message}` });
   }
