@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { modelForProfile } = require('./aiModelProfiles');
 
 function numberEnv(value, fallback) {
@@ -5,8 +7,14 @@ function numberEnv(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function boolEnv(value, fallback = false) {
+  if (value == null || value === '') return fallback;
+  return !['false', '0', 'no', 'off'].includes(String(value).toLowerCase());
+}
+
 const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_TIMEOUT_MS, 180000), 600000));
 const MAX_RETRIES = Math.max(0, Math.min(Math.trunc(numberEnv(process.env.QWEN_MAX_RETRIES, 1)), 3));
+const EXTERNAL_CAPABILITIES = ['EMAIL_SMS_OTP','CROSS_ORIGIN_IFRAME','REAL_MULTI_TAB','CAPTCHA_BIOMETRIC','NATIVE_MOBILE','BROWSER_EXTENSION','OS_DIALOG'];
 
 function ensureConfigured() {
   if (!process.env.QWEN_API_KEY || !process.env.QWEN_BASE_URL) throw new Error('AI provider is not configured.');
@@ -55,6 +63,75 @@ async function callModel(systemPrompt, userPayload, { modelTier = 'fast', attemp
   } finally { clearTimeout(timeout); }
 }
 
+function configuredDirectory(envName, fallback) {
+  const raw = String(process.env[envName] || '').trim();
+  if (!raw) return fallback;
+  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+}
+
+function safeFiles(directory, predicate = () => true, max = 50) {
+  try {
+    if (!fs.existsSync(directory)) return [];
+    return fs.readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && !entry.name.includes('..') && predicate(entry.name))
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, max);
+  } catch {
+    return [];
+  }
+}
+
+function namedDatabaseQueries() {
+  if (!boolEnv(process.env.AUTOMATION_DB_ASSERTIONS_ENABLED, false)) return [];
+  if (!String(process.env.AUTOMATION_DB_ASSERTION_URL || '').trim()) return [];
+  try {
+    const parsed = JSON.parse(process.env.AUTOMATION_DB_ASSERTION_QUERIES_JSON || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? Object.keys(parsed).filter(Boolean).sort().slice(0, 50)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function configuredExternalCapabilities() {
+  if (!String(process.env.AUTOMATION_EXTERNAL_ADAPTER_URL || '').trim()) return [];
+  const allowList = String(process.env.AUTOMATION_EXTERNAL_CAPABILITIES || '')
+    .split(',').map((value) => value.trim().toUpperCase()).filter(Boolean);
+  if (!allowList.length) return [...EXTERNAL_CAPABILITIES];
+  const allowed = new Set(EXTERNAL_CAPABILITIES);
+  return [...new Set(allowList.filter((value) => allowed.has(value)))];
+}
+
+function runtimeCapabilities() {
+  const root = path.resolve(__dirname, '..', '..');
+  const uploadDir = configuredDirectory('AUTOMATION_UPLOAD_FIXTURE_DIR', path.join(root, 'automation-system', 'fixtures', 'uploads'));
+  const baselineDir = configuredDirectory('AUTOMATION_VISUAL_BASELINE_DIR', path.join(root, 'automation-system', 'baselines'));
+  const uploadFixtures = safeFiles(uploadDir);
+  const visualBaselines = safeFiles(baselineDir, (name) => /\.png$/i.test(name));
+  const external = configuredExternalCapabilities();
+  const databaseQueries = namedDatabaseQueries();
+  const visualCanCreateBaseline = boolEnv(process.env.AUTOMATION_VISUAL_UPDATE_BASELINES, false);
+
+  return {
+    direct: {
+      WEB_VITALS: { available: true, assertions: ['LCP','CLS','INP'] },
+      FILE_UPLOAD: { available: uploadFixtures.length > 0, fixtures: uploadFixtures },
+      DRAG_AND_DROP: { available: true },
+      WEBSOCKET_SSE: { available: true, transports: ['WEBSOCKET','SSE'] },
+      BROWSER_PERMISSION: { available: true, mode: 'deterministic permission-state simulation' },
+      CLIPBOARD: { available: true, mode: 'application clipboard-write observation' },
+      BINARY_DOCUMENT_CONTENT: { available: true, formats: ['txt','csv','json','xml','html','pdf','docx','xls','xlsx','pptx'] },
+      VISUAL_REGRESSION: { available: visualBaselines.length > 0 || visualCanCreateBaseline, baselines: visualBaselines, baselineCreationEnabled: visualCanCreateBaseline },
+    },
+    database: {
+      DATABASE_ASSERTIONS: { available: databaseQueries.length > 0, namedQueries: databaseQueries, readOnly: true },
+    },
+    external: Object.fromEntries(EXTERNAL_CAPABILITIES.map((capability) => [capability, { available: external.includes(capability) }])),
+  };
+}
+
 const PLAN_PROMPT = `You are a senior QA test architect. Propose the SMALLEST evidence-grounded test suite that gives useful coverage of the supplied business requirement.
 
 Important rules:
@@ -65,8 +142,12 @@ Important rules:
 - Positive, negative and boundary are scenario types. FUNCTIONAL is a test category, not a scenario type.
 - Each planned test must cover a materially distinct behavior, rule, risk, state or boundary.
 - Do not invent validation rules, boundaries, messages, controls, selectors or business rules that are absent from the story/discovery.
+- runtimeCapabilities is authoritative for advanced automation availability. Use an advanced capability only when the story actually requires it AND runtimeCapabilities marks it available.
+- If the story requires an advanced capability that is unavailable (for example email/SMS adapter, DB named query, file fixture, visual baseline, native/mobile adapter, cross-origin iframe, real multi-tab or OS dialog), put that limitation in knownGaps instead of allocating an unrunnable test solely for it.
+- CAPTCHA/biometric support means an explicitly configured vendor-supported non-production test adapter only. Never propose defeating a production security challenge.
 - If the configured ceiling prevents fuller coverage, explicitly list the remaining gaps.
-- coverageScore is an AI ESTIMATE of requirement/scenario coverage achieved by this proposed suite, from 0 to 100. It is NOT source-code coverage and NOT a measured execution metric.
+- coverageScore is an AI ESTIMATE of requirement/scenario coverage achieved by this proposed runnable suite, from 0 to 100. It is NOT source-code coverage and NOT a measured execution metric.
+- Reduce coverageScore when story-required behavior cannot be covered because a required capability/configuration is unavailable.
 - Prefer fewer strong tests over redundant tests.
 
 Return JSON only:
@@ -110,9 +191,11 @@ async function proposeGenerationPlan({
   if (!categories.length) throw new Error('At least one test category is required for AI coverage planning.');
   if (!scenarioTypes.length) throw new Error('At least one scenario type is required for AI coverage planning.');
 
+  const capabilities = runtimeCapabilities();
   const result = await callModel(PLAN_PROMPT, {
     story,
     pageDiscoveries,
+    runtimeCapabilities: capabilities,
     allowedCategories: categories,
     allowedScenarioTypes: scenarioTypes,
     customCategories: cleanTextArray(customCategories),
@@ -145,7 +228,7 @@ async function proposeGenerationPlan({
     units.push({
       category: categories[index % categories.length],
       scenarioType: scenarioTypes[index % scenarioTypes.length],
-      rationale: 'Fallback allocation within the AI-recommended suite size.',
+      rationale: 'Fallback allocation within the AI-recommended runnable suite size.',
     });
   }
   requested = units.length;
@@ -157,6 +240,7 @@ async function proposeGenerationPlan({
     coverageSummary: String(result?.coverageSummary || '').trim().slice(0, 1200),
     coveredAreas: cleanTextArray(result?.coveredAreas, 30),
     knownGaps: cleanTextArray(result?.knownGaps, 30),
+    runtimeCapabilities: capabilities,
     units,
   };
 }
@@ -172,12 +256,30 @@ Rules:
 - If requestedScenarioType is custom and requestedCustomScenarioType is supplied, use that label to describe how the scenario should behave.
 - Never invent selectors, pages, validation rules, messages, boundaries, options or business rules absent from story/discovery evidence.
 - Use discovered selectors exactly when technical targets are needed.
-- Prefer human-readable actions from the supported interaction vocabulary: navigate, fill, clear, click, select, check, uncheck, submit, verify. Avoid arbitrary sleeps; use verify when an element must be available.
+- runtimeCapabilities is authoritative. Never generate an advanced step/assertion for a capability with available=false.
+- Prefer ordinary human-readable actions: navigate, fill, clear, click, select, check, uncheck, submit, verify.
+- Advanced actions are allowed only when required by the story and available:
+  * File upload: {"action":"Upload file","target":"#discoveredFileInput","value":"fixture-name.ext"}. The value MUST be one of runtimeCapabilities.direct.FILE_UPLOAD.fixtures.
+  * Drag/drop: {"action":"Drag and drop","target":"#discoveredSource","value":"#discoveredTarget"}.
+  * Browser permission: {"action":"Set browser permission","target":"geolocation|camera|microphone|notifications","value":"granted|denied|prompt"}.
+  * Adapter-backed native/cross-origin/multi-tab/security actions may be stated plainly only when their named runtimeCapabilities.external capability is available.
+- Advanced expected-result grammar supported by the deterministic compiler:
+  * Visual: Visual screenshot #selector matches baseline "name.png". Baseline MUST be listed in runtimeCapabilities.direct.VISUAL_REGRESSION.baselines unless baselineCreationEnabled=true.
+  * Web Vitals: LCP at most 2500 ms; CLS at most 0.1; INP at most 200 ms.
+  * Email/SMS/OTP: Email received containing "text" or SMS received containing "text"; only when EMAIL_SMS_OTP is available.
+  * Database: Database query "approved_query_name" field "fieldName" equals "value" OR Database query "approved_query_name" row count equals 1. query name MUST be listed in runtimeCapabilities.database.DATABASE_ASSERTIONS.namedQueries.
+  * Stream: WebSocket message contains "text" or SSE message contains "text".
+  * Clipboard: Clipboard equals "text" or Clipboard contains "text".
+  * Downloaded semantic document: Downloaded file "report.pdf" contains "Approved". Supported formats are listed in runtimeCapabilities.direct.BINARY_DOCUMENT_CONTENT.formats.
+  * Permission: Permission "geolocation" is granted|denied|prompt.
+  * Cross-origin iframe / real multi-tab / CAPTCHA-biometric test harness / native mobile / extension / OS dialog: describe the expected outcome clearly only when the corresponding external capability is available; the deterministic compiler routes it to the configured adapter.
+- CAPTCHA/biometric means an approved non-production test harness/vendor bypass. Never generate a method to defeat a real production security challenge.
+- Avoid arbitrary sleeps; use verification/state expectations.
 - Avoid titles listed in excludeTitles and produce materially different scenarios.
 - Tests describe EXPECTED behavior. Do not manufacture failures.
 - SECURITY means safe security-functional checks only and must remain within supplied evidence.
 - PERFORMANCE means single-user page/API timing expectations only.
-- Do not include passwords or secrets.
+- Do not include passwords, tokens, connection strings, SQL statements or other secrets. Database tests use named queries only.
 
 Return JSON only:
 {
@@ -217,9 +319,11 @@ function normalizeCaseShape(testCase, category, scenarioType, customCategory = n
 
 async function generateBatch({ story, pageDiscoveries, environment, category, scenarioType = 'positive', customCategory = null, customScenarioType = null, count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
   const requestedCount = Math.max(1, Math.min(Number(count) || 1, 5));
+  const capabilities = runtimeCapabilities();
   const result = await callModel(BATCH_PROMPT, {
     story,
     pageDiscoveries,
+    runtimeCapabilities: capabilities,
     environment,
     requestedCategory: category,
     requestedCustomCategory: category === 'CUSTOM' ? customCategory : null,
@@ -232,7 +336,7 @@ async function generateBatch({ story, pageDiscoveries, environment, category, sc
   if (!Array.isArray(result?.testCases) || result.testCases.length === 0) throw new Error(`AI returned no ${category}/${scenarioType} test cases.`);
   const cases = result.testCases.slice(0, requestedCount).map((tc) => normalizeCaseShape(tc, category, scenarioType, customCategory, customScenarioType));
   if (cases.some((tc) => !tc.title || !tc.steps.length || !tc.expectedResults.length)) throw new Error(`AI returned an incomplete ${category}/${scenarioType} generation batch.`);
-  return { feature: result.feature || null, testCases: cases };
+  return { feature: result.feature || null, testCases: cases, runtimeCapabilities: capabilities };
 }
 
-module.exports = { proposeGenerationPlan, generateBatch };
+module.exports = { proposeGenerationPlan, generateBatch, runtimeCapabilities, configuredExternalCapabilities, namedDatabaseQueries };
