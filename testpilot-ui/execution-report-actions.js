@@ -1,55 +1,156 @@
-(function(){
-  if(window.__aiTestPilotExecutionReportActions)return;window.__aiTestPilotExecutionReportActions=true;
-  let lastSummary=null,lastAnalyses=[];
-  function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function ensure(){
-    let box=document.getElementById('executionReportActions');if(box)return box;
-    const analysis=document.getElementById('analysis'),results=document.getElementById('results');if(!analysis&&!results)return null;
-    box=document.createElement('div');box.id='executionReportActions';box.style.cssText='display:none;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px';
-    box.innerHTML='<button id="openHtmlReportBtn" class="btn secondary" type="button">HTML Report</button><button id="exportExecutionExcelBtn" class="btn ghost" type="button">Export Excel</button>';
-    (analysis||results).insertAdjacentElement('afterend',box);
-    document.getElementById('openHtmlReportBtn').addEventListener('click',()=>{if(!window.sessionId&&!globalThis.sessionId)return;const id=window.sessionId||globalThis.sessionId;window.open(`/api/reports/${encodeURIComponent(id)}`,'_blank','noopener');});
-    document.getElementById('exportExecutionExcelBtn').addEventListener('click',exportExcel);
+(function () {
+  if (window.__aiTestPilotExecutionReportActions) return;
+  window.__aiTestPilotExecutionReportActions = true;
+
+  let lastSummary = null;
+  let lastReportUrl = '';
+
+  function sid() {
+    try {
+      if (window.sessionId) return window.sessionId;
+      if (typeof sessionId !== 'undefined') return sessionId;
+    } catch {}
+    return '';
+  }
+
+  function statusText() {
+    return String(document.getElementById('runStatus')?.textContent || '').trim().toLowerCase();
+  }
+
+  function ensureStyles() {
+    if (document.getElementById('executionReportActionStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'executionReportActionStyles';
+    style.textContent = `
+      #executionReportActions{display:none;margin-top:12px}
+      #generateAiAnalysisReportBtn{width:100%;min-height:42px;background:linear-gradient(135deg,#2f5bff,#4f7cff);color:#fff;border:0;box-shadow:0 7px 18px rgba(47,91,255,.18)}
+      #generateAiAnalysisReportBtn:hover{filter:brightness(.98);box-shadow:0 9px 22px rgba(47,91,255,.24)}
+      #generateAiAnalysisReportBtn small{display:block;font-size:9.5px;font-weight:600;opacity:.82;margin-top:2px}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function removeLegacyActions() {
+    const reportBox = document.getElementById('reportBox');
+    if (reportBox) reportBox.style.display = 'none';
+    const legacyAnalysis = document.getElementById('analyzeResultsBox');
+    if (legacyAnalysis) legacyAnalysis.remove();
+    const legacyExcel = document.getElementById('exportExecutionExcelBtn');
+    if (legacyExcel) legacyExcel.remove();
+    const analysis = document.getElementById('analysis');
+    if (analysis && !analysis.dataset.reportOnlyAnalysis) {
+      analysis.dataset.reportOnlyAnalysis = '1';
+      analysis.innerHTML = '';
+      analysis.style.display = 'none';
+    }
+    document.getElementById('analysisStreamShell')?.remove();
+  }
+
+  function ensure() {
+    ensureStyles();
+    let box = document.getElementById('executionReportActions');
+    if (box) return box;
+
+    const analysis = document.getElementById('analysis');
+    const results = document.getElementById('results');
+    if (!analysis && !results) return null;
+
+    box = document.createElement('div');
+    box.id = 'executionReportActions';
+    box.innerHTML = '<button id="generateAiAnalysisReportBtn" class="btn secondary" type="button">Generate AI Analysis Report<small>Opens the report and analyzes failed cases only</small></button>';
+    (analysis || results).insertAdjacentElement('afterend', box);
+
+    document.getElementById('generateAiAnalysisReportBtn')?.addEventListener('click', openReport);
     return box;
   }
-  function testCaseFor(id){try{return (window.testCases||testCases||[]).find(x=>String(x.id).toUpperCase()===String(id).toUpperCase())||{};}catch{return {};}}
-  function renderedRows(){
-    const rows=[];
-    for(const el of document.querySelectorAll('#results .result')){
-      const text=String(el.textContent||'').replace(/\s+/g,' ').trim();
-      const id=text.match(/TC(?:\d{3}|-H\d{3})/i)?.[0]||'';
-      const outcome=/\bPASS\b/i.test(text)?'PASS':/\bFAIL\b/i.test(text)?'FAIL':'';
-      rows.push({id,title:text,outcome,error:outcome==='FAIL'?text:''});
+
+  function reportUrl() {
+    const id = sid();
+    if (!id) return '';
+    const link = document.getElementById('reportLink');
+    const href = link?.getAttribute('href') || '';
+    if (lastReportUrl) return lastReportUrl;
+    if (href && href !== '#') return href;
+    return `/api/reports/${encodeURIComponent(id)}`;
+  }
+
+  function openReport() {
+    const url = reportUrl();
+    if (!url) return;
+    window.open(url, '_blank', 'noopener');
+  }
+
+  function capture(summary, reportUrlValue) {
+    if (summary) lastSummary = summary;
+    if (reportUrlValue) lastReportUrl = reportUrlValue;
+    refresh();
+  }
+
+  function refresh() {
+    removeLegacyActions();
+    const box = ensure();
+    if (!box) return;
+
+    const current = statusText();
+    const completed = current.startsWith('completed');
+    const total = Number(lastSummary?.total || document.getElementById('mTotal')?.textContent || 0);
+    box.style.display = completed && total > 0 ? 'block' : 'none';
+
+    const button = document.getElementById('generateAiAnalysisReportBtn');
+    if (button) {
+      const failed = Number(lastSummary?.failed || document.getElementById('mFailed')?.textContent || 0);
+      button.innerHTML = `Generate AI Analysis Report<small>${failed > 0 ? `${failed} failed case${failed === 1 ? '' : 's'} will be analyzed live` : 'No failures — opens the execution report without AI calls'}</small>`;
     }
-    return rows;
   }
-  function summaryFromDom(){
-    const items=renderedRows();if(!items.length)return null;
-    const passed=items.filter(x=>x.outcome==='PASS').length,failed=items.filter(x=>x.outcome==='FAIL').length;
-    return {total:items.length,passed,failed,tests:items.map(x=>({testCaseId:x.id,title:x.title,pass:x.outcome==='PASS',fail:x.outcome==='FAIL',state:x.outcome.toLowerCase(),durationMs:null,err:x.error?{message:x.error}:null}))};
-  }
-  function analysisText(){return String(document.getElementById('analysis')?.innerText||'').replace(/\s+/g,' ').trim();}
-  function exportExcel(){
-    const summary=lastSummary||summaryFromDom();if(!summary)return;
-    const globalAnalysis=analysisText();
-    const rows=[['Test Case','Title','Scenario Type','Category','Priority','Outcome','Duration (ms)','Error','AI Classification','AI Analysis']];
-    for(const test of summary.tests||[]){
-      const id=test.testCaseId||String(test.title||'').match(/TC(?:\d{3}|-H\d{3})/i)?.[0]||'';const tc=testCaseFor(id);const analysis=(lastAnalyses||[]).find(a=>String(a.testCase||'').toUpperCase()===String(id).toUpperCase())||{};
-      rows.push([id,test.title||tc.title||'',String(tc.type||'').toUpperCase(),String(tc.testCategory||tc.category||'FUNCTIONAL').toUpperCase(),String(tc.priority||'').toUpperCase(),test.pass?'PASS':test.fail?'FAIL':String(test.state||'').toUpperCase(),test.durationMs??'',test.err?.message||'',analysis.classification||'',analysis.summary||globalAnalysis||'']);
+
+  function wrapRenderResults() {
+    const original = window.renderResults;
+    if (typeof original !== 'function' || original.__reportActionWrapped) return;
+    function wrapped(summary) {
+      const out = original.apply(this, arguments);
+      capture(summary, null);
+      return out;
     }
-    const html='<!doctype html><html><head><meta charset="utf-8"></head><body><table border="1"><tr><th colspan="10">TestNexus AI Execution & Analysis Report</th></tr><tr><td>Exported At</td><td colspan="9">'+esc(new Date().toISOString())+'</td></tr><tr><td>Total</td><td>'+Number(summary.total||0)+'</td><td>Passed</td><td>'+Number(summary.passed||0)+'</td><td>Failed</td><td>'+Number(summary.failed||0)+'</td><td colspan="4"></td></tr>'+rows.map((r,i)=>'<tr>'+r.map(v=>(i===0?'<th>':'<td>')+esc(v)+(i===0?'</th>':'</td>')).join('')+'</tr>').join('')+'</table></body></html>';
-    const blob=new Blob([html],{type:'application/vnd.ms-excel'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`TestNexus-AI-Execution-${new Date().toISOString().slice(0,10)}.xls`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+    wrapped.__reportActionWrapped = true;
+    window.renderResults = wrapped;
+    try { renderResults = wrapped; } catch {}
   }
-  function capture(summary,analyses){if(summary)lastSummary=summary;if(Array.isArray(analyses))lastAnalyses=analyses;refresh();}
-  function refresh(){const box=ensure();if(!box)return;const hasResults=Boolean(lastSummary||document.querySelector('#results .result'));box.style.display=hasResults?'grid':'none';}
-  function wrap(){const original=window.renderResults;if(typeof original!=='function'||original.__reportActionsWrapped)return;function wrapped(summary,analyses){const out=original.apply(this,arguments);capture(summary,analyses);return out;}wrapped.__reportActionsWrapped=true;window.renderResults=wrapped;try{renderResults=wrapped}catch{}}
-  function start(){
-    ensure();wrap();
-    window.addEventListener('testnexus:analysis-progress',(event)=>{const detail=event.detail||{};capture(detail.summary,detail.analyses);});
-    let scheduled=false;const schedule=()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;wrap();refresh();});};
-    const results=document.getElementById('results'),analysis=document.getElementById('analysis');
-    const observer=new MutationObserver(schedule);if(results)observer.observe(results,{childList:true,subtree:true});if(analysis)observer.observe(analysis,{childList:true,subtree:true});
-    let attempts=0;const timer=setInterval(()=>{wrap();refresh();if(++attempts>20)clearInterval(timer);},250);
+
+  function start() {
+    ensure();
+    wrapRenderResults();
+    removeLegacyActions();
+
+    window.addEventListener('testnexus:execution-starting', () => {
+      lastSummary = null;
+      lastReportUrl = '';
+      refresh();
+    });
+    window.addEventListener('testnexus:execution-completed', (event) => {
+      const detail = event.detail || {};
+      capture(detail.summary, detail.reportUrl);
+    });
+    window.addEventListener('testnexus:execution-failed', refresh);
+
+    const status = document.getElementById('runStatus');
+    if (status) new MutationObserver(refresh).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
+    const results = document.getElementById('results');
+    if (results) new MutationObserver(refresh).observe(results, { childList: true, subtree: true });
+    const reportLink = document.getElementById('reportLink');
+    if (reportLink) new MutationObserver(() => {
+      const href = reportLink.getAttribute('href');
+      if (href && href !== '#') lastReportUrl = href;
+      refresh();
+    }).observe(reportLink, { attributes: true, attributeFilter: ['href'] });
+
+    let attempts = 0;
+    const timer = setInterval(() => {
+      wrapRenderResults();
+      refresh();
+      if (++attempts > 80) clearInterval(timer);
+    }, 250);
   }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
 })();
