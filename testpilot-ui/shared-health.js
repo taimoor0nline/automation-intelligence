@@ -26,4 +26,16 @@
 
   window.aiTestPilotGetHealth = loadHealth;
   window.aiTestPilotHealth = () => cachedHealth;
+
+  function loadEditorHelp() {
+    if (document.querySelector('script[data-ai-testpilot-help]')) return;
+    const script = document.createElement('script');
+    script.src = '/test-case-help.js';
+    script.defer = true;
+    script.dataset.aiTestpilotHelp = 'true';
+    document.head.appendChild(script);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadEditorHelp, { once: true });
+  else loadEditorHelp();
 })();
