@@ -14,7 +14,8 @@
     "test:rest": "node scripts/rest-smoke.js",
     "test:assertion-grounding": "node scripts/assertion-grounding-regression-smoke.js",
     "test:advanced-capabilities": "node scripts/advanced-capabilities-smoke.js",
-    "test:capabilities": "node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js"
+    "test:story-discovery": "node scripts/story-discovery-compatibility-smoke.js",
+    "test:capabilities": "node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
