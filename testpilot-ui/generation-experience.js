@@ -45,6 +45,7 @@
     loadScript('/custom-generation-scopes.js', 'data-custom-generation-scopes');
     loadScript('/generation-loading-ux.js', 'data-generation-loading-ux');
     loadScript('/progressive-generation.js', 'data-progressive-generation');
+    loadScript('/generation-progress-clarity.js', 'data-generation-progress-clarity');
     loadScript('/review-filters.js', 'data-review-filters');
     loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
