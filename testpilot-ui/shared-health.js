@@ -27,7 +27,7 @@
   window.aiTestPilotGetHealth = loadHealth;
   window.aiTestPilotHealth = () => cachedHealth;
 
-  function loadEnhancement(src, marker) {
+  function loadUiExtension(src, marker) {
     if (document.querySelector(`script[${marker}]`)) return;
     const script = document.createElement('script');
     script.src = src;
@@ -36,11 +36,12 @@
     document.head.appendChild(script);
   }
 
-  function loadEditorEnhancements() {
-    loadEnhancement('/test-case-help.js', 'data-ai-testpilot-help');
-    loadEnhancement('/test-category-ui.js', 'data-ai-testpilot-category-ui');
+  function loadExtensions() {
+    loadUiExtension('/test-case-help.js', 'data-ai-testpilot-help');
+    loadUiExtension('/test-category-ui.js', 'data-ai-testpilot-category-ui');
+    loadUiExtension('/generation-options.js', 'data-ai-testpilot-generation-options');
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadEditorEnhancements, { once: true });
-  else loadEditorEnhancements();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadExtensions, { once: true });
+  else loadExtensions();
 })();
