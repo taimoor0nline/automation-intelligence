@@ -3,7 +3,7 @@ const { phrasesForSelector, hasSelectorIntent, detectedIntents } = require('./ex
 const { capabilitiesForElement } = require('./webCapabilityMatrix');
 
 const STOP_WORDS = new Set([
-  'the','a','an','is','are','be','becomes','become','with','without','and','or','to','of','in','on','for','after','before','successfully','successful','user','element','field','form','page','text','message','displayed','visible','shown','appears','appear','accept','accepts','input','valid','validation','errors','error','feedback','submission','submit','button','value','data','all','reference','generated',
+  'the','a','an','is','are','be','becomes','become','with','without','and','or','to','of','in','on','for','after','before','successfully','successful','user','element','field','form','page','text','message','displayed','visible','shown','appears','appear','accept','accepts','input','valid','validation','errors','error','submission','submit','button','value','data','all','reference','generated',
 ]);
 
 function selectorFor(item) {
@@ -48,22 +48,22 @@ function buildIndex(pageDiscoveries = []) {
   const paths = new Set();
   const seenSelectors = new Set();
   const capabilityCounts = new Map();
-  const register = (item, path) => {
+  const register = (item, path, parent = null) => {
     const selector = selectorFor(item);
     if (!selector || seenSelectors.has(selector)) return;
     seenSelectors.add(selector);
     const capabilities = new Set(Array.isArray(item?.capabilities) ? item.capabilities : capabilitiesForElement(item));
     for (const capability of capabilities) capabilityCounts.set(capability, (capabilityCounts.get(capability) || 0) + 1);
-    entries.push({ selector, item, path, capabilities, words: new Set(semanticWords(itemText(item, selector))) });
+    entries.push({ selector, item, parent, path, capabilities, words: new Set(semanticWords(itemText(item, selector))) });
   };
   for (const page of pageDiscoveries || []) {
     const path = pathForPage(page);
     paths.add(path);
     for (const item of page?.elements || []) {
-      register(item, path);
-      if (item?.errorElement) register(item.errorElement, path);
+      register(item, path, null);
+      if (item?.errorElement) register(item.errorElement, path, item);
     }
-    for (const message of page?.messages || []) register(message, path);
+    for (const message of page?.messages || []) register(message, path, null);
   }
   const index = { entries, paths, capabilityCounts };
   if (pageDiscoveries && typeof pageDiscoveries === 'object') INDEX_CACHE.set(pageDiscoveries, index);
@@ -88,7 +88,9 @@ function resolvePathExpectation(text, index) {
   let best = null;
   for (const path of index.paths) {
     if (path === '/') continue;
-    const words = semanticWords(path);
+    const normalizedPath = String(path).toLowerCase();
+    if (lower.includes(normalizedPath)) return { text: `Path equals "${path}"`, source: 'discovery-path', path, confidence: 10 };
+    const words = normalizeWords(path).filter((word) => word.length > 1);
     if (!words.length) continue;
     const score = words.reduce((sum, word) => sum + (lower.includes(word) ? 1 : 0), 0);
     if (!score) continue;
@@ -103,8 +105,8 @@ function requiredCapabilitiesForExpectation(text) {
   const lower = source.toLowerCase();
   const required = new Set(detectedIntents(source).map((rule) => rule.key));
   if (/\b(text|message|label|caption|heading|content)\b|thank|error|required/i.test(source) && /contains|equals|exact|display|show|appear|text|message/i.test(source)) required.add('TEXT');
-  if (/\bvalue\b|field.*(?:empty|non-empty|contains|equals)/i.test(source)) required.add('VALUE');
-  if (/selected\s+(?:value|option)/i.test(source)) required.add('SELECTED_VALUE');
+  if (/\bvalue\b|field.*(?:empty|non-empty|contains|equals)|\b(?:entered|filled|populated|set)\b/i.test(source)) required.add('VALUE');
+  if (/selected\s+(?:value|option)|selected\s+from\s+(?:the\s+)?dropdown/i.test(source)) required.add('SELECTED_VALUE');
   if (/selected\s+(?:option\s+)?text/i.test(source)) required.add('SELECTED_TEXT');
   if (/\boptions?\b.*\b(count|exactly|at least|at most|\d+)/i.test(source)) required.add('OPTION_COUNT');
   if (/placeholder/i.test(lower)) required.add('PLACEHOLDER');
@@ -130,24 +132,76 @@ function candidateScore(expectationWords, entry) {
   return score;
 }
 
+function bestEntry(text, index, capabilities = [], minimum = 1) {
+  const words = semanticWords(text);
+  if (!words.length) return null;
+  let best = null;
+  let second = 0;
+  for (const entry of index.entries) {
+    if (!supportsRequiredCapabilities(entry, capabilities)) continue;
+    const score = candidateScore(words, entry);
+    if (!best || score > best.score) {
+      second = best?.score || 0;
+      best = { entry, score };
+    } else if (score > second) second = score;
+  }
+  if (!best || best.score < minimum || best.score === second) return null;
+  return best;
+}
+
+function resolveValueExpectation(text, index) {
+  if (!/\b(?:entered|filled|populated|set|selected)\b/i.test(String(text || ''))) return null;
+  const quoted = quotedValues(text);
+  if (!quoted.length) return null;
+  const isSelected = /selected/i.test(text);
+  const capability = isSelected ? 'SELECTED_VALUE' : 'VALUE';
+  const best = bestEntry(text, index, [capability], 1);
+  if (!best) return null;
+  const expected = quoted[0];
+  const selector = best.entry.selector;
+  return {
+    text: isSelected ? `Selected value equals "${expected}" in ${selector}` : `Value equals "${expected}" in ${selector}`,
+    source: 'discovery-value-grounding',
+    selector,
+    confidence: best.score,
+    requiredCapabilities: [capability],
+    matchedCapabilities: [...best.entry.capabilities],
+  };
+}
+
+function resolveAdjacentErrorExpectation(text, index) {
+  if (!/(?:error|validation)\s+(?:message|text)|message.*(?:error|validation)/i.test(String(text || ''))) return null;
+  const words = semanticWords(text);
+  let best = null;
+  let second = 0;
+  for (const entry of index.entries) {
+    if (!entry.parent) continue;
+    if (!entry.capabilities.has('VISIBLE') && !entry.capabilities.has('TEXT')) continue;
+    const combinedWords = new Set([...entry.words, ...semanticWords(itemText(entry.parent, selectorFor(entry.parent)))]);
+    let score = 0;
+    for (const word of words) if (combinedWords.has(word)) score += 1;
+    if (!best || score > best.score) { second = best?.score || 0; best = { entry, score }; }
+    else if (score > second) second = score;
+  }
+  if (!best || best.score < 1 || best.score === second) return null;
+  const selector = best.entry.selector;
+  return {
+    text: `Element ${selector} is visible`,
+    source: 'discovered-error-element',
+    selector,
+    confidence: best.score,
+    requiredCapabilities: ['VISIBLE'],
+    matchedCapabilities: [...best.entry.capabilities],
+  };
+}
+
 function resolveSelectorExpectation(text, index) {
   if (!hasSelectorIntent(text)) return null;
   const words = semanticWords(text);
   if (!words.length) return null;
   const requiredCapabilities = requiredCapabilitiesForExpectation(text);
-  let best = null;
-  let secondScore = 0;
-  for (const entry of index.entries) {
-    if (!supportsRequiredCapabilities(entry, requiredCapabilities)) continue;
-    const score = candidateScore(words, entry);
-    if (!best || score > best.score) {
-      secondScore = best?.score || 0;
-      best = { entry, score };
-    } else if (score > secondScore) secondScore = score;
-  }
-  // Strong, unambiguous local evidence only. Capability filtering removes impossible
-  // targets before semantic scoring, while this threshold prevents guessing among valid ones.
-  if (!best || best.score < 2 || best.score === secondScore) return null;
+  const best = bestEntry(text, index, requiredCapabilities, 2);
+  if (!best) return null;
 
   const selector = best.entry.selector;
   const quotes = quotedValues(text).filter((value) => !value.includes('data-testid') && value !== selector);
@@ -170,7 +224,9 @@ function resolveSelectorExpectation(text, index) {
 }
 
 function normalizeTestIdPhrase(text) {
-  return String(text || '').replace(/\btest\s*id\s*[=:]?\s*["'`]([^"'`]+)["'`]/gi, '[data-testid="$1"]');
+  const source = String(text || '');
+  if (hasExplicitSelector(source)) return source;
+  return source.replace(/\btest\s*id\s*[=:]?\s*["'`]([^"'`]+)["'`]/gi, '[data-testid="$1"]');
 }
 
 function resolveExpectation(value, index) {
@@ -181,6 +237,10 @@ function resolveExpectation(value, index) {
   }
   const path = resolvePathExpectation(normalized, index);
   if (path) return { original, resolved: true, ...path };
+  const error = resolveAdjacentErrorExpectation(normalized, index);
+  if (error) return { original, resolved: true, ...error };
+  const valueGrounding = resolveValueExpectation(normalized, index);
+  if (valueGrounding) return { original, resolved: true, ...valueGrounding };
   const selector = resolveSelectorExpectation(normalized, index);
   if (selector) return { original, resolved: true, ...selector };
   return { original, text: normalized, resolved: false, source: 'narrative', confidence: 0, requiredCapabilities: requiredCapabilitiesForExpectation(normalized) };
@@ -207,4 +267,6 @@ module.exports = {
   normalizeTestIdPhrase,
   requiredCapabilitiesForExpectation,
   supportsRequiredCapabilities,
+  resolveValueExpectation,
+  resolveAdjacentErrorExpectation,
 };
