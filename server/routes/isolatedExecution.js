@@ -1,4 +1,6 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { randomUUID } = require('crypto');
 
 const router = express.Router();
@@ -13,6 +15,16 @@ const persistence = require('../services/persistenceService');
 
 const TEST_ID_REGEX = /TC(?:\d{3}|-H\d{3})/i;
 const RUNNABLE_STATES = new Set(['AWAITING_APPROVAL', 'DONE']);
+const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || 'false').toLowerCase() === 'true';
+const ARTIFACT_ROOT = path.resolve(__dirname, '..', '..', 'automation-system', 'artifacts');
+
+function qaManagerOnly(req, res, next) {
+  if (!AUTH_REQUIRED) return next();
+  const role = String(req.user?.role || '').toUpperCase();
+  if (!req.user) return res.status(401).json({ reply: 'Authentication is required for test execution.' });
+  if (!['QA', 'MANAGER'].includes(role)) return res.status(403).json({ reply: 'QA or MANAGER role is required for test execution.' });
+  next();
+}
 
 function safeRunId(value) {
   return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
@@ -105,6 +117,25 @@ function deterministicFindings(session, summary) {
     });
 }
 
+function safeArtifactPath(candidate) {
+  if (!candidate) return null;
+  const resolved = path.resolve(candidate);
+  if (resolved !== ARTIFACT_ROOT && !resolved.startsWith(`${ARTIFACT_ROOT}${path.sep}`)) return null;
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
+  return resolved;
+}
+
+function sendEvidence(kind) {
+  return (req, res) => {
+    const session = getSession(req.params.sessionId || 'default');
+    const testCaseId = String(req.params.testCaseId || '').toUpperCase();
+    const map = kind === 'video' ? session.artifacts?.videosByTestCase : session.artifacts?.screenshotsByTestCase;
+    const filePath = safeArtifactPath(map?.[testCaseId]);
+    if (!filePath) return res.status(404).json({ reply: `${kind === 'video' ? 'Video' : 'Screenshot'} evidence is not available for ${testCaseId}.` });
+    return res.sendFile(filePath);
+  };
+}
+
 async function persistCompletedRun(sessionId, session, userId) {
   if (!persistence.enabled()) return;
   try {
@@ -138,7 +169,10 @@ function publishProgress(sessionId, session, type, payload = {}) {
   return event;
 }
 
-router.get('/api/test-runs/events/:sessionId', (req, res) => {
+router.get('/api/artifacts/:sessionId/screenshot/:testCaseId', qaManagerOnly, sendEvidence('screenshot'));
+router.get('/api/artifacts/:sessionId/video/:testCaseId', qaManagerOnly, sendEvidence('video'));
+
+router.get('/api/test-runs/events/:sessionId', qaManagerOnly, (req, res) => {
   const sessionId = String(req.params.sessionId || 'default');
   const session = getSession(sessionId);
 
@@ -187,7 +221,7 @@ router.get('/api/test-runs/events/:sessionId', (req, res) => {
   res.on('close', close);
 });
 
-router.post('/api/test-runs/start', async (req, res) => {
+router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
   const {
     sessionId = 'default',
     approvedIds = [],
@@ -359,7 +393,7 @@ router.post('/api/test-runs/start', async (req, res) => {
   }
 });
 
-router.get('/api/test-runs/result/:sessionId', (req, res) => {
+router.get('/api/test-runs/result/:sessionId', qaManagerOnly, (req, res) => {
   const session = getSession(req.params.sessionId || 'default');
   if (!session.lastResults?.summary) {
     return res.status(404).json({ ok: false, reply: 'No completed run result is available for this session.' });
