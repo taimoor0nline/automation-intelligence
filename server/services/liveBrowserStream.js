@@ -9,7 +9,7 @@ const subscribers = new Set();
 let latestFrame = null;
 let latestFrameAt = null;
 let status = "idle";
-let statusMessage = "Waiting for an automation browser.";
+let statusMessage = "Test not started.";
 let runSummary = null;
 let currentRunKey = null;
 let ws = null;
@@ -20,31 +20,25 @@ let connectLoopPromise = null;
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function broadcast(event, payload) {
   const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-  for (const res of subscribers) {
-    try { res.write(data); } catch { subscribers.delete(res); }
-  }
+  for (const res of subscribers) { try { res.write(data); } catch { subscribers.delete(res); } }
 }
 function setStatus(nextStatus, message, summary = runSummary) {
-  status = nextStatus;
-  statusMessage = message;
-  runSummary = summary || null;
+  status = nextStatus; statusMessage = message; runSummary = summary || null;
   broadcast("status", { status, message, latestFrameAt, summary: runSummary });
 }
 function resetFrame() {
-  latestFrame = null;
-  latestFrameAt = null;
+  latestFrame = null; latestFrameAt = null;
   broadcast("reset", { at: new Date().toISOString() });
 }
 function pushFrame(base64) {
-  latestFrame = base64;
-  latestFrameAt = new Date().toISOString();
+  if (status !== "live") return;
+  latestFrame = base64; latestFrameAt = new Date().toISOString();
   broadcast("frame", { image: `data:image/jpeg;base64,${base64}`, at: latestFrameAt });
 }
 function getJson(url) {
   return new Promise((resolve, reject) => {
     const request = http.get(url, (res) => {
-      let body = "";
-      res.setEncoding("utf8");
+      let body = ""; res.setEncoding("utf8");
       res.on("data", (chunk) => { body += chunk; });
       res.on("end", () => {
         if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`HTTP ${res.statusCode}`));
@@ -60,8 +54,7 @@ function readJsonFile(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath, "utf8")); } catch { return null; }
 }
 async function discoverDebuggerPort(infoFile) {
-  const info = readJsonFile(infoFile);
-  const port = Number(info?.port);
+  const info = readJsonFile(infoFile); const port = Number(info?.port);
   return Number.isFinite(port) && port > 0 ? port : null;
 }
 async function discoverPageTarget(port) {
@@ -69,24 +62,28 @@ async function discoverPageTarget(port) {
   if (!Array.isArray(targets)) return null;
   const pages = targets.filter((target) => target.type === "page" && target.webSocketDebuggerUrl);
   if (!pages.length) return null;
-  return pages.find((target) => /^https?:/i.test(String(target.url || ""))) ||
-    pages.find((target) => !/^(?:about:blank|chrome:|devtools:)/i.test(String(target.url || ""))) ||
-    pages[0];
+  return pages.find((target) => /^https?:/i.test(String(target.url || ""))) || pages.find((target) => !/^(?:about:blank|chrome:|devtools:)/i.test(String(target.url || ""))) || pages[0];
 }
 function completedMessage(state) {
-  const passed = Number(state?.passed || 0);
-  const failed = Number(state?.failed || 0);
-  const total = Number(state?.total || (passed + failed));
+  const passed = Number(state?.passed || 0), failed = Number(state?.failed || 0), total = Number(state?.total || (passed + failed));
   return `Automation completed · ${passed} passed · ${failed} failed${total ? ` · ${total} total` : ""}.`;
 }
 function observeRunState(state) {
-  if (!state || !state.status) return false;
-  const runKey = state.status === "running" ? String(state.at || state.port || "running") : currentRunKey;
-  if (state.status === "running" && runKey !== currentRunKey) {
-    currentRunKey = runKey;
-    runSummary = null;
-    resetFrame();
-    setStatus("starting", "Automation browser is starting...");
+  if (!state || !state.status) {
+    if (!currentRunKey && status !== "idle") { resetFrame(); setStatus("idle", "Test not started."); }
+    return false;
+  }
+  const runKey = String(state.runId || state.at || "run");
+  if (state.status === "preparing") {
+    if (runKey !== currentRunKey) { currentRunKey = runKey; runSummary = null; resetFrame(); }
+    setStatus("preparing", "Browser is preparing. Test has not started yet.");
+    return false;
+  }
+  if (state.status === "running") {
+    if (runKey !== currentRunKey) { currentRunKey = runKey; runSummary = null; resetFrame(); }
+    const testName = state.testCaseId || state.testTitle || "approved test";
+    setStatus("live", `Test started · ${testName}`);
+    return false;
   }
   if (state.status === "finalizing") {
     const summary = { passed: Number(state.passed || 0), failed: Number(state.failed || 0), total: Number(state.total || 0) };
@@ -95,6 +92,7 @@ function observeRunState(state) {
   }
   if (state.status === "finished") {
     const summary = { passed: Number(state.passed || 0), failed: Number(state.failed || 0), total: Number(state.total || 0) };
+    resetFrame();
     setStatus("finished", completedMessage(summary), summary);
     return true;
   }
@@ -102,169 +100,60 @@ function observeRunState(state) {
 }
 function attachToTarget(target, stateFile) {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(target.webSocketDebuggerUrl);
-    ws = socket;
-    attachedTargetUrl = target.webSocketDebuggerUrl;
-    let commandId = 1;
-    let lastFrameSentAt = 0;
-    let lastFrameObservedAt = Date.now();
-    const pendingCaptures = new Set();
-    let heartbeat = null;
-
-    function cleanup() {
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = null;
-      pendingCaptures.clear();
+    const socket = new WebSocket(target.webSocketDebuggerUrl); ws = socket; attachedTargetUrl = target.webSocketDebuggerUrl;
+    let commandId = 1, lastFrameSentAt = 0, lastFrameObservedAt = Date.now();
+    const pendingCaptures = new Set(); let heartbeat = null;
+    function cleanup(){ if(heartbeat) clearInterval(heartbeat); heartbeat=null; pendingCaptures.clear(); }
+    function requestFallbackFrame(){
+      if(socket.readyState!==WebSocket.OPEN||pendingCaptures.size>=2||status!=="live")return;
+      const id=commandId++; pendingCaptures.add(id);
+      try{socket.send(JSON.stringify({id,method:"Page.captureScreenshot",params:{format:"jpeg",quality:68,fromSurface:true}}));}catch{pendingCaptures.delete(id);}
     }
-
-    function requestFallbackFrame() {
-      if (socket.readyState !== WebSocket.OPEN || pendingCaptures.size >= 2) return;
-      const id = commandId++;
-      pendingCaptures.add(id);
-      try {
-        socket.send(JSON.stringify({ id, method: "Page.captureScreenshot", params: { format: "jpeg", quality: 68, fromSurface: true } }));
-      } catch {
-        pendingCaptures.delete(id);
-      }
-    }
-
-    socket.once("open", () => {
-      setStatus("live", `Streaming ${target.title || "automation browser"}`);
-      socket.send(JSON.stringify({ id: commandId++, method: "Page.enable" }));
-      socket.send(JSON.stringify({ id: commandId++, method: "Page.startScreencast", params: { format: "jpeg", quality: 68, maxWidth: 1280, maxHeight: 720, everyNthFrame: 1 } }));
-      heartbeat = setInterval(() => {
-        const quietFor = Date.now() - lastFrameObservedAt;
-        if (quietFor >= 900) requestFallbackFrame();
-        if (quietFor >= 6000 && socket.readyState === WebSocket.OPEN && pendingCaptures.size >= 2) {
-          try { socket.close(); } catch {}
-        }
-      }, 500);
+    socket.once("open",()=>{
+      socket.send(JSON.stringify({id:commandId++,method:"Page.enable"}));
+      socket.send(JSON.stringify({id:commandId++,method:"Page.startScreencast",params:{format:"jpeg",quality:68,maxWidth:1280,maxHeight:720,everyNthFrame:1}}));
+      heartbeat=setInterval(()=>{const quietFor=Date.now()-lastFrameObservedAt;if(quietFor>=900)requestFallbackFrame();if(quietFor>=6000&&socket.readyState===WebSocket.OPEN&&pendingCaptures.size>=2){try{socket.close();}catch{}}},500);
       resolve();
     });
-    socket.on("message", (raw) => {
-      let message;
-      try { message = JSON.parse(String(raw)); } catch { return; }
-
-      if (pendingCaptures.has(message.id)) {
-        pendingCaptures.delete(message.id);
-        if (message.result?.data) {
-          lastFrameObservedAt = Date.now();
-          pushFrame(message.result.data);
-        }
-        return;
-      }
-
-      if (message.method !== "Page.screencastFrame") return;
-      const sessionId = message.params?.sessionId;
-      if (sessionId != null && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ id: commandId++, method: "Page.screencastFrameAck", params: { sessionId } }));
-      }
-      lastFrameObservedAt = Date.now();
-      const now = Date.now();
-      if (now - lastFrameSentAt < 120) return;
-      lastFrameSentAt = now;
-      if (message.params?.data) pushFrame(message.params.data);
+    socket.on("message",raw=>{
+      let message;try{message=JSON.parse(String(raw));}catch{return;}
+      if(pendingCaptures.has(message.id)){pendingCaptures.delete(message.id);if(message.result?.data){lastFrameObservedAt=Date.now();pushFrame(message.result.data);}return;}
+      if(message.method!=="Page.screencastFrame")return;
+      const sessionId=message.params?.sessionId;if(sessionId!=null&&socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({id:commandId++,method:"Page.screencastFrameAck",params:{sessionId}}));
+      lastFrameObservedAt=Date.now();const now=Date.now();if(now-lastFrameSentAt<120)return;lastFrameSentAt=now;if(message.params?.data)pushFrame(message.params.data);
     });
-    socket.once("error", (err) => { cleanup(); reject(err); });
-    socket.once("close", () => {
-      cleanup();
-      const state = readJsonFile(stateFile);
-      if (!observeRunState(state)) {
-        setStatus("waiting", state?.status === "running" ? "Browser page changed or stream stalled. Reconnecting to the active test page..." : "Automation browser disconnected. Waiting for final run status...");
-      }
-      if (ws === socket) ws = null;
-      if (attachedTargetUrl === target.webSocketDebuggerUrl) attachedTargetUrl = null;
-    });
+    socket.once("error",err=>{cleanup();reject(err);});
+    socket.once("close",()=>{cleanup();const state=readJsonFile(stateFile);observeRunState(state);if(ws===socket)ws=null;if(attachedTargetUrl===target.webSocketDebuggerUrl)attachedTargetUrl=null;});
   });
 }
-async function connectionLoop(infoFile, stateFile) {
-  while (!stopRequested) {
-    try {
-      const state = readJsonFile(stateFile);
-      if (observeRunState(state)) {
-        await delay(300);
-        continue;
+async function connectionLoop(infoFile,stateFile){
+  while(!stopRequested){
+    try{
+      const state=readJsonFile(stateFile);if(observeRunState(state)){await delay(300);continue;}
+      if(state?.status!=="running"){if(ws&&ws.readyState===WebSocket.OPEN){try{ws.close();}catch{}}await delay(200);continue;}
+      const port=await discoverDebuggerPort(infoFile);if(!port){setStatus("preparing","Test started; waiting for browser stream endpoint...");await delay(200);continue;}
+      const target=await discoverPageTarget(port);if(!target){setStatus("preparing","Test started; waiting for the test page...");await delay(200);continue;}
+      if(!ws||ws.readyState===WebSocket.CLOSED)await attachToTarget(target,stateFile);
+      let lastTargetCheckAt=0;
+      while(!stopRequested&&ws&&[WebSocket.OPEN,WebSocket.CONNECTING].includes(ws.readyState)){
+        const liveState=readJsonFile(stateFile);observeRunState(liveState);if(liveState?.status!=="running"){try{ws.close();}catch{}break;}
+        const now=Date.now();if(now-lastTargetCheckAt>=1000&&ws?.readyState===WebSocket.OPEN){lastTargetCheckAt=now;try{const activeTarget=await discoverPageTarget(port);if(activeTarget?.webSocketDebuggerUrl&&attachedTargetUrl&&activeTarget.webSocketDebuggerUrl!==attachedTargetUrl){try{ws.close();}catch{}break;}}catch{}}
+        await delay(150);
       }
-
-      const port = await discoverDebuggerPort(infoFile);
-      if (!port) {
-        if (state?.status !== "finalizing") setStatus("waiting", "Waiting for Chrome DevTools endpoint...");
-        await delay(300);
-        continue;
-      }
-      const target = await discoverPageTarget(port);
-      if (!target) {
-        if (state?.status !== "finalizing") setStatus("waiting", "Chrome started; waiting for the test page...");
-        await delay(300);
-        continue;
-      }
-      if (!ws || ws.readyState === WebSocket.CLOSED) await attachToTarget(target, stateFile);
-
-      let lastTargetCheckAt = 0;
-      while (!stopRequested && ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(ws.readyState)) {
-        const liveState = readJsonFile(stateFile);
-        observeRunState(liveState);
-        const now = Date.now();
-        if (now - lastTargetCheckAt >= 1000 && ws?.readyState === WebSocket.OPEN) {
-          lastTargetCheckAt = now;
-          try {
-            const activeTarget = await discoverPageTarget(port);
-            if (activeTarget?.webSocketDebuggerUrl && attachedTargetUrl && activeTarget.webSocketDebuggerUrl !== attachedTargetUrl) {
-              setStatus("waiting", "Cypress switched browser pages. Reconnecting live view...");
-              try { ws.close(); } catch {}
-              break;
-            }
-          } catch {}
-        }
-        await delay(200);
-      }
-    } catch (err) {
-      const state = readJsonFile(stateFile);
-      if (!stopRequested && !observeRunState(state)) {
-        setStatus("waiting", `Live stream reconnecting: ${err.message}`);
-        await delay(500);
-      }
-    }
+    }catch(err){const state=readJsonFile(stateFile);observeRunState(state);if(!stopRequested){await delay(300);}}
   }
 }
-function start(infoFile = DEFAULT_INFO_FILE, stateFile = DEFAULT_STATE_FILE) {
-  stopRequested = false;
-  if (!connectLoopPromise) {
-    setStatus("starting", "Starting live browser stream...");
-    connectLoopPromise = connectionLoop(infoFile, stateFile).finally(() => { connectLoopPromise = null; });
-  }
+function start(infoFile=DEFAULT_INFO_FILE,stateFile=DEFAULT_STATE_FILE){
+  stopRequested=false;if(!connectLoopPromise){setStatus("idle","Test not started.");connectLoopPromise=connectionLoop(infoFile,stateFile).finally(()=>{connectLoopPromise=null;});}
 }
-async function stop(message = "Automation run finished.") {
-  stopRequested = true;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    try { ws.close(); } catch {}
-  }
-  ws = null;
-  attachedTargetUrl = null;
-  setStatus("finished", message);
+async function stop(message="Automation run finished."){
+  stopRequested=true;if(ws&&ws.readyState===WebSocket.OPEN){try{ws.close();}catch{}}ws=null;attachedTargetUrl=null;resetFrame();setStatus("finished",message);
 }
-function subscribe(req, res) {
-  start();
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
-  });
-  res.write(`event: status\ndata: ${JSON.stringify({ status, message: statusMessage, latestFrameAt, summary: runSummary })}\n\n`);
-  if (latestFrame) {
-    res.write(`event: frame\ndata: ${JSON.stringify({ image: `data:image/jpeg;base64,${latestFrame}`, at: latestFrameAt })}\n\n`);
-  }
-  subscribers.add(res);
-  const heartbeat = setInterval(() => {
-    try { res.write(": keepalive\n\n"); } catch { clearInterval(heartbeat); }
-  }, 15000);
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    subscribers.delete(res);
-  });
+function subscribe(req,res){
+  start();res.writeHead(200,{"Content-Type":"text/event-stream","Cache-Control":"no-cache, no-transform",Connection:"keep-alive","X-Accel-Buffering":"no"});
+  res.write(`event: status\ndata: ${JSON.stringify({status,message:statusMessage,latestFrameAt,summary:runSummary})}\n\n`);
+  if(latestFrame&&status==="live")res.write(`event: frame\ndata: ${JSON.stringify({image:`data:image/jpeg;base64,${latestFrame}`,at:latestFrameAt})}\n\n`);
+  subscribers.add(res);const heartbeat=setInterval(()=>{try{res.write(": keepalive\n\n");}catch{clearInterval(heartbeat);}},15000);req.on("close",()=>{clearInterval(heartbeat);subscribers.delete(res);});
 }
-function snapshot() {
-  return { status, message: statusMessage, latestFrameAt, viewerCount: subscribers.size, summary: runSummary };
-}
-module.exports = { start, stop, subscribe, snapshot, DEFAULT_INFO_FILE, DEFAULT_STATE_FILE };
+function snapshot(){return{status,message:statusMessage,latestFrameAt,viewerCount:subscribers.size,summary:runSummary};}
+module.exports={start,stop,subscribe,snapshot,DEFAULT_INFO_FILE,DEFAULT_STATE_FILE};
