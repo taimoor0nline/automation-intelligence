@@ -1,4 +1,4 @@
-const { compileTestCase } = require("./automationDsl");
+const { compileTestCase, externalConfigured } = require("./automationDsl");
 
 const READY = "READY";
 const NOT_AUTOMATABLE = "NOT_AUTOMATABLE";
@@ -13,12 +13,10 @@ const RESOLUTION_MANUAL_TESTING = "MANUAL_TESTING";
 const RESOLUTION_FRAMEWORK_CHANGE_REQUIRED = "FRAMEWORK_CHANGE_REQUIRED";
 
 const CAPABILITY_RULES = [
-  { pattern: /\b(captcha|recaptcha|hcaptcha)\b/i, status: NOT_AUTOMATABLE, reasonCode: "CAPTCHA_REQUIRED", resolutionType: RESOLUTION_MANUAL_TESTING, reason: "The scenario requires a CAPTCHA challenge, which the configured automation system intentionally does not automate." },
-  { pattern: /\b(face\s?id|fingerprint|biometric|touch\s?id)\b/i, status: NOT_AUTOMATABLE, reasonCode: "BIOMETRIC_REQUIRED", resolutionType: RESOLUTION_MANUAL_TESTING, reason: "The scenario requires native biometric interaction, which is outside the configured web automation system." },
-  { pattern: /\b(native\s+file\s+(?:dialog|picker)|windows\s+(?:dialog|prompt)|os\s+(?:dialog|prompt))\b/i, status: REQUIRES_FRAMEWORK_CAPABILITY, reasonCode: "NATIVE_OS_DIALOG_REQUIRED", resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED, reason: "The scenario requires a native operating-system dialog that the configured automation system does not control." },
-  { pattern: /\b(browser\s+extension|extension\s+popup)\b/i, status: REQUIRES_FRAMEWORK_CAPABILITY, reasonCode: "BROWSER_EXTENSION_REQUIRED", resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED, reason: "The scenario requires browser-extension UI outside the configured application automation surface." },
-  { pattern: /\b(native\s+mobile|android\s+app|ios\s+app|mobile\s+app)\b/i, status: REQUIRES_FRAMEWORK_CAPABILITY, reasonCode: "NATIVE_MOBILE_REQUIRED", resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED, reason: "The scenario targets a native mobile application and requires a mobile automation capability." },
-  { pattern: /\b(camera\s+permission|microphone\s+permission|system\s+permission\s+prompt)\b/i, status: REQUIRES_FRAMEWORK_CAPABILITY, reasonCode: "SYSTEM_PERMISSION_PROMPT_REQUIRED", resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED, reason: "The scenario depends on a browser or operating-system permission prompt outside the current deterministic interaction contract." },
+  { pattern: /\b(captcha|recaptcha|hcaptcha|face\s?id|fingerprint|biometric|touch\s?id)\b/i, capability: "CAPTCHA_BIOMETRIC", reasonCode: "SECURITY_CHALLENGE_ADAPTER_REQUIRED", reason: "This real security challenge requires the configured non-production security-challenge adapter; TestNexus never guesses or bypasses it implicitly." },
+  { pattern: /\b(native\s+file\s+(?:dialog|picker)|windows\s+(?:dialog|prompt)|os\s+(?:dialog|prompt)|native\s+(?:os\s+)?dialog)\b/i, capability: "OS_DIALOG", reasonCode: "OS_DIALOG_ADAPTER_REQUIRED", reason: "Native operating-system dialogs require the configured OS automation adapter." },
+  { pattern: /\b(browser\s+extension|extension\s+popup|extension\s+ui)\b/i, capability: "BROWSER_EXTENSION", reasonCode: "BROWSER_EXTENSION_ADAPTER_REQUIRED", reason: "Browser-extension UI requires the configured extension automation adapter." },
+  { pattern: /\b(native\s+mobile|android\s+app|ios\s+app|mobile\s+app)\b/i, capability: "NATIVE_MOBILE", reasonCode: "NATIVE_MOBILE_ADAPTER_REQUIRED", reason: "Native mobile execution requires the configured mobile automation adapter." },
 ];
 
 function result({
@@ -103,7 +101,18 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   if (!Array.isArray(testCase.expectedResults) || !testCase.expectedResults.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_EXPECTED_RESULTS", reason: "At least one expected result is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
 
   const fullText = JSON.stringify(testCase);
-  for (const rule of CAPABILITY_RULES) if (rule.pattern.test(fullText)) return result({ ...rule, automatable: false });
+  for (const rule of CAPABILITY_RULES) {
+    if (!rule.pattern.test(fullText)) continue;
+    if (externalConfigured(rule.capability)) continue;
+    return result({
+      status: REQUIRES_FRAMEWORK_CAPABILITY,
+      automatable: false,
+      reasonCode: rule.reasonCode,
+      reason: `${rule.reason} Configure AUTOMATION_EXTERNAL_ADAPTER_URL and enable ${rule.capability}.`,
+      resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED,
+      requiredInputs: ["AUTOMATION_EXTERNAL_ADAPTER_URL", rule.capability],
+    });
+  }
 
   if (requiresRuntimeCredentials(testCase) && !hasCredentials) {
     return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "MISSING_CREDENTIALS", reason: "Valid runtime credentials are required for this test case but have not been supplied.", resolutionType: RESOLUTION_USER_INPUT_REQUIRED, requiredInputs: ["username", "password"] });
@@ -127,15 +136,16 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   if (!compiled.ok) {
     const userInput = compiled.reasonCode === "MISSING_CREDENTIALS";
     const assertionGap = compiled.reasonCode === "ASSERTION_CAPABILITY_MISSING";
+    const configurationGap = ["EXTERNAL_ADAPTER_NOT_CONFIGURED", "DATABASE_ASSERTION_NOT_CONFIGURED"].includes(compiled.reasonCode);
     return result({
-      status: assertionGap ? REQUIRES_FRAMEWORK_CAPABILITY : INSUFFICIENT_EVIDENCE,
+      status: assertionGap || configurationGap ? REQUIRES_FRAMEWORK_CAPABILITY : INSUFFICIENT_EVIDENCE,
       automatable: false,
       reasonCode: compiled.reasonCode || "AUTOMATION_CONTRACT_INCOMPLETE",
       reason: assertionGap
         ? "The expected behavior is valid, but the deterministic assertion registry does not yet contain a matching assertion capability."
         : compiled.reason || "The test case could not be compiled into the supported automation contract.",
       reasons: compiled.errors || [],
-      resolutionType: userInput ? RESOLUTION_USER_INPUT_REQUIRED : assertionGap ? RESOLUTION_FRAMEWORK_CHANGE_REQUIRED : RESOLUTION_AI_REPAIRABLE,
+      resolutionType: userInput ? RESOLUTION_USER_INPUT_REQUIRED : assertionGap || configurationGap ? RESOLUTION_FRAMEWORK_CHANGE_REQUIRED : RESOLUTION_AI_REPAIRABLE,
       requiredInputs: userInput ? ["username", "password"] : [],
       evidence: compiled.supportedAssertions || compiled.supportedOperations || [],
       assertionSuggestions: compiled.assertionSuggestions || [],
@@ -148,6 +158,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   const narratives = compiled.plan.narrativeExpectations || [];
   const coverage = compiled.expectationCoverage || compiled.plan.expectationCoverage || null;
   const partialCoverage = coverage && coverage.total > 0 && coverage.compiled < coverage.total;
+  const advanced = Array.isArray(compiled.plan.advancedCapabilities) ? compiled.plan.advancedCapabilities : [];
   return result({
     status: READY,
     automatable: true,
@@ -155,12 +166,16 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       ? "SUPPORTED_WITH_ASSERTION_SUGGESTIONS"
       : partialCoverage
         ? "SUPPORTED_WITH_PARTIAL_EXPECTATION_COVERAGE"
-        : "SUPPORTED_GROUNDED_AND_COMPILED",
+        : advanced.length
+          ? "SUPPORTED_ADVANCED_CAPABILITIES"
+          : "SUPPORTED_GROUNDED_AND_COMPILED",
     reason: suggestions.length
       ? "The test has deterministic assertions and can run. Some narrative expectations also have optional assertion-capability suggestions for stronger coverage. Execution PASS/FAIL is determined only when the browser runs the test."
       : partialCoverage
         ? `The test is executable and grounded. ${coverage.compiled} of ${coverage.total} human expectation(s) compile into deterministic assertions; unresolved narrative expectations remain visible for review. Automation Ready does not predict PASS/FAIL.`
-        : "The test case is grounded and compiled successfully into the deterministic automation contract. Automation Ready means executable; it does not predict PASS/FAIL. The execution outcome is determined only when the browser runs the test.",
+        : advanced.length
+          ? `The test is grounded and executable with advanced capability support: ${advanced.join(", ")}.`
+          : "The test case is grounded and compiled successfully into the deterministic automation contract. Automation Ready means executable; it does not predict PASS/FAIL. The execution outcome is determined only when the browser runs the test.",
     resolutionType: RESOLUTION_NONE,
     automationPlan: compiled.plan,
     assertionSuggestions: suggestions,
@@ -170,6 +185,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       `${compiled.plan.actions.length} deterministic action(s) compiled`,
       `${compiled.plan.assertions.length} deterministic assertion(s) compiled`,
       coverage ? `${coverage.compiled}/${coverage.total} human expectation(s) compiled (${coverage.percent}%)` : null,
+      advanced.length ? `Advanced capabilities: ${advanced.join(", ")}` : null,
       `${discovery.selectors.size} discovered selector(s) available`,
       `${discovery.paths.size} discovered path(s) available`,
       hasCredentials ? "Runtime credentials available when required" : "No runtime credential dependency detected",
