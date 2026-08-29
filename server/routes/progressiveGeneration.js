@@ -13,6 +13,7 @@ const jobs = new Map();
 const MAX_CASES = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 5) || 5, 50));
 const GENERATION_BATCH_SIZE = Math.max(1, Math.min(Number(process.env.AI_GENERATION_BATCH_SIZE || 1) || 1, 5));
 const JOB_TTL_MS = 30 * 60 * 1000;
+const SCENARIO_TYPES = ['functional','negative','boundary','positive'];
 
 function cleanArray(input, normalizer, allowed) {
   const out = [...new Set((Array.isArray(input) ? input : []).map((x) => normalizer(x, null)).filter(Boolean))];
@@ -22,6 +23,16 @@ function cleanArray(input, normalizer, allowed) {
 function normalizeCategories(input) { return cleanArray(input, normalizeTestCategory, TEST_CATEGORIES); }
 function normalizeSecuritySubcategories(input) { return cleanArray(input, normalizeSecuritySubcategory, SECURITY_SUBCATEGORIES); }
 function normalizeSecuritySeverities(input) { return cleanArray(input, normalizeSecuritySeverity, SECURITY_SEVERITIES); }
+function normalizeScenarioTypes(input) {
+  const values = [...new Set((Array.isArray(input) ? input : []).map((x) => String(x || '').trim().toLowerCase()).filter((x) => SCENARIO_TYPES.includes(x)))];
+  return values.length ? values : [...SCENARIO_TYPES];
+}
+function allowQaManager(req, res, next) {
+  if (!req.user) return next();
+  const role = String(req.user.role || '').toUpperCase();
+  if (!['QA','MANAGER'].includes(role)) return res.status(403).json({ reply: 'QA or MANAGER role is required for test generation.' });
+  next();
+}
 function targetUrl(value) { const u = new URL(String(value || '')); if (!['http:','https:'].includes(u.protocol)) throw new Error('Only HTTP/HTTPS targets are supported.'); return u.toString(); }
 function discoveryUrls(baseUrl, additionalPaths = []) { const base = new URL(baseUrl); return [...new Set([baseUrl, ...(Array.isArray(additionalPaths) ? additionalPaths : []).map((p) => String(p || '').trim()).filter(Boolean).map((p) => new URL(p, `${base.protocol}//${base.host}/`).toString())])]; }
 function pendingSummary(cases) { return { total: cases.length, ready: 0, checking: cases.length, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0 }; }
@@ -39,8 +50,12 @@ function relevantCategories(selected, story, discoveries) {
   return [...new Set(result)].filter((c) => selected.includes(c));
 }
 
-function buildPlan(categories, total) {
+function categoryPlan(categories, total) {
   const source = categories.length ? categories : ['FUNCTIONAL'];
+  return Array.from({ length: total }, (_, i) => source[i % source.length]);
+}
+function scenarioTypePlan(types, total) {
+  const source = types.length ? types : SCENARIO_TYPES;
   return Array.from({ length: total }, (_, i) => source[i % source.length]);
 }
 
@@ -62,9 +77,7 @@ function finish(job, type, data = {}) {
   emit(job, type, data);
   job.completed = true;
   job.state = type;
-  for (const res of [...job.subscribers]) {
-    try { res.end(); } catch {}
-  }
+  for (const res of [...job.subscribers]) { try { res.end(); } catch {} }
   job.subscribers.clear();
 }
 function trimJobs() {
@@ -87,8 +100,14 @@ async function runGeneration(job, input) {
     emit(job, 'DISCOVERY_COMPLETED', { pageCount: pages.length, durationMs: Date.now() - discoveryStarted });
 
     const categoryPool = relevantCategories(input.categories, input.story, compact);
-    const plan = buildPlan(categoryPool, MAX_CASES);
-    emit(job, 'CATEGORY_PLAN', { categories: categoryPool, plan, allCategoriesAutoScoped: input.categories.length === TEST_CATEGORIES.length });
+    const categories = categoryPlan(categoryPool, MAX_CASES);
+    const scenarioTypes = scenarioTypePlan(input.scenarioTypes, MAX_CASES);
+    emit(job, 'GENERATION_PLAN', {
+      categories: categoryPool,
+      scenarioTypes: input.scenarioTypes,
+      units: Array.from({ length: MAX_CASES }, (_, i) => ({ category: categories[i], scenarioType: scenarioTypes[i] })),
+      allCategoriesAutoScoped: input.categories.length === TEST_CATEGORIES.length,
+    });
 
     const cases = [];
     let feature = null;
@@ -96,10 +115,11 @@ async function runGeneration(job, input) {
     while (cases.length < MAX_CASES) {
       const remaining = MAX_CASES - cases.length;
       const batchCount = Math.min(GENERATION_BATCH_SIZE, remaining);
-      const category = plan[cases.length] || categoryPool[0] || 'FUNCTIONAL';
+      const category = categories[cases.length] || categoryPool[0] || 'FUNCTIONAL';
+      const scenarioType = scenarioTypes[cases.length] || 'functional';
       batchNumber += 1;
       job.state = 'GENERATING';
-      emit(job, 'BATCH_STARTED', { batchNumber, category, requested: batchCount, generatedSoFar: cases.length, totalRequested: MAX_CASES });
+      emit(job, 'BATCH_STARTED', { batchNumber, category, scenarioType, requested: batchCount, generatedSoFar: cases.length, totalRequested: MAX_CASES });
 
       const batchStarted = Date.now();
       const generated = await generateBatch({
@@ -107,6 +127,7 @@ async function runGeneration(job, input) {
         pageDiscoveries: compact,
         environment: 'Test',
         category,
+        scenarioType,
         count: batchCount,
         excludeTitles: cases.map((tc) => tc.title),
         securitySubcategories: input.securitySubcategories,
@@ -124,33 +145,19 @@ async function runGeneration(job, input) {
         const tc = { ...raw, id, source: 'ai', automationReadiness: null };
         cases.push(tc); accepted.push(tc);
       }
-      if (!accepted.length) throw new Error(`Generation batch ${batchNumber} returned only duplicate or unusable ${category} cases.`);
+      if (!accepted.length) throw new Error(`Generation batch ${batchNumber} returned only duplicate or unusable ${category}/${scenarioType} cases.`);
 
       session.testCases = [...cases];
       session.automationReadiness = pendingSummary(cases);
-      emit(job, 'BATCH_COMPLETED', {
-        batchNumber,
-        category,
-        durationMs: Date.now() - batchStarted,
-        cases: accepted,
-        generatedSoFar: cases.length,
-        totalRequested: MAX_CASES,
-      });
+      emit(job, 'BATCH_COMPLETED', { batchNumber, category, scenarioType, durationMs: Date.now() - batchStarted, cases: accepted, generatedSoFar: cases.length, totalRequested: MAX_CASES });
     }
 
     session.testCases = cases;
     session.automationReadiness = pendingSummary(cases);
     session.readinessValidated = false;
     session.state = 'AWAITING_APPROVAL';
-    finish(job, 'GENERATION_COMPLETED', {
-      feature,
-      cases,
-      pageCount: pages.length,
-      totalGenerated: cases.length,
-      durationMs: Date.now() - startedAt,
-      categoryPlan: plan,
-    });
-    console.log(`[progressive-generation] session=${job.sessionId} cases=${cases.length} batches=${batchNumber} categories=${categoryPool.join(',')} total=${Date.now()-startedAt}ms`);
+    finish(job, 'GENERATION_COMPLETED', { feature, cases, pageCount: pages.length, totalGenerated: cases.length, durationMs: Date.now() - startedAt, categoryPlan: categories, scenarioTypePlan: scenarioTypes });
+    console.log(`[progressive-generation] session=${job.sessionId} cases=${cases.length} batches=${batchNumber} categories=${categoryPool.join(',')} types=${input.scenarioTypes.join(',')} total=${Date.now()-startedAt}ms`);
   } catch (err) {
     job.error = err.message;
     session.state = 'IDLE';
@@ -159,7 +166,7 @@ async function runGeneration(job, input) {
   }
 }
 
-router.post('/api/generation/start', (req, res) => {
+router.post('/api/generation/start', allowQaManager, (req, res) => {
   trimJobs();
   try {
     const sessionId = String(req.body?.sessionId || '').trim();
@@ -170,6 +177,7 @@ router.post('/api/generation/start', (req, res) => {
 
     const url = targetUrl(req.body?.targetUrl);
     const categories = normalizeCategories(req.body?.selectedTestCategories);
+    const scenarioTypes = normalizeScenarioTypes(req.body?.selectedScenarioTypes);
     const securitySubcategories = normalizeSecuritySubcategories(req.body?.selectedSecuritySubcategories);
     const securitySeverities = normalizeSecuritySeverities(req.body?.selectedSecuritySeverities);
     const aiModelTier = normalizeProfile(req.body?.aiModelTier || process.env.AI_MODEL_DEFAULT || 'fast');
@@ -181,19 +189,20 @@ router.post('/api/generation/start', (req, res) => {
     session.environment = 'Test';
     session.additionalPaths = Array.isArray(req.body?.additionalPaths) ? req.body.additionalPaths : [];
     session.selectedTestCategories = categories;
+    session.selectedScenarioTypes = scenarioTypes;
     session.selectedSecuritySubcategories = securitySubcategories;
     session.selectedSecuritySeverities = securitySeverities;
     session.aiModelTier = aiModelTier;
     session.credentials = req.body?.credentials && typeof req.body.credentials === 'object' ? { username: String(req.body.credentials.username || ''), password: String(req.body.credentials.password || '') } : null;
 
     const job = newJob(sessionId);
-    const input = { targetUrl: url, story, additionalPaths: session.additionalPaths, categories, securitySubcategories, securitySeverities, aiModelTier };
+    const input = { targetUrl: url, story, additionalPaths: session.additionalPaths, categories, scenarioTypes, securitySubcategories, securitySeverities, aiModelTier };
     setImmediate(() => runGeneration(job, input));
     res.status(202).json({ ok: true, sessionId, totalRequested: MAX_CASES, batchSize: GENERATION_BATCH_SIZE, eventsUrl: `/api/generation/events/${encodeURIComponent(sessionId)}` });
   } catch (err) { res.status(400).json({ reply: err.message }); }
 });
 
-router.get('/api/generation/events/:sessionId', (req, res) => {
+router.get('/api/generation/events/:sessionId', allowQaManager, (req, res) => {
   trimJobs();
   const job = jobs.get(req.params.sessionId);
   if (!job) return res.status(404).json({ reply: 'Generation job not found.' });
