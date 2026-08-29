@@ -14,7 +14,11 @@
       .filter(Boolean)
   );
 
-  if (!failedIds.size) return;
+  if (!failedIds.size) {
+    body.dataset.aiAnalysisTerminal = 'true';
+    body.dataset.aiAnalysisState = 'NOT_REQUIRED';
+    return;
+  }
 
   let activeJobId = null;
   let stopped = false;
@@ -41,6 +45,19 @@
     return headers;
   }
 
+  function isAnalysisError(analysis) {
+    return String(analysis?.classification || '').toUpperCase() === 'ANALYSIS_ERROR';
+  }
+
+  function retryableIds() {
+    const ids = new Set();
+    for (const id of failedIds) {
+      const analysis = analyses.get(id);
+      if (!analysis || isAnalysisError(analysis)) ids.add(id);
+    }
+    return ids;
+  }
+
   function ensureLiveStatus() {
     let status = document.getElementById('reportAiLiveStatus');
     if (status) return status;
@@ -51,6 +68,29 @@
     status.style.cssText = 'display:inline-flex;align-items:center;gap:7px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:9px;padding:8px 10px;font-size:10.5px;font-weight:800;white-space:nowrap';
     actions.insertBefore(status, actions.firstChild);
     return status;
+  }
+
+  function ensureRetryButton() {
+    let button = document.getElementById('retryAiAnalysisBtn');
+    if (button) return button;
+    const actions = document.querySelector('.hero-actions');
+    if (!actions) return null;
+    button = document.createElement('button');
+    button.id = 'retryAiAnalysisBtn';
+    button.type = 'button';
+    button.className = 'export-btn';
+    button.style.display = 'none';
+    button.style.borderColor = '#fecaca';
+    button.style.background = '#fff7f7';
+    button.style.color = '#b91c1c';
+    button.textContent = 'Retry AI Analysis';
+    button.addEventListener('click', retryAnalysisErrors);
+    actions.appendChild(button);
+    return button;
+  }
+
+  function exportButton() {
+    return document.getElementById('exportAnalysisExcel');
   }
 
   function updateLiveStatus(text, mode) {
@@ -72,10 +112,63 @@
     }
   }
 
+  function publishAiState(detail) {
+    window.dispatchEvent(new CustomEvent('testnexus:report-ai-state', { detail }));
+  }
+
+  function setBusyControls(label) {
+    body.dataset.aiAnalysisTerminal = 'false';
+    body.dataset.aiAnalysisState = 'RUNNING';
+    const excel = exportButton();
+    if (excel) {
+      excel.disabled = true;
+      excel.title = 'Excel becomes available when AI analysis finishes or reaches an error state.';
+      excel.style.opacity = '.55';
+      excel.style.cursor = 'not-allowed';
+    }
+    const retry = ensureRetryButton();
+    if (retry) {
+      retry.style.display = 'none';
+      retry.disabled = true;
+    }
+    publishAiState({ state: 'RUNNING', terminal: false, busy: true, errorCount: 0, label: label || 'AI analysis running' });
+  }
+
+  function setTerminalControls(label, mode) {
+    const errors = retryableIds();
+    body.dataset.aiAnalysisTerminal = 'true';
+    body.dataset.aiAnalysisState = errors.size ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED';
+    const excel = exportButton();
+    if (excel) {
+      excel.disabled = false;
+      excel.title = errors.size
+        ? 'Export is available. AI analysis errors are included in the workbook.'
+        : 'Export the completed execution and AI analysis.';
+      excel.style.opacity = '';
+      excel.style.cursor = '';
+    }
+    const retry = ensureRetryButton();
+    if (retry) {
+      retry.disabled = false;
+      retry.style.display = errors.size ? 'inline-flex' : 'none';
+      retry.textContent = errors.size === 1 ? 'Retry AI Analysis (1)' : `Retry AI Analysis (${errors.size})`;
+      retry.title = errors.size ? 'Retry only the failed or incomplete AI-analysis cases.' : '';
+    }
+    updateLiveStatus(label, mode || (errors.size ? 'error' : 'done'));
+    publishAiState({
+      state: errors.size ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED',
+      terminal: true,
+      busy: false,
+      errorCount: errors.size,
+      retryableTestCases: [...errors],
+      label,
+    });
+  }
+
   function updateProgressStatus(prefix) {
     const completed = analyses.size;
     const total = failedIds.size;
-    updateLiveStatus(`${prefix || 'Live AI analysis'} · ${completed}/${total} failed cases`, completed >= total ? 'done' : 'running');
+    updateLiveStatus(`${prefix || 'Live AI analysis'} · ${completed}/${total} failed cases`, 'running');
   }
 
   function waitingHtml() {
@@ -95,6 +188,15 @@
     const cell = cells.get(id);
     if (!cell || !failedIds.has(id)) return;
     cell.innerHTML = html || waitingHtml();
+  }
+
+  function markUnresolvedAsError(message) {
+    for (const id of failedIds) {
+      const analysis = analyses.get(id);
+      if (!analysis || isAnalysisError(analysis)) {
+        if (!analysis) setCell(id, errorHtml(message));
+      }
+    }
   }
 
   function updateDefectMetric() {
@@ -122,7 +224,9 @@
       const key = String(id || '').toUpperCase();
       if (!analyses.has(key)) setCell(key, analyzingHtml());
     }
-    updateProgressStatus(data?.state === 'COMPLETED' ? 'AI analysis complete' : 'Live AI analysis');
+    if (!['COMPLETED', 'FAILED', 'CANCELLED'].includes(String(data?.state || '').toUpperCase())) {
+      updateProgressStatus('Live AI analysis');
+    }
   }
 
   function parseSseChunk(buffer, onEvent) {
@@ -144,43 +248,57 @@
 
   function onAnalysisEvent(type, event) {
     if (type === 'ANALYSIS_STARTED') {
-      updateLiveStatus(`Analyzing ${failedIds.size} failed case${failedIds.size === 1 ? '' : 's'}…`, 'running');
+      setBusyControls(event.retryErrorsOnly ? 'Retrying AI analysis' : 'AI analysis running');
+      updateLiveStatus(event.retryErrorsOnly
+        ? `Retrying ${event.totalFailed || retryableIds().size} AI analysis error${Number(event.totalFailed || retryableIds().size) === 1 ? '' : 's'}…`
+        : `Analyzing ${failedIds.size} failed case${failedIds.size === 1 ? '' : 's'}…`, 'running');
       return;
     }
     if (type === 'ANALYSIS_ITEM_STARTED') {
       const id = String(event.testCase || '').toUpperCase();
-      if (!analyses.has(id)) setCell(id, analyzingHtml());
-      updateProgressStatus('Live AI analysis');
+      const current = analyses.get(id);
+      if (!current || isAnalysisError(current)) setCell(id, analyzingHtml());
+      updateProgressStatus(event.retryErrorsOnly ? 'Retrying AI analysis' : 'Live AI analysis');
       return;
     }
     if (type === 'ANALYSIS_ITEM_COMPLETED' || type === 'ANALYSIS_ITEM_FAILED') {
       if (event.analysis) analyses.set(String(event.testCase || '').toUpperCase(), event.analysis);
       setCell(event.testCase, event.analysisHtml || (type === 'ANALYSIS_ITEM_FAILED' ? errorHtml(event.error) : errorHtml()));
       updateDefectMetric();
-      updateProgressStatus('Live AI analysis');
+      updateProgressStatus(event.retryErrorsOnly ? 'Retrying AI analysis' : 'Live AI analysis');
       return;
     }
     if (type === 'ANALYSIS_COMPLETED') {
+      for (const analysis of event.failureAnalyses || []) {
+        if (analysis?.testCase) analyses.set(String(analysis.testCase).toUpperCase(), analysis);
+      }
       stopped = true;
+      startRequested = false;
       activeJobId = null;
       clearTimeout(reconnectTimer);
-      updateLiveStatus(`AI analysis complete · ${analyses.size}/${failedIds.size} failed cases`, 'done');
+      const errors = retryableIds().size;
+      setTerminalControls(
+        errors
+          ? `AI analysis completed with ${errors} error${errors === 1 ? '' : 's'} · Excel is available`
+          : `AI analysis complete · ${analyses.size}/${failedIds.size} failed cases`,
+        errors ? 'error' : 'done'
+      );
       return;
     }
     if (type === 'ANALYSIS_FAILED') {
       activeJobId = null;
       startRequested = false;
-      for (const id of failedIds) {
-        if (!analyses.has(id)) setCell(id, errorHtml('The AI analysis job stopped before this case completed.'));
-      }
-      updateLiveStatus('AI analysis interrupted · execution results remain valid', 'error');
-      scheduleDiscovery(5000);
+      stopped = true;
+      markUnresolvedAsError(event.error || 'The AI analysis service stopped before this case completed.');
+      setTerminalControls('AI analysis service error · Excel is available · retry when ready', 'error');
       return;
     }
     if (type === 'ANALYSIS_CANCELLED') {
       activeJobId = null;
+      startRequested = false;
       stopped = true;
-      updateLiveStatus('AI analysis stopped', 'error');
+      markUnresolvedAsError(event.reason || 'AI analysis was stopped before this case completed.');
+      setTerminalControls('AI analysis stopped · Excel is available', 'error');
     }
   }
 
@@ -214,6 +332,7 @@
     if (!job?.eventsUrl || !job?.jobId || stopped) return;
     if (activeJobId === job.jobId) return;
     activeJobId = job.jobId;
+    setBusyControls(job.retryErrorsOnly ? 'Retrying AI analysis' : 'AI analysis running');
     try {
       await consumeFetchStream(job.eventsUrl);
       if (!stopped) {
@@ -223,25 +342,45 @@
     } catch (err) {
       if (err?.name === 'AbortError' || stopped) return;
       activeJobId = null;
-      scheduleDiscovery(1800);
+      scheduleDiscovery(1200);
     }
   }
 
-  async function startAnalysis() {
-    if (startRequested || stopped) return;
+  async function startAnalysis(retryErrorsOnly) {
+    if (startRequested || (stopped && !retryErrorsOnly)) return;
+
+    if (retryErrorsOnly) {
+      stopped = false;
+      startRequested = false;
+      activeJobId = null;
+      clearTimeout(reconnectTimer);
+      currentAbort?.abort?.();
+      for (const id of retryableIds()) {
+        const prior = analyses.get(id);
+        if (isAnalysisError(prior)) analyses.delete(id);
+        setCell(id, waitingHtml());
+      }
+      updateDefectMetric();
+    }
+
     startRequested = true;
-    updateLiveStatus(`Starting AI analysis · 0/${failedIds.size} failed cases`, 'running');
+    setBusyControls(retryErrorsOnly ? 'Retrying AI analysis' : 'Starting AI analysis');
+    updateLiveStatus(retryErrorsOnly
+      ? `Retrying AI analysis · ${retryableIds().size} case${retryableIds().size === 1 ? '' : 's'}`
+      : `Starting AI analysis · 0/${failedIds.size} failed cases`, 'running');
+
     try {
       const response = await fetch('/api/test-results/analyze/start', {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ sessionId, retryErrorsOnly: Boolean(retryErrorsOnly) }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.reply || 'Could not start AI failure analysis.');
       if (data.analysisNeeded === false) {
         stopped = true;
-        updateLiveStatus('No failed cases require AI analysis', 'done');
+        startRequested = false;
+        setTerminalControls('AI analysis complete · no retry is required', 'done');
         return;
       }
       if (data.jobId && data.eventsUrl) {
@@ -251,9 +390,15 @@
       scheduleDiscovery(500);
     } catch (err) {
       startRequested = false;
-      updateLiveStatus('Waiting to start AI analysis…', 'error');
-      scheduleDiscovery(2500);
+      stopped = true;
+      markUnresolvedAsError(err.message || 'The AI analysis service could not be started.');
+      setTerminalControls('AI analysis service error · Excel is available · retry when ready', 'error');
     }
+  }
+
+  function retryAnalysisErrors() {
+    if (!retryableIds().size) return;
+    startAnalysis(true);
   }
 
   async function discover() {
@@ -267,19 +412,31 @@
       const data = await response.json();
       applySnapshot(data);
 
-      if (data.state === 'COMPLETED' || data.state === 'NOT_REQUIRED') {
+      const state = String(data.state || '').toUpperCase();
+      if (state === 'COMPLETED' || state === 'NOT_REQUIRED') {
         stopped = true;
-        updateLiveStatus(data.state === 'COMPLETED' ? `AI analysis complete · ${analyses.size}/${failedIds.size} failed cases` : 'No AI analysis required', 'done');
+        startRequested = false;
+        const errors = retryableIds().size;
+        setTerminalControls(
+          state === 'NOT_REQUIRED'
+            ? 'No AI analysis required'
+            : errors
+              ? `AI analysis completed with ${errors} error${errors === 1 ? '' : 's'} · Excel is available`
+              : `AI analysis complete · ${analyses.size}/${failedIds.size} failed cases`,
+          errors ? 'error' : 'done'
+        );
         return;
       }
-      if (data.state === 'FAILED') {
+      if (state === 'FAILED' || state === 'CANCELLED') {
         activeJobId = null;
         startRequested = false;
-        for (const id of failedIds) {
-          if (!analyses.has(id)) setCell(id, errorHtml('The previous AI analysis job stopped before this case completed.'));
-        }
-        updateLiveStatus('AI analysis needs retry', 'error');
-        scheduleDiscovery(5000);
+        stopped = true;
+        markUnresolvedAsError(state === 'FAILED'
+          ? 'The previous AI analysis job stopped before this case completed.'
+          : 'The previous AI analysis job was cancelled before this case completed.');
+        setTerminalControls(state === 'FAILED'
+          ? 'AI analysis needs retry · Excel is available'
+          : 'AI analysis stopped · Excel is available', 'error');
         return;
       }
       if (data.jobId && data.eventsUrl) {
@@ -287,13 +444,16 @@
         connect(data);
         return;
       }
-      if (data.state === 'PENDING') {
-        startAnalysis();
+      if (state === 'PENDING') {
+        startAnalysis(false);
         return;
       }
       scheduleDiscovery(1500);
-    } catch {
-      scheduleDiscovery(2500);
+    } catch (err) {
+      stopped = true;
+      startRequested = false;
+      markUnresolvedAsError(err.message || 'Could not read AI analysis status.');
+      setTerminalControls('AI analysis status error · Excel is available · retry when ready', 'error');
     }
   }
 
@@ -303,7 +463,9 @@
     currentAbort?.abort?.();
   });
 
+  ensureRetryButton();
   for (const id of failedIds) setCell(id, waitingHtml());
+  setBusyControls('Preparing failed-only AI analysis');
   updateLiveStatus(`Preparing failed-only AI analysis · 0/${failedIds.size}`, 'running');
   discover();
 })();
