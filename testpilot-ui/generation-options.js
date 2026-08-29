@@ -3,6 +3,8 @@
     'FUNCTIONAL','SMOKE','REGRESSION','SECURITY','PERFORMANCE','ACCESSIBILITY',
     'INTEGRATION','API','UI','COMPATIBILITY','LOAD','STRESS','CUSTOM'
   ];
+  const DISABLED_CATEGORIES = new Set(['LOAD','STRESS']);
+  const SELECTABLE_CATEGORIES = CATEGORIES.filter((value) => !DISABLED_CATEGORIES.has(value));
   const SECURITY_SUBCATEGORIES = [
     'AUTHENTICATION','AUTHORIZATION_RBAC','SESSION_MANAGEMENT','INPUT_VALIDATION','XSS','SQL_COMMAND_INJECTION','CSRF',
     'SECURITY_HEADERS','COOKIES','SENSITIVE_DATA_EXPOSURE','API_SECURITY','FILE_UPLOAD','ACCESS_CONTROL','RATE_LIMITING',
@@ -15,16 +17,15 @@
 
   function label(value) { return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
   function selectedValues() {
-    const checked = [...document.querySelectorAll('#generationCategoryMenu input[data-test-category]:checked')].map((input) => input.value);
-    return checked.length ? checked : [...CATEGORIES];
+    return [...document.querySelectorAll('#generationCategoryMenu input[data-test-category]:checked:not(:disabled)')]
+      .map((input) => input.value)
+      .filter((value) => SELECTABLE_CATEGORIES.includes(value));
   }
   function selectedSecuritySubcategories() {
-    const checked = [...document.querySelectorAll('#securitySubcategoryMenu input[data-security-subcategory]:checked')].map((input) => input.value);
-    return checked.length ? checked : [...SECURITY_SUBCATEGORIES];
+    return [...document.querySelectorAll('#securitySubcategoryMenu input[data-security-subcategory]:checked')].map((input) => input.value);
   }
   function selectedSecuritySeverities() {
-    const checked = [...document.querySelectorAll('#securitySeverityMenu input[data-security-severity]:checked')].map((input) => input.value);
-    return checked.length ? checked : [...SECURITY_SEVERITIES];
+    return [...document.querySelectorAll('#securitySeverityMenu input[data-security-severity]:checked')].map((input) => input.value);
   }
   function persist() {
     try {
@@ -44,10 +45,10 @@
     const count = document.getElementById('generationCategoryCount');
     if (!button || !selectAll) return;
     const selected = selectedValues();
-    const all = selected.length === CATEGORIES.length;
+    const all = selected.length === SELECTABLE_CATEGORIES.length;
     selectAll.checked = all;
     selectAll.indeterminate = !all && selected.length > 0;
-    button.innerHTML = `<span>${all ? 'All test categories' : `${selected.length} categor${selected.length === 1 ? 'y' : 'ies'} selected`}</span><span class="generation-chevron">⌄</span>`;
+    button.innerHTML = `<span>${all ? 'All available test categories' : `${selected.length} categor${selected.length === 1 ? 'y' : 'ies'} selected`}</span><span class="generation-chevron">⌄</span>`;
     button.title = selected.map(label).join(', ');
     if (count) count.textContent = all ? 'All' : String(selected.length);
     updateSecurityVisibility();
@@ -76,10 +77,19 @@
       savedSecurity = JSON.parse(sessionStorage.getItem(SECURITY_STORAGE_KEY) || 'null');
       savedSeverities = JSON.parse(sessionStorage.getItem(SEVERITY_STORAGE_KEY) || 'null');
     } catch {}
-    const selected = Array.isArray(saved) && saved.length ? new Set(saved.filter((x) => CATEGORIES.includes(x))) : new Set(CATEGORIES);
+    const selected = Array.isArray(saved) && saved.length
+      ? new Set(saved.filter((x) => SELECTABLE_CATEGORIES.includes(x)))
+      : new Set(SELECTABLE_CATEGORIES);
     const selectedSecurity = Array.isArray(savedSecurity) && savedSecurity.length ? new Set(savedSecurity.filter((x) => SECURITY_SUBCATEGORIES.includes(x))) : new Set(SECURITY_SUBCATEGORIES);
     const selectedSeverities = Array.isArray(savedSeverities) && savedSeverities.length ? new Set(savedSeverities.filter((x) => SECURITY_SEVERITIES.includes(x))) : new Set(SECURITY_SEVERITIES);
-    document.querySelectorAll('#generationCategoryMenu input[data-test-category]').forEach((input) => { input.checked = selected.has(input.value); });
+    document.querySelectorAll('#generationCategoryMenu input[data-test-category]').forEach((input) => {
+      if (DISABLED_CATEGORIES.has(input.value)) {
+        input.checked = false;
+        input.disabled = true;
+      } else {
+        input.checked = selected.has(input.value);
+      }
+    });
     document.querySelectorAll('#securitySubcategoryMenu input[data-security-subcategory]').forEach((input) => { input.checked = selectedSecurity.has(input.value); });
     document.querySelectorAll('#securitySeverityMenu input[data-security-severity]').forEach((input) => { input.checked = selectedSeverities.has(input.value); });
     updateSummary();
@@ -111,11 +121,17 @@
     return `<div class="security-picker" id="${id}"><button id="${buttonId}" class="generation-category-button generation-category-button-compact" type="button"><span>${allLabel}</span><span class="generation-chevron">⌄</span></button><div id="${menuId}" class="generation-category-menu security-menu"><label class="generation-category-option generation-category-all"><input id="${allId}" type="checkbox" checked> Select All</label>${values.map((value) => `<label class="generation-category-option"><input type="checkbox" ${attr} value="${value}" checked> ${label(value)}</label>`).join('')}</div></div>`;
   }
 
+  function categoryOption(category) {
+    const disabled = DISABLED_CATEGORIES.has(category);
+    const uiNote = category === 'UI' ? '<span class="generation-category-inline-note">Browser UI/state checks</span>' : '';
+    return `<label class="generation-category-option${disabled ? ' generation-category-disabled' : ''}"${disabled ? ` title="${label(category)} execution is not supported by this engine"` : ''}><input type="checkbox" data-test-category value="${category}"${disabled ? ' disabled' : ' checked'}> <span>${label(category)}</span>${uiNote}${disabled ? '<span class="generation-category-unavailable">Unavailable</span>' : ''}</label>`;
+  }
+
   function bindPicker({ rootId, buttonId, menuId, allId, attrSelector, update }) {
     const root = document.getElementById(rootId), button = document.getElementById(buttonId), menu = document.getElementById(menuId), selectAll = document.getElementById(allId);
     if (!root || !button || !menu || !selectAll) return;
     button.addEventListener('click', (event) => { event.stopPropagation(); root.classList.toggle('open'); });
-    selectAll.addEventListener('change', () => { menu.querySelectorAll(attrSelector).forEach((input) => { input.checked = selectAll.checked; }); update(); });
+    selectAll.addEventListener('change', () => { menu.querySelectorAll(attrSelector).forEach((input) => { if (!input.disabled) input.checked = selectAll.checked; }); update(); });
     menu.querySelectorAll(attrSelector).forEach((input) => input.addEventListener('change', update));
     document.addEventListener('click', (event) => { if (!root.contains(event.target)) root.classList.remove('open'); });
   }
@@ -127,17 +143,17 @@
     if (!storyField) return;
 
     const style = document.createElement('style');
-    style.textContent = `.generation-category-picker,.security-picker{position:relative}.generation-category-picker{margin-top:14px}.generation-category-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.generation-category-heading label{margin:0;color:#344054;font-size:12px;font-weight:800}.generation-category-count{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:22px;padding:0 7px;border-radius:999px;background:#eef2ff;color:#3b5ccc;font-size:10px;font-weight:850}.generation-category-button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border:1px solid #dfe4ee;border-radius:11px;padding:11px 13px;background:#fff;color:#101828;cursor:pointer;font-weight:750;box-shadow:0 1px 2px rgba(16,24,40,.02);transition:border-color .15s ease,box-shadow .15s ease}.generation-category-button:hover{border-color:#b7c3ff;box-shadow:0 0 0 3px rgba(47,91,255,.06)}.generation-category-button-compact{min-height:43px;font-size:12px}.generation-chevron{color:#667085;font-size:15px;line-height:1}.generation-category-menu{display:none;position:absolute;left:0;right:0;top:48px;z-index:45;background:#fff;border:1px solid #e3e8ef;border-radius:12px;box-shadow:0 16px 38px rgba(15,23,42,.16);max-height:340px;overflow:auto;padding:8px}.generation-category-picker.open>#generationCategoryMenu,.security-picker.open>.generation-category-menu{display:block}.generation-category-option{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:11.5px;color:#344054}.generation-category-option:hover{background:#f8fafc}.generation-category-option input{width:auto;margin:0}.generation-category-all{font-weight:850;border-bottom:1px solid #eef1f6;margin-bottom:5px;padding-bottom:10px}.generation-category-note{display:block;color:#667085;margin-top:6px;font-size:10.5px;line-height:1.45}.generation-category-engine-note{margin:6px 8px 2px;padding:7px 8px;border-radius:7px;background:#fff7ed;color:#9a3412;font-size:10px;line-height:1.4}.security-options{margin-top:12px;padding:12px;border:1px solid #e5e7eb;background:linear-gradient(180deg,#fbfcff,#f8faff);border-radius:12px}.security-options-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}.security-options-title{display:flex;align-items:center;gap:7px;color:#344054;font-size:11.5px;font-weight:850}.security-options-icon{width:23px;height:23px;border-radius:7px;display:inline-grid;place-items:center;background:#eef2ff;color:#3857c8;font-size:12px}.security-options-badge{padding:4px 7px;border-radius:999px;background:#eef2ff;color:#3857c8;font-size:9.5px;font-weight:800}.security-options-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.75fr);gap:8px}.security-picker{margin-top:0}.security-menu{top:47px}.security-options-note{display:flex;gap:6px;align-items:flex-start;margin-top:9px;color:#667085;font-size:10px;line-height:1.45}.security-options-note strong{color:#475467}.generation-category-primary-note{margin-top:6px;color:#667085;font-size:10.5px;line-height:1.45}@media(max-width:760px){.security-options-grid{grid-template-columns:1fr}}`;
+    style.textContent = `.generation-category-picker,.security-picker{position:relative}.generation-category-picker{margin-top:14px}.generation-category-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.generation-category-heading label{margin:0;color:#344054;font-size:12px;font-weight:800}.generation-category-count{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:22px;padding:0 7px;border-radius:999px;background:#eef2ff;color:#3b5ccc;font-size:10px;font-weight:850}.generation-category-button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border:1px solid #dfe4ee;border-radius:11px;padding:11px 13px;background:#fff;color:#101828;cursor:pointer;font-weight:750;box-shadow:0 1px 2px rgba(16,24,40,.02);transition:border-color .15s ease,box-shadow .15s ease}.generation-category-button:hover{border-color:#b7c3ff;box-shadow:0 0 0 3px rgba(47,91,255,.06)}.generation-category-button-compact{min-height:43px;font-size:12px}.generation-chevron{color:#667085;font-size:15px;line-height:1}.generation-category-menu{display:none;position:absolute;left:0;right:0;top:48px;z-index:45;background:#fff;border:1px solid #e3e8ef;border-radius:12px;box-shadow:0 16px 38px rgba(15,23,42,.16);max-height:340px;overflow:auto;padding:8px}.generation-category-picker.open>#generationCategoryMenu,.security-picker.open>.generation-category-menu{display:block}.generation-category-option{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:11.5px;color:#344054}.generation-category-option:hover{background:#f8fafc}.generation-category-option input{width:auto;margin:0}.generation-category-all{font-weight:850;border-bottom:1px solid #eef1f6;margin-bottom:5px;padding-bottom:10px}.generation-category-disabled{cursor:not-allowed;color:#98a2b3;background:#f8fafc;text-decoration:line-through}.generation-category-disabled:hover{background:#f8fafc}.generation-category-disabled input{cursor:not-allowed}.generation-category-unavailable{margin-left:auto;padding:2px 6px;border-radius:999px;background:#eef2f6;color:#667085;font-size:9px;font-weight:800;text-decoration:none}.generation-category-inline-note{margin-left:auto;color:#667085;font-size:9.5px}.generation-category-note{display:block;color:#667085;margin-top:6px;font-size:10.5px;line-height:1.45}.generation-category-engine-note{margin:6px 8px 2px;padding:7px 8px;border-radius:7px;background:#f8fafc;color:#667085;font-size:10px;line-height:1.4}.security-options{margin-top:12px;padding:12px;border:1px solid #e5e7eb;background:linear-gradient(180deg,#fbfcff,#f8faff);border-radius:12px}.security-options-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}.security-options-title{display:flex;align-items:center;gap:7px;color:#344054;font-size:11.5px;font-weight:850}.security-options-icon{width:23px;height:23px;border-radius:7px;display:inline-grid;place-items:center;background:#eef2ff;color:#3857c8;font-size:12px}.security-options-badge{padding:4px 7px;border-radius:999px;background:#eef2ff;color:#3857c8;font-size:9.5px;font-weight:800}.security-options-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.75fr);gap:8px}.security-picker{margin-top:0}.security-menu{top:47px}.security-options-note{display:flex;gap:6px;align-items:flex-start;margin-top:9px;color:#667085;font-size:10px;line-height:1.45}.security-options-note strong{color:#475467}.generation-category-primary-note{margin-top:6px;color:#667085;font-size:10.5px;line-height:1.45}@media(max-width:760px){.security-options-grid{grid-template-columns:1fr}}`;
     document.head.appendChild(style);
 
     const picker = document.createElement('div');
     picker.id = 'generationCategoryPicker'; picker.className = 'generation-category-picker';
-    picker.innerHTML = `<div class="generation-category-heading"><label>Test categories to generate</label><span id="generationCategoryCount" class="generation-category-count">All</span></div><button id="generationCategoryButton" class="generation-category-button" type="button"><span>All test categories</span><span class="generation-chevron">⌄</span></button><div id="generationCategoryMenu" class="generation-category-menu"><label class="generation-category-option generation-category-all"><input id="generationCategorySelectAll" type="checkbox" checked> Select All</label>${CATEGORIES.map((category) => `<label class="generation-category-option"><input type="checkbox" data-test-category value="${category}" checked> ${label(category)}</label>`).join('')}<div class="generation-category-engine-note">Load and Stress can be selected for planning and reporting; true concurrent load/stress execution is outside the normal browser/API execution path.</div></div><div class="generation-category-primary-note">Choose the testing purposes you want the generated suite to cover.</div><div id="generationSecurityOptions" class="security-options"><div class="security-options-header"><div class="security-options-title"><span class="security-options-icon">◈</span><span>Security options</span></div><span class="security-options-badge">Security selected</span></div><div class="security-options-grid">${pickerHtml({id:'securitySubcategoryPicker',buttonId:'securitySubcategoryButton',menuId:'securitySubcategoryMenu',allId:'securitySubcategorySelectAll',values:SECURITY_SUBCATEGORIES,attr:'data-security-subcategory',allLabel:'All security areas'})}${pickerHtml({id:'securitySeverityPicker',buttonId:'securitySeverityButton',menuId:'securitySeverityMenu',allId:'securitySeveritySelectAll',values:SECURITY_SEVERITIES,attr:'data-security-severity',allLabel:'All severities'})}</div><div class="security-options-note"><span>ⓘ</span><span><strong>Scope:</strong> Security-functional browser/API checks only. Package scanning, active exploitation, password spraying and network attacks are outside this execution engine.</span></div></div>`;
+    picker.innerHTML = `<div class="generation-category-heading"><label>Test categories to generate</label><span id="generationCategoryCount" class="generation-category-count">All</span></div><button id="generationCategoryButton" class="generation-category-button" type="button"><span>All available test categories</span><span class="generation-chevron">⌄</span></button><div id="generationCategoryMenu" class="generation-category-menu"><label class="generation-category-option generation-category-all"><input id="generationCategorySelectAll" type="checkbox" checked> Select All available</label>${CATEGORIES.map(categoryOption).join('')}<div class="generation-category-engine-note"><strong>Load and Stress are disabled:</strong> this browser/API execution engine does not perform concurrent load generation or stress/saturation testing. Use a dedicated performance-testing engine for those workloads.</div></div><div class="generation-category-primary-note">Choose the testing purposes you want the generated suite to cover. <strong>UI</strong> exercises discovered browser controls and visible application states through deterministic browser execution.</div><div id="generationSecurityOptions" class="security-options"><div class="security-options-header"><div class="security-options-title"><span class="security-options-icon">◈</span><span>Security options</span></div><span class="security-options-badge">Security selected</span></div><div class="security-options-grid">${pickerHtml({id:'securitySubcategoryPicker',buttonId:'securitySubcategoryButton',menuId:'securitySubcategoryMenu',allId:'securitySubcategorySelectAll',values:SECURITY_SUBCATEGORIES,attr:'data-security-subcategory',allLabel:'All security areas'})}${pickerHtml({id:'securitySeverityPicker',buttonId:'securitySeverityButton',menuId:'securitySeverityMenu',allId:'securitySeveritySelectAll',values:SECURITY_SEVERITIES,attr:'data-security-severity',allLabel:'All severities'})}</div><div class="security-options-note"><span>ⓘ</span><span><strong>Scope:</strong> Security-functional browser/API checks only. Package scanning, active exploitation, password spraying and network attacks are outside this execution engine.</span></div></div>`;
     storyField.insertAdjacentElement('afterend', picker);
 
     const button = document.getElementById('generationCategoryButton'), menu = document.getElementById('generationCategoryMenu'), selectAll = document.getElementById('generationCategorySelectAll');
     button.addEventListener('click', (event) => { event.stopPropagation(); picker.classList.toggle('open'); });
-    selectAll.addEventListener('change', () => { menu.querySelectorAll('input[data-test-category]').forEach((input) => { input.checked = selectAll.checked; }); updateSummary(); });
+    selectAll.addEventListener('change', () => { menu.querySelectorAll('input[data-test-category]').forEach((input) => { if (!input.disabled) input.checked = selectAll.checked; }); updateSummary(); });
     menu.querySelectorAll('input[data-test-category]').forEach((input) => input.addEventListener('change', updateSummary));
     document.addEventListener('click', (event) => { if (!picker.contains(event.target)) picker.classList.remove('open'); });
 
