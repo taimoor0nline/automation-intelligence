@@ -23,17 +23,6 @@ router.post('/api/projects', requireAuth, requireRole('MANAGER'), async (req, re
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
-router.post('/api/projects/:projectId/members', requireAuth, requireRole('MANAGER'), async (req, res) => {
-  try {
-    const projectRole = String(req.body?.projectRole || req.body?.role || '').toUpperCase();
-    const normalized = projectRole === 'MANAGER' ? 'PROJECT_MANAGER' : projectRole === 'DEV' ? 'DEVELOPER' : projectRole;
-    if (!['PROJECT_MANAGER','QA','DEVELOPER','VIEWER'].includes(normalized)) return res.status(400).json({ reply: 'Project role must be PROJECT_MANAGER, QA, DEVELOPER, or VIEWER.' });
-    const legacyRole = normalized === 'PROJECT_MANAGER' ? 'MANAGER' : normalized === 'DEVELOPER' ? 'DEV' : normalized === 'VIEWER' ? 'DEV' : 'QA';
-    await db.query(`insert into project_members(project_id,user_id,role,project_role) values($1,$2,$3,$4) on conflict(project_id,user_id) do update set role=excluded.role,project_role=excluded.project_role`, [req.params.projectId, req.body?.userId, legacyRole, normalized]);
-    res.json({ ok: true, projectRole: normalized });
-  } catch (err) { res.status(500).json({ reply: err.message }); }
-});
-
 router.get('/api/developers', requireAuth, requireRole('QA','MANAGER'), async (_req, res) => {
   try {
     const result = await db.query(`select id,email,display_name as "displayName" from users where role='DEV' and is_active=true order by display_name,email`);
