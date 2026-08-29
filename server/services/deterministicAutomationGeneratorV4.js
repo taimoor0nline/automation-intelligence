@@ -46,9 +46,9 @@ function emitAdvancedAssertion(assertion) {
     case 'ASSERT_EXTERNAL_MESSAGE_RECEIVED':
       return `    cy.task('testNexusExternalAdapter', ${js({ capability: 'EMAIL_SMS_OTP', action: 'assert-message', payload: { channel: assertion.channel, contains: assertion.contains || '', description: assertion.description || '' } })}, { log:false }).then((result) => { expect(result && result.ok, JSON.stringify(result || {})).to.eq(true); });`;
     case 'ASSERT_DATABASE_VALUE_EQUALS':
-      return `    cy.task('testNexusDatabaseAssertion', ${js({ queryName: assertion.queryName })}, { log:false }).then((result) => { const value = result && result.first ? result.first[${js(assertion.field)}] : undefined; expect(String(value ?? '')).to.eq(${js(assertion.value)}); });`;
+      return `    cy.task('testNexusDatabaseAssertion', ${js({ queryName: assertion.queryName, params: assertion.params || [] })}, { log:false }).then((result) => { const value = result && result.first ? result.first[${js(assertion.field)}] : undefined; expect(String(value ?? '')).to.eq(${js(assertion.value)}); });`;
     case 'ASSERT_DATABASE_ROW_COUNT_EQUALS':
-      return `    cy.task('testNexusDatabaseAssertion', ${js({ queryName: assertion.queryName })}, { log:false }).then((result) => { expect(Number(result && result.rowCount || 0)).to.eq(${num(assertion.count, 'database row count')}); });`;
+      return `    cy.task('testNexusDatabaseAssertion', ${js({ queryName: assertion.queryName, params: assertion.params || [] })}, { log:false }).then((result) => { expect(Number(result && result.rowCount || 0)).to.eq(${num(assertion.count, 'database row count')}); });`;
     case 'ASSERT_STREAM_MESSAGE_CONTAINS':
       return `    cy.window().should((win) => { const items = Array.isArray(win.__testNexusStreamMessages) ? win.__testNexusStreamMessages : []; const found = items.some((item) => String(item.transport) === ${js(assertion.transport)} && (!${js(assertion.urlFragment || '')} || String(item.url || '').includes(${js(assertion.urlFragment || '')})) && String(item.data ?? '').includes(${js(assertion.value)})); expect(found, JSON.stringify(items)).to.eq(true); });`;
     case 'ASSERT_CLIPBOARD_EQUALS':
