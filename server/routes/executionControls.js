@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const router = express.Router();
 
-const { getSession } = require("../data/sessionStore");
+const { getSession, resetSession } = require("../data/sessionStore");
 const { READY } = require("../services/testCaseFeasibility");
 const { cancelActiveExecution, getActiveExecution } = require("../services/singleSpecRunner");
 const {
@@ -175,7 +175,7 @@ router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) 
 router.use((req, _res, next) => {
   if (req.method === "POST" && req.path === "/api/test-runs/start") {
     const sessionId = String(req.body?.sessionId || "default");
-    const session = getSession(sessionId);
+    let session = getSession(sessionId);
     clearReportGenerationRequest(sessionId);
     removeReportFile(sessionId);
     session.reportHtml = null;
@@ -187,13 +187,32 @@ router.use((req, _res, next) => {
       ? req.body.approvedIds.map((id) => String(id || "").toUpperCase()).filter(Boolean)
       : [];
     const approvedSet = new Set(approvedIds);
-    const selectedCases = (Array.isArray(session.testCases) ? session.testCases : [])
+    let selectedCases = (Array.isArray(session.testCases) ? session.testCases : [])
       .filter((testCase) => approvedSet.has(String(testCase?.id || "").toUpperCase()));
     const selectedReadinessTerminal = selectedCases.length > 0 && selectedCases.every((testCase) => Boolean(testCase?.automationReadiness?.status));
     const selectedReady = selectedCases.length > 0 && selectedCases.every((testCase) => testCase?.automationReadiness?.status === READY);
 
     if (session.state !== "RUNNING" && selectedReadinessTerminal) {
       const previousState = session.state;
+
+      // When generation is still active, detach the reviewed execution snapshot from the
+      // object held by the AI generation worker. resetSession creates a new object in the
+      // store; the old worker can finish without overwriting RUNNING/DONE on this run.
+      if (previousState === "GENERATING") {
+        const snapshot = {
+          ...session,
+          testCases: Array.isArray(session.testCases) ? [...session.testCases] : [],
+          pageDiscoveries: Array.isArray(session.pageDiscoveries) ? [...session.pageDiscoveries] : [],
+          runHistory: Array.isArray(session.runHistory) ? [...session.runHistory] : [],
+          approvedIds: Array.isArray(session.approvedIds) ? [...session.approvedIds] : [],
+          failureAnalyses: Array.isArray(session.failureAnalyses) ? [...session.failureAnalyses] : [],
+        };
+        session = resetSession(sessionId);
+        Object.assign(session, snapshot);
+        selectedCases = (session.testCases || [])
+          .filter((testCase) => approvedSet.has(String(testCase?.id || "").toUpperCase()));
+      }
+
       session.state = "AWAITING_APPROVAL";
       // The isolated execution route still has a legacy aggregate readiness gate. Once
       // every SELECTED case has a terminal readiness result, mark the reviewed subset as
@@ -202,6 +221,7 @@ router.use((req, _res, next) => {
       session.executionSelectionPrepared = {
         at: new Date().toISOString(),
         previousState,
+        detachedFromGeneration: previousState === "GENERATING",
         approvedIds: selectedCases.map((testCase) => testCase.id),
         selectedReady,
         ignoredUnselectedCount: Math.max(0, (session.testCases?.length || 0) - selectedCases.length),
