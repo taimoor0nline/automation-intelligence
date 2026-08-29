@@ -99,4 +99,59 @@ const ungrounded = compileTestCase(ungroundedCase, { pageDiscoveries, hasCredent
 assert.equal(ungrounded.ok, false);
 assert.equal(ungrounded.reasonCode, "NETWORK_ENDPOINT_NOT_GROUNDED");
 
+// Regression: a valid cross-page journey must not execute AI-invented login values.
+// When runtime credentials are available and the discovered workflow crosses from
+// login controls to controls on another page, V6 collapses the login sequence to LOGIN_VALID.
+const crossPageDiscoveries = [
+  annotatePageDiscovery({
+    url: 'http://localhost:4000/',
+    finalUrl: 'http://localhost:4000/',
+    pageTitle: 'Login',
+    elements: [
+      { tag: 'input', type: 'text', testId: 'username', selector: '[data-testid="username"]', label: 'Username' },
+      { tag: 'input', type: 'password', testId: 'password', selector: '[data-testid="password"]', label: 'Password' },
+      { tag: 'button', type: 'submit', testId: 'login-button', selector: '[data-testid="login-button"]', text: 'Sign in' },
+    ],
+    messages: [],
+  }),
+  annotatePageDiscovery({
+    url: 'http://localhost:4000/feedback',
+    finalUrl: 'http://localhost:4000/feedback',
+    pageTitle: 'Feedback',
+    elements: [
+      { tag: 'input', type: 'text', testId: 'full-name', selector: '[data-testid="full-name"]', label: 'Full name', required: true },
+      { tag: 'button', type: 'submit', testId: 'submit-feedback', selector: '[data-testid="submit-feedback"]', text: 'Submit' },
+    ],
+    messages: [],
+  }),
+];
+const validJourney = {
+  id: 'TC-H004',
+  title: 'Successful authenticated feedback journey',
+  type: 'functional',
+  preconditions: ['User can authenticate with valid credentials'],
+  steps: [
+    { action: 'fill', target: '[data-testid="username"]', value: 'invented-user' },
+    { action: 'fill', target: '[data-testid="password"]', value: 'invented-password' },
+    { action: 'click', target: '[data-testid="login-button"]', value: null },
+    { action: 'fill', target: '[data-testid="full-name"]', value: 'Jane Smith' },
+  ],
+  expectedResults: ['Element [data-testid="full-name"] is visible'],
+};
+const validJourneyCompiled = compileTestCase(validJourney, { pageDiscoveries: crossPageDiscoveries, hasCredentials: true });
+assert.equal(validJourneyCompiled.ok, true, validJourneyCompiled.reason || JSON.stringify(validJourneyCompiled.errors));
+assert.equal(validJourneyCompiled.plan.actions[0].operation, 'LOGIN_VALID');
+assert(!validJourneyCompiled.plan.actions.some((action) => action.operation === 'TYPE' && action.value === 'invented-user'));
+assert(validJourneyCompiled.plan.actions.some((action) => action.operation === 'TYPE' && action.selector === '[data-testid="full-name"]'));
+
+const invalidLoginCase = {
+  ...validJourney,
+  id: 'TC-H005',
+  title: 'Reject invalid login credentials',
+  type: 'negative',
+  expectedResults: ['Login error is displayed'],
+};
+const invalidLoginCompiled = compileTestCase(invalidLoginCase, { pageDiscoveries: crossPageDiscoveries, hasCredentials: true });
+assert(!invalidLoginCompiled.plan?.actions?.some((action) => action.operation === 'LOGIN_VALID'));
+
 console.log(`Capability smoke test passed: ${ASSERTION_OPERATIONS.length} assertions, ${ACTION_OPERATIONS.length} actions, ${matrix.elementCount} capability-mapped elements.`);
