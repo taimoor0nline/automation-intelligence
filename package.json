@@ -2,7 +2,7 @@
   "name": "ai-testpilot-poc",
   "version": "2.3.0",
   "private": true,
-  "description": "AI TestPilot — persistent source-aware Cypress automation platform",
+  "description": "TestNexus AI — persistent source-aware Cypress automation platform",
   "scripts": {
     "postinstall": "npm run automation:install",
     "automation:install": "npm install --prefix automation-system --include=dev",
@@ -12,7 +12,7 @@
     "db:migrate": "node server/db/migrate.js",
     "test:platform": "node scripts/platform-smoke.js",
     "test:rest": "node scripts/rest-smoke.js",
-    "test:capabilities": "node scripts/capability-smoke.js"
+    "test:capabilities": "node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
