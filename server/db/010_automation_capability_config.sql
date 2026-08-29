@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS automation_db_assertion_query (
   description text NULL,
   enabled boolean NOT NULL DEFAULT true,
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT automation_db_assertion_query_read_only CHECK (sql_text ~* '^\\s*(select|with)\\b')
+  CONSTRAINT automation_db_assertion_query_read_only CHECK (lower(ltrim(sql_text)) ~ '^(select|with)[[:space:]]')
 );
 
 INSERT INTO automation_capability_config (config_key, enabled, settings, secret_env_key)
