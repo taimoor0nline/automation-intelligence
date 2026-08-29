@@ -3,10 +3,24 @@
 
 require("cypress-axe");
 
+function boolEnv(name, fallback = false) {
+  const raw = Cypress.env(name);
+  if (raw == null || raw === "") return fallback;
+  return !["false", "0", "no", "off"].includes(String(raw).toLowerCase());
+}
+
+function boundedNumberEnv(name, fallback, min, max) {
+  const value = Number(Cypress.env(name));
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(value, max));
+}
+
 function getDemoStepDelayMs() {
-  const value = Number(Cypress.env("DEMO_STEP_DELAY_MS") || 0);
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(value, 3000));
+  return boundedNumberEnv("DEMO_STEP_DELAY_MS", 0, 0, 3000);
+}
+
+function getCompletionPauseMs() {
+  return boundedNumberEnv("TEST_COMPLETION_PAUSE_MS", 5000, 0, 30000);
 }
 
 /**
@@ -23,6 +37,16 @@ function withDemoDelay(chain) {
   return chain.then((subject) =>
     Cypress.Promise.delay(delayMs).then(() => subject)
   );
+}
+
+function safeEvidenceName(title) {
+  const raw = String(title || "test");
+  const id = raw.match(/TC(?:\d{3}|-H\d{3})/i)?.[0]?.toUpperCase() || "TEST";
+  const suffix = raw
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 70);
+  return `${id}-${suffix || "completion"}`;
 }
 
 // Credentials, login path and login selectors are injected by the deterministic
@@ -43,8 +67,6 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
     throw new Error("Runtime login controls were not grounded from page discovery.");
   }
 
-  // Navigation is automation-system-owned too. This prevents tests from
-  // attempting login while the browser is still on about:blank or another page.
   cy.visit(loginPath);
   cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
   cy.get(passwordSelector).clear({ log: false }).type(String(password), { log: false });
@@ -63,12 +85,28 @@ Cypress.Commands.overwrite("visit", (originalFn, url, options) =>
   withDemoDelay(originalFn(url, options))
 );
 
-// When demo pacing is enabled, keep the page in its final post-test state long
-// enough for the CDP screencast to publish the last visible frame. This is a
-// presentation hold only; it does not change assertions, retries, or outcomes.
-afterEach(() => {
-  const delayMs = getDemoStepDelayMs();
-  if (!delayMs) return undefined;
-  const finalStateHoldMs = Math.max(500, Math.min(delayMs, 1800));
-  return Cypress.Promise.delay(finalStateHoldMs);
+// Evidence is captured after the test assertions have completed. The optional
+// completion pause deliberately keeps the final state visible before Cypress
+// exits and AI TestPilot terminates the owned Chromium process tree.
+afterEach(function () {
+  const screenshotEachTest = boolEnv("SCREENSHOT_EACH_TEST", true);
+  const completionPauseMs = getCompletionPauseMs();
+
+  if (screenshotEachTest) {
+    const title = this.currentTest?.fullTitle?.() || this.currentTest?.title || "test";
+    cy.screenshot(safeEvidenceName(title), {
+      capture: "viewport",
+      overwrite: true,
+      log: false,
+    });
+  }
+
+  if (completionPauseMs > 0) {
+    cy.wait(completionPauseMs, { log: false });
+  } else {
+    const demoDelayMs = getDemoStepDelayMs();
+    if (demoDelayMs > 0) {
+      cy.wait(Math.max(300, Math.min(demoDelayMs, 1200)), { log: false });
+    }
+  }
 });
