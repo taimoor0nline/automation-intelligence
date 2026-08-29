@@ -30,6 +30,34 @@
     updateSummary();
   }
 
+  function closeOtherGenerationPickers(exceptRoot) {
+    document.querySelectorAll('#generationTypePicker.open,#generationCategoryPicker.open,.security-picker.open').forEach((root) => {
+      if (root !== exceptRoot) root.classList.remove('open');
+    });
+  }
+
+  function installDropdownCoordinator() {
+    if (window.__aiTestPilotGenerationDropdownCoordinator) return;
+    window.__aiTestPilotGenerationDropdownCoordinator = true;
+    const rootByButton = {
+      generationTypeButton: 'generationTypePicker',
+      generationCategoryButton: 'generationCategoryPicker',
+      securitySubcategoryButton: 'securitySubcategoryPicker',
+      securitySeverityButton: 'securitySeverityPicker',
+    };
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      const rootId = button ? rootByButton[button.id] : null;
+      if (rootId) {
+        closeOtherGenerationPickers(document.getElementById(rootId));
+        return;
+      }
+      if (!event.target.closest('#generationTypePicker,#generationCategoryPicker,.security-picker')) {
+        closeOtherGenerationPickers(null);
+      }
+    }, true);
+  }
+
   function inject() {
     if (document.getElementById('generationTypePicker')) return;
     const categoryPicker = document.getElementById('generationCategoryPicker');
@@ -37,7 +65,7 @@
     if (!storyField) return;
 
     const style = document.createElement('style');
-    style.textContent = `.generation-type-picker{position:relative;margin-top:12px}.generation-type-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.generation-type-heading label{margin:0;color:#344054;font-size:12px;font-weight:800}.generation-type-count{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:22px;padding:0 7px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:850}.generation-type-note{margin-top:6px;color:#667085;font-size:10.5px;line-height:1.45}`;
+    style.textContent = `.generation-type-picker{position:relative;margin-top:12px}.generation-type-picker.open>#generationTypeMenu{display:block}.generation-type-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.generation-type-heading label{margin:0;color:#344054;font-size:12px;font-weight:800}.generation-type-count{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:22px;padding:0 7px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:850}.generation-type-note{margin-top:6px;color:#667085;font-size:10.5px;line-height:1.45}`;
     document.head.appendChild(style);
 
     const root = document.createElement('div');
@@ -54,8 +82,8 @@
     button.addEventListener('click', (event) => { event.stopPropagation(); root.classList.toggle('open'); });
     allBox.addEventListener('change', () => { menu.querySelectorAll('input[data-scenario-type]').forEach((input) => { input.checked = allBox.checked; }); updateSummary(); });
     menu.querySelectorAll('input[data-scenario-type]').forEach((input) => input.addEventListener('change', updateSummary));
-    document.addEventListener('click', (event) => { if (!root.contains(event.target)) root.classList.remove('open'); });
     restore();
+    installDropdownCoordinator();
   }
 
   function start() {
