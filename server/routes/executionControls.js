@@ -71,8 +71,6 @@ router.post("/api/reports/:sessionId/generate", allowQaManager, (req, res) => {
       return res.status(409).json({ ok: false, reply: "Wait for the current execution to complete before generating the report." });
     }
 
-    // A report exists only after this explicit endpoint is called.
-    // Remove any stale file first so the URL can never serve a previous run accidentally.
     clearReportGenerationRequest(sessionId);
     removeReportFile(sessionId);
 
@@ -168,8 +166,25 @@ router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) 
   });
 });
 
-// Generation is mounted here as part of the already-active failure-analysis/control route tree.
-// Use the adaptive planner so AI_TEST_CASE_COUNT remains a ceiling rather than a required count.
+// Any new execution invalidates a previously requested/generated report for this session.
+// The next report is created only after the user explicitly clicks Generate AI Analysis Report again.
+router.use((req, _res, next) => {
+  if (req.method === "POST" && req.path === "/api/test-runs/start") {
+    const sessionId = String(req.body?.sessionId || "default");
+    const session = getSession(sessionId);
+    clearReportGenerationRequest(sessionId);
+    removeReportFile(sessionId);
+    session.reportHtml = null;
+    session.reportGeneratedAt = null;
+    session.reportGeneratedForRun = null;
+    session.reportGenerationError = null;
+  }
+  next();
+});
+
+// Mount the active adaptive generator and deterministic execution routes through the
+// already-mounted failure-analysis/control route tree.
 router.use(require("./progressiveGenerationAdaptive"));
+router.use(require("./isolatedExecution"));
 
 module.exports = router;
