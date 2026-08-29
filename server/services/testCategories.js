@@ -5,8 +5,13 @@ const TEST_CATEGORIES = Object.freeze([
   'SECURITY',
   'PERFORMANCE',
   'ACCESSIBILITY',
+  'INTEGRATION',
+  'API',
+  'UI',
+  'COMPATIBILITY',
   'LOAD',
   'STRESS',
+  'CUSTOM',
 ]);
 
 const TEST_CATEGORY_SET = new Set(TEST_CATEGORIES);
@@ -28,6 +33,10 @@ function inferTestCategory({ story = '', testCase = null } = {}) {
   if (/\bsecurity\b|authorization|access\s+control|xss|cross[- ]site|sql\s+injection|csrf|session\s+security|secure\s+cookie|security\s+header/.test(text)) return 'SECURITY';
   if (/\bperformance\b|response\s+time|page\s+load|latency|web\s+vitals?|largest\s+contentful|\blcp\b|\bfcp\b|time\s+to\s+interactive/.test(text)) return 'PERFORMANCE';
   if (/\baccessibility\b|\ba11y\b|\bwcag\b|keyboard\s+navigation|screen\s+reader|aria/.test(text)) return 'ACCESSIBILITY';
+  if (/\bintegration\b|service\s+integration|system\s+integration|cross[- ]service/.test(text)) return 'INTEGRATION';
+  if (/\bapi\b|endpoint|request\s+body|response\s+body|http\s+status/.test(text)) return 'API';
+  if (/\bcompatibility\b|cross[- ]browser|browser\s+compatibility|device\s+compatibility|responsive\s+compatibility/.test(text)) return 'COMPATIBILITY';
+  if (/\buser interface\b|\bui\b|layout|visual\s+state/.test(text)) return 'UI';
   if (/\bsmoke\b|\bsanity\b|critical\s+path|health\s+check|basic\s+availability/.test(text)) return 'SMOKE';
   if (/\bregression\b|previously\s+working|existing\s+behavior|existing\s+behaviour/.test(text)) return 'REGRESSION';
   return 'FUNCTIONAL';
