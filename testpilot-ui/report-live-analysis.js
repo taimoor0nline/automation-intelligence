@@ -79,11 +79,11 @@
   }
 
   function waitingHtml() {
-    return '<div class="analysis-live pending"><div class="analysis-live-head"><span class="analysis-live-dot"></span><strong>Waiting for AI response…</strong></div><div class="analysis-live-note">This failed case is queued for AI analysis. Execution evidence and the PASS/FAIL result remain unchanged.</div></div>';
+    return '<div class="analysis-live pending"><div class="analysis-live-head"><span class="analysis-live-dot"></span><strong>Generating AI analysis… Please wait.</strong></div><div class="analysis-live-note">This failed case is queued. The report is already available and this analysis column will update independently when its AI response arrives.</div></div>';
   }
 
   function analyzingHtml() {
-    return '<div class="analysis-live running"><div class="analysis-live-head"><span class="analysis-live-dot"></span><strong>AI analysis in progress…</strong></div><div class="analysis-live-note">The failed-case worker is reviewing this result. Other failed cases continue independently through the bounded queue.</div></div>';
+    return '<div class="analysis-live running"><div class="analysis-live-head"><span class="analysis-live-dot"></span><strong>AI analysis in progress…</strong></div><div class="analysis-live-note">This failed case is being analyzed now. Other failed rows continue independently through the bounded SSE queue.</div></div>';
   }
 
   function errorHtml(message) {
