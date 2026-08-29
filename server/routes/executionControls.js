@@ -7,11 +7,20 @@ const { getSession } = require("../data/sessionStore");
 const { cancelActiveExecution, getActiveExecution } = require("../services/singleSpecRunner");
 const { REPORT_DIR, reportFileName } = require("../services/reportGenerator");
 
+function allowQaManager(req, res, next) {
+  if (!req.user) return next();
+  const role = String(req.user.role || "").toUpperCase();
+  if (!["QA", "MANAGER"].includes(role)) {
+    return res.status(403).json({ reply: "QA or MANAGER role is required to control automation execution." });
+  }
+  next();
+}
+
 function currentRunId(session) {
   return session?.executionProgress?.runId || null;
 }
 
-router.post("/api/test-runs/cancel/:sessionId", async (req, res) => {
+router.post("/api/test-runs/cancel/:sessionId", allowQaManager, async (req, res) => {
   const sessionId = req.params.sessionId || "default";
   const session = getSession(sessionId);
   const runId = currentRunId(session);
@@ -42,7 +51,7 @@ router.post("/api/test-runs/cancel/:sessionId", async (req, res) => {
   });
 });
 
-router.post("/api/test-runs/reset/:sessionId", async (req, res) => {
+router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) => {
   const sessionId = req.params.sessionId || "default";
   const session = getSession(sessionId);
   const runId = currentRunId(session);
