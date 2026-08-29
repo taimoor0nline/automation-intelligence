@@ -4,6 +4,7 @@
 
   let cancellationRequested = false;
   let resetting = false;
+  let lastApprovedIds = [];
 
   function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -22,6 +23,18 @@
       if (token) headers.Authorization = `Bearer ${token}`;
     } catch {}
     return headers;
+  }
+
+  function checkedIds() {
+    return Array.from(document.querySelectorAll('.case-check:checked')).map((el) => String(el.value || '')).filter(Boolean);
+  }
+
+  function applyApprovedIds(ids) {
+    const wanted = new Set((ids || []).map((id) => String(id).toUpperCase()));
+    if (!wanted.size) return;
+    for (const checkbox of document.querySelectorAll('.case-check')) {
+      checkbox.checked = wanted.has(String(checkbox.value || '').toUpperCase());
+    }
   }
 
   function ensureStyles() {
@@ -159,7 +172,7 @@
     if (results) results.innerHTML = '<div class="empty">Run cancelled. Reviewed test cases remain available for re-run.</div>';
     const runBtn = document.getElementById('runBtn');
     if (runBtn && hasReviewedCases()) runBtn.disabled = false;
-    setRunLabel('Re-run Approved Tests');
+    setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
     refreshControls();
   }
 
@@ -180,11 +193,13 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.reply || 'Could not reset Execution & Analytics.');
+      if (Array.isArray(data.approvedIds) && data.approvedIds.length) lastApprovedIds = [...data.approvedIds];
       clearExecutionUi();
+      applyApprovedIds(lastApprovedIds);
       try { if (typeof setActivityStatus === 'function') setActivityStatus(hasReviewedCases() ? 'Ready' : 'Idle', false); } catch {}
       const runBtn = document.getElementById('runBtn');
       if (runBtn) runBtn.disabled = !hasReviewedCases();
-      setRunLabel('Run Approved Tests');
+      setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
     } catch (err) {
       try { if (typeof showError === 'function') showError(err.message); } catch {}
     } finally {
@@ -209,7 +224,7 @@
     }
     if (reset) reset.disabled = running || generating || resetting || !hasExecutionData();
 
-    if (completed || cancelled) setRunLabel('Re-run Approved Tests');
+    if (completed || cancelled) setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
 
     if (cancellationRequested && statusText === 'error') finishCancellation();
   }
@@ -219,6 +234,9 @@
     if (runBtn && runBtn.dataset.executionControlsBound !== '1') {
       runBtn.dataset.executionControlsBound = '1';
       runBtn.addEventListener('click', () => {
+        const rerun = /re-run approved tests/i.test(String(runBtn.dataset.oldText || runBtn.textContent || ''));
+        if (rerun && lastApprovedIds.length) applyApprovedIds(lastApprovedIds);
+        else lastApprovedIds = checkedIds();
         cancellationRequested = false;
         const cancel = document.getElementById('cancelExecutionBtn');
         if (cancel) { cancel.disabled = false; cancel.textContent = 'Cancel Run'; cancel.style.display = 'inline-flex'; }
@@ -232,6 +250,7 @@
       generateBtn.dataset.executionControlsBound = '1';
       generateBtn.addEventListener('click', () => {
         cancellationRequested = false;
+        lastApprovedIds = [];
         setRunLabel('Run Approved Tests');
       }, true);
     }
