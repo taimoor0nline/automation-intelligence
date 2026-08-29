@@ -9,6 +9,7 @@ const { TEST_CATEGORIES, normalizeTestCategory } = require('../services/testCate
 const { SECURITY_SUBCATEGORIES, SECURITY_SEVERITIES, normalizeSecuritySubcategory, normalizeSecuritySeverity } = require('../services/securityTaxonomy');
 const { proposeGenerationPlan, generateBatch } = require('../services/progressiveTestGenerator');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
+const { validateStoryDiscoveryCompatibility, mismatchMessage } = require('../services/storyDiscoveryCompatibility');
 
 const jobs = new Map();
 // AI_TEST_CASE_COUNT is a ceiling, never a required/target count.
@@ -27,8 +28,16 @@ function normalizeCategories(input) { return cleanArray(input, normalizeTestCate
 function normalizeSecuritySubcategories(input) { return cleanArray(input, normalizeSecuritySubcategory, SECURITY_SUBCATEGORIES); }
 function normalizeSecuritySeverities(input) { return cleanArray(input, normalizeSecuritySeverity, SECURITY_SEVERITIES); }
 function normalizeScenarioTypes(input) {
-  const values = [...new Set((Array.isArray(input) ? input : []).map((x) => String(x || '').trim().toLowerCase()).filter((x) => SCENARIO_TYPES.includes(x)))];
-  return values.length ? values : [...SCENARIO_TYPES];
+  const raw = [...new Set((Array.isArray(input) ? input : []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean))];
+  if (!raw.length) return [...SCENARIO_TYPES];
+  const invalid = raw.filter((x) => !SCENARIO_TYPES.includes(x));
+  if (invalid.length) {
+    const legacyFunctional = invalid.includes('functional');
+    throw new Error(legacyFunctional
+      ? 'Functional is a Test Category, not a Scenario Type. Select Positive, Negative and/or Boundary and refresh the page if an old Functional scenario option is still cached.'
+      : `Unsupported Scenario Type: ${invalid.join(', ')}. Allowed values are Positive, Negative and Boundary.`);
+  }
+  return raw;
 }
 function cleanCustomLabels(input) {
   return [...new Set((Array.isArray(input) ? input : []).map((x) => String(x || '').trim().slice(0, 80)).filter(Boolean))].slice(0, 20);
@@ -175,6 +184,23 @@ async function runGeneration(job, input) {
     const compact = compactDiscoveriesForModel(pages);
     emit(job, 'DISCOVERY_COMPLETED', { pageCount: pages.length, durationMs: Date.now() - discoveryStarted });
 
+    const compatibility = validateStoryDiscoveryCompatibility(input.story, compact);
+    session.storyDiscoveryCompatibility = compatibility;
+    emit(job, 'SCOPE_VALIDATION_COMPLETED', {
+      compatible: compatibility.compatible,
+      requestedConcepts: compatibility.requestedConcepts,
+      evidencedConcepts: compatibility.evidencedConcepts,
+      missingConcepts: compatibility.missingConcepts,
+      evidenceRatio: compatibility.evidenceRatio,
+      finalUrls: compatibility.finalUrls,
+    });
+    if (!compatibility.compatible) {
+      const error = new Error(mismatchMessage(compatibility, input.targetUrl));
+      error.code = 'STORY_DISCOVERY_MISMATCH';
+      error.scopeCompatibility = compatibility;
+      throw error;
+    }
+
     job.state = 'PLANNING';
     emit(job, 'COVERAGE_PLANNING_STARTED', { maxTestCases: MAX_CASE_LIMIT });
     const coveragePlan = await proposeGenerationPlan({
@@ -208,6 +234,7 @@ async function runGeneration(job, input) {
       knownGaps: coveragePlan.knownGaps,
       proposedTestCaseCount: plannedCount,
       maxTestCases: MAX_CASE_LIMIT,
+      storyDiscoveryEvidenceRatio: compatibility.evidenceRatio,
     };
 
     emit(job, 'GENERATION_PLAN', {
@@ -332,17 +359,24 @@ async function runGeneration(job, input) {
       totalGenerated: cases.length,
       maxTestCases: MAX_CASE_LIMIT,
       coverageProposal: session.coverageProposal,
+      storyDiscoveryCompatibility: compatibility,
       durationMs: Date.now() - startedAt,
       categoryPlan: units.map((unit) => unit.category),
       scenarioTypePlan: units.map((unit) => unit.scenarioType),
       concurrency: workerCount,
       readinessConcurrency: READINESS_CONCURRENCY,
     });
-    console.log(`[progressive-generation] session=${job.sessionId} planned=${plannedCount}/${MAX_CASE_LIMIT} coverage=${coveragePlan.coverageScore}% cases=${cases.length} total=${Date.now() - startedAt}ms`);
+    console.log(`[progressive-generation] session=${job.sessionId} planned=${plannedCount}/${MAX_CASE_LIMIT} coverage=${coveragePlan.coverageScore}% evidence=${compatibility.evidenceRatio}% cases=${cases.length} total=${Date.now() - startedAt}ms`);
   } catch (err) {
     job.error = err.message;
     session.state = 'IDLE';
-    finish(job, 'GENERATION_FAILED', { message: err.message, generatedSoFar: session.testCases?.length || 0, maxTestCases: MAX_CASE_LIMIT });
+    finish(job, 'GENERATION_FAILED', {
+      message: err.message,
+      code: err.code || 'GENERATION_FAILED',
+      scopeCompatibility: err.scopeCompatibility || null,
+      generatedSoFar: session.testCases?.length || 0,
+      maxTestCases: MAX_CASE_LIMIT,
+    });
     console.error(`[progressive-generation] session=${job.sessionId} failed:`, err);
   }
 }
@@ -380,6 +414,7 @@ router.post('/api/generation/start', allowQaManager, (req, res) => {
     session.selectedSecuritySeverities = securitySeverities;
     session.aiModelTier = aiModelTier;
     session.coverageProposal = null;
+    session.storyDiscoveryCompatibility = null;
     session.credentials = req.body?.credentials && typeof req.body.credentials === 'object'
       ? { username: String(req.body.credentials.username || ''), password: String(req.body.credentials.password || '') }
       : null;
