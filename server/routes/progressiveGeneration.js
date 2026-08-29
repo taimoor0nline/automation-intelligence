@@ -8,10 +8,12 @@ const { normalizeProfile } = require('../services/aiModelProfiles');
 const { TEST_CATEGORIES, normalizeTestCategory } = require('../services/testCategories');
 const { SECURITY_SUBCATEGORIES, SECURITY_SEVERITIES, normalizeSecuritySubcategory, normalizeSecuritySeverity } = require('../services/securityTaxonomy');
 const { generateBatch } = require('../services/progressiveTestGenerator');
+const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
 
 const jobs = new Map();
 const MAX_CASES = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 5) || 5, 50));
 const GENERATION_CONCURRENCY = Math.max(1, Math.min(Number(process.env.AI_GENERATION_CONCURRENCY || 2) || 2, 4));
+const READINESS_CONCURRENCY = Math.max(1, Math.min(Number(process.env.READINESS_CONCURRENCY || 2) || 2, 8));
 const JOB_TTL_MS = 30 * 60 * 1000;
 const SCENARIO_TYPES = ['functional','negative','boundary','positive'];
 
@@ -27,6 +29,9 @@ function normalizeScenarioTypes(input) {
   const values = [...new Set((Array.isArray(input) ? input : []).map((x) => String(x || '').trim().toLowerCase()).filter((x) => SCENARIO_TYPES.includes(x)))];
   return values.length ? values : [...SCENARIO_TYPES];
 }
+function cleanCustomLabels(input) {
+  return [...new Set((Array.isArray(input) ? input : []).map((x) => String(x || '').trim().slice(0, 80)).filter(Boolean))].slice(0, 20);
+}
 function allowQaManager(req, res, next) {
   if (!req.user) return next();
   const role = String(req.user.role || '').toUpperCase();
@@ -35,7 +40,7 @@ function allowQaManager(req, res, next) {
 }
 function targetUrl(value) { const u = new URL(String(value || '')); if (!['http:','https:'].includes(u.protocol)) throw new Error('Only HTTP/HTTPS targets are supported.'); return u.toString(); }
 function discoveryUrls(baseUrl, additionalPaths = []) { const base = new URL(baseUrl); return [...new Set([baseUrl, ...(Array.isArray(additionalPaths) ? additionalPaths : []).map((p) => String(p || '').trim()).filter(Boolean).map((p) => new URL(p, `${base.protocol}//${base.host}/`).toString())])]; }
-function pendingSummary(cases) { return { total: cases.length, ready: 0, checking: cases.length, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0 }; }
+function pendingSummary(cases) { return { total: cases.length, ready: 0, checking: cases.filter((tc) => !tc?.automationReadiness).length, manual: 0, insufficientEvidence: 0, invalid: 0, userInputRequired: 0, aiRepairable: 0, frameworkChangeRequired: 0 }; }
 
 function relevantCategories(selected, story, discoveries) {
   if (selected.length !== TEST_CATEGORIES.length) return [...selected];
@@ -67,7 +72,7 @@ function newJob(sessionId) {
 function emit(job, type, data = {}) {
   const event = { type, at: new Date().toISOString(), ...data };
   job.events.push(event);
-  if (job.events.length > 200) job.events.shift();
+  if (job.events.length > 400) job.events.shift();
   const payload = `event: ${type}\ndata: ${JSON.stringify(event)}\n\n`;
   for (const res of [...job.subscribers]) {
     try { res.write(payload); } catch { job.subscribers.delete(res); }
@@ -85,12 +90,76 @@ function trimJobs() {
   for (const [id, job] of jobs.entries()) if (job.completed && now - job.createdAt > JOB_TTL_MS) jobs.delete(id);
 }
 
+function createReadinessPool(job, session, slots) {
+  const queue = [];
+  const waiters = [];
+  let active = 0;
+  let completed = 0;
+
+  function notifyDrain() {
+    if (queue.length || active) return;
+    while (waiters.length) waiters.shift()();
+  }
+
+  function updateSession() {
+    const available = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
+    session.testCases = available;
+    const assessed = available.filter((tc) => tc.automationReadiness);
+    session.automationReadiness = assessed.length ? readinessSummary(assessed) : pendingSummary(available);
+  }
+
+  function pump() {
+    while (active < READINESS_CONCURRENCY && queue.length) {
+      const tc = queue.shift();
+      active += 1;
+      emit(job, 'READINESS_STARTED', {
+        testCaseId: tc.id,
+        checking: active,
+        completed,
+        generated: slots.filter(Boolean).length,
+      });
+      setImmediate(() => {
+        try {
+          const assessed = assessTestCases([tc], {
+            pageDiscoveries: session.pageDiscoveries || [],
+            hasCredentials: Boolean(session.credentials?.username && session.credentials?.password),
+          })[0];
+          const index = slots.findIndex((item) => item?.id === tc.id);
+          if (index >= 0 && assessed) slots[index] = { ...slots[index], ...assessed, automationReadiness: assessed.automationReadiness };
+          completed += 1;
+          updateSession();
+          emit(job, 'READINESS_COMPLETED', {
+            testCaseId: tc.id,
+            testCase: index >= 0 ? slots[index] : assessed,
+            readiness: assessed?.automationReadiness || null,
+            completed,
+            generated: slots.filter(Boolean).length,
+          });
+        } catch (err) {
+          emit(job, 'READINESS_FAILED', { testCaseId: tc.id, message: err.message, completed, generated: slots.filter(Boolean).length });
+        } finally {
+          active -= 1;
+          pump();
+          notifyDrain();
+        }
+      });
+    }
+    notifyDrain();
+  }
+
+  return {
+    enqueue(tc) { if (tc) { queue.push(tc); pump(); } },
+    drain() { if (!queue.length && !active) return Promise.resolve(); return new Promise((resolve) => waiters.push(resolve)); },
+    completed: () => completed,
+  };
+}
+
 async function runGeneration(job, input) {
   const session = getSession(job.sessionId);
   const startedAt = Date.now();
   try {
     job.state = 'DISCOVERING';
-    emit(job, 'GENERATION_STARTED', { totalRequested: MAX_CASES, concurrency: GENERATION_CONCURRENCY });
+    emit(job, 'GENERATION_STARTED', { totalRequested: MAX_CASES, concurrency: GENERATION_CONCURRENCY, readinessConcurrency: READINESS_CONCURRENCY });
 
     const urls = discoveryUrls(input.targetUrl, input.additionalPaths);
     const discoveryStarted = Date.now();
@@ -102,16 +171,26 @@ async function runGeneration(job, input) {
     const categoryPool = relevantCategories(input.categories, input.story, compact);
     const categories = categoryPlan(categoryPool, MAX_CASES);
     const scenarioTypes = scenarioTypePlan(input.scenarioTypes, MAX_CASES);
-    const units = Array.from({ length: MAX_CASES }, (_, i) => ({ index: i, category: categories[i], scenarioType: scenarioTypes[i] }));
+    const units = Array.from({ length: MAX_CASES }, (_, i) => ({
+      index: i,
+      category: categories[i],
+      scenarioType: scenarioTypes[i],
+      customCategory: categories[i] === 'CUSTOM' && input.customCategories.length ? input.customCategories[i % input.customCategories.length] : null,
+      customScenarioType: input.customScenarioTypes.length ? input.customScenarioTypes[i % input.customScenarioTypes.length] : null,
+    }));
     emit(job, 'GENERATION_PLAN', {
       categories: categoryPool,
       scenarioTypes: input.scenarioTypes,
+      customCategories: input.customCategories,
+      customScenarioTypes: input.customScenarioTypes,
       units,
       concurrency: GENERATION_CONCURRENCY,
+      readinessConcurrency: READINESS_CONCURRENCY,
       allCategoriesAutoScoped: input.categories.length === TEST_CATEGORIES.length,
     });
 
     const slots = Array(MAX_CASES).fill(null);
+    const readinessPool = createReadinessPool(job, session, slots);
     let nextUnit = 0;
     let completedCount = 0;
     let feature = null;
@@ -137,6 +216,8 @@ async function runGeneration(job, input) {
             environment: 'Test',
             category: unit.category,
             scenarioType: unit.scenarioType,
+            customCategory: unit.customCategory,
+            customScenarioType: unit.customScenarioType,
             count: 1,
             excludeTitles: slots.filter(Boolean).map((tc) => tc.title),
             securitySubcategories: securityScope ? input.securitySubcategories : [],
@@ -168,6 +249,7 @@ async function runGeneration(job, input) {
             generatedSoFar: completedCount,
             totalRequested: MAX_CASES,
           });
+          readinessPool.enqueue(tc);
           return;
         } catch (err) {
           lastError = err;
@@ -190,24 +272,31 @@ async function runGeneration(job, input) {
     const workerCount = Math.min(GENERATION_CONCURRENCY, units.length);
     await Promise.all(Array.from({ length: workerCount }, (_, i) => worker(i + 1)));
 
-    const cases = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
-    if (cases.length !== MAX_CASES) throw new Error(`Generation completed with ${cases.length}/${MAX_CASES} test cases.`);
+    const generatedCases = slots.filter(Boolean);
+    if (generatedCases.length !== MAX_CASES) throw new Error(`Generation completed with ${generatedCases.length}/${MAX_CASES} test cases.`);
 
+    job.state = 'VALIDATING';
+    emit(job, 'READINESS_DRAINING', { generated: generatedCases.length, completed: readinessPool.completed() });
+    await readinessPool.drain();
+
+    const cases = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
     session.testCases = cases;
-    session.automationReadiness = pendingSummary(cases);
-    session.readinessValidated = false;
+    session.automationReadiness = readinessSummary(cases);
+    session.readinessValidated = cases.every((tc) => Boolean(tc?.automationReadiness));
     session.state = 'AWAITING_APPROVAL';
     finish(job, 'GENERATION_COMPLETED', {
       feature,
       cases,
+      automationReadiness: session.automationReadiness,
       pageCount: pages.length,
       totalGenerated: cases.length,
       durationMs: Date.now() - startedAt,
       categoryPlan: categories,
       scenarioTypePlan: scenarioTypes,
       concurrency: workerCount,
+      readinessConcurrency: READINESS_CONCURRENCY,
     });
-    console.log(`[progressive-generation] session=${job.sessionId} cases=${cases.length} concurrency=${workerCount} categories=${categoryPool.join(',')} types=${input.scenarioTypes.join(',')} total=${Date.now()-startedAt}ms`);
+    console.log(`[progressive-generation] session=${job.sessionId} cases=${cases.length} concurrency=${workerCount} readinessConcurrency=${READINESS_CONCURRENCY} categories=${categoryPool.join(',')} types=${input.scenarioTypes.join(',')} total=${Date.now()-startedAt}ms`);
   } catch (err) {
     job.error = err.message;
     session.state = 'IDLE';
@@ -228,6 +317,8 @@ router.post('/api/generation/start', allowQaManager, (req, res) => {
     const url = targetUrl(req.body?.targetUrl);
     const categories = normalizeCategories(req.body?.selectedTestCategories);
     const scenarioTypes = normalizeScenarioTypes(req.body?.selectedScenarioTypes);
+    const customCategories = cleanCustomLabels(req.body?.customTestCategories);
+    const customScenarioTypes = cleanCustomLabels(req.body?.customScenarioTypes).map((x) => x.toLowerCase());
     const hasSecurity = categories.includes('SECURITY');
     const securitySubcategories = hasSecurity ? normalizeSecuritySubcategories(req.body?.selectedSecuritySubcategories) : [];
     const securitySeverities = hasSecurity ? normalizeSecuritySeverities(req.body?.selectedSecuritySeverities) : [];
@@ -241,13 +332,15 @@ router.post('/api/generation/start', allowQaManager, (req, res) => {
     session.additionalPaths = Array.isArray(req.body?.additionalPaths) ? req.body.additionalPaths : [];
     session.selectedTestCategories = categories;
     session.selectedScenarioTypes = scenarioTypes;
+    session.customTestCategories = customCategories;
+    session.customScenarioTypes = customScenarioTypes;
     session.selectedSecuritySubcategories = securitySubcategories;
     session.selectedSecuritySeverities = securitySeverities;
     session.aiModelTier = aiModelTier;
     session.credentials = req.body?.credentials && typeof req.body.credentials === 'object' ? { username: String(req.body.credentials.username || ''), password: String(req.body.credentials.password || '') } : null;
 
     const job = newJob(sessionId);
-    const input = { targetUrl: url, story, additionalPaths: session.additionalPaths, categories, scenarioTypes, securitySubcategories, securitySeverities, aiModelTier };
+    const input = { targetUrl: url, story, additionalPaths: session.additionalPaths, categories, scenarioTypes, customCategories, customScenarioTypes, securitySubcategories, securitySeverities, aiModelTier };
     setImmediate(() => runGeneration(job, input));
     res.status(202).json({
       ok: true,
@@ -255,6 +348,7 @@ router.post('/api/generation/start', allowQaManager, (req, res) => {
       totalRequested: MAX_CASES,
       batchSize: 1,
       concurrency: GENERATION_CONCURRENCY,
+      readinessConcurrency: READINESS_CONCURRENCY,
       eventsUrl: `/api/generation/events/${encodeURIComponent(sessionId)}`,
     });
   } catch (err) { res.status(400).json({ reply: err.message }); }
