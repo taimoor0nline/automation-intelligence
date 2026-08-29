@@ -37,16 +37,28 @@
     }
   }
 
+  function statusText() {
+    return String(document.getElementById('runStatus')?.textContent || '').trim().toLowerCase();
+  }
+
+  function isRunningStatus(value = statusText()) {
+    return value.startsWith('starting') || value.startsWith('running') || value === 'finalizing' || value === 'stopping' || value === 'cancelling';
+  }
+
   function ensureStyles() {
     if (document.getElementById('executionControlStyles')) return;
     const style = document.createElement('style');
     style.id = 'executionControlStyles';
     style.textContent = `
-      .execution-control-actions{display:flex;align-items:center;gap:7px;margin-left:auto}
-      #cancelExecutionBtn{display:none;border-color:#fecaca;color:#b91c1c;background:#fff7f7}
-      #cancelExecutionBtn:hover{background:#fee2e2}
-      #resetExecutionBtn{white-space:nowrap}
-      #resetExecutionBtn:disabled,#cancelExecutionBtn:disabled{opacity:.5;cursor:not-allowed}
+      .execution-run-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+      .runbar .execution-run-actions .btn{margin-left:0!important}
+      #stopExecutionBtn,#resetExecutionBtn{display:none;white-space:nowrap}
+      #stopExecutionBtn{border-color:#fecaca;color:#b91c1c;background:#fff7f7}
+      #stopExecutionBtn:hover{background:#fee2e2}
+      #resetExecutionBtn{border-color:#dbe3ef;background:#f8fafc;color:#334155}
+      #resetExecutionBtn:hover{background:#eef2f7}
+      #resetExecutionBtn:disabled,#stopExecutionBtn:disabled{opacity:.5;cursor:not-allowed}
+      @media(max-width:760px){.runbar{align-items:flex-start;flex-direction:column}.execution-run-actions{width:100%;margin-left:0;justify-content:flex-start}}
     `;
     document.head.appendChild(style);
   }
@@ -63,8 +75,8 @@
   }
 
   function hasExecutionData() {
-    const statusText = String(document.getElementById('runStatus')?.textContent || '').trim().toLowerCase();
-    if (!['', 'idle', 'ready', 'review required'].includes(statusText)) return true;
+    const current = statusText();
+    if (!['', 'idle', 'ready', 'review required'].includes(current)) return true;
     if (document.querySelector('#results .result')) return true;
     return Number(document.getElementById('mTotal')?.textContent || 0) > 0;
   }
@@ -95,31 +107,37 @@
 
     const runBtn = document.getElementById('runBtn');
     const runbar = runBtn?.closest('.runbar');
-    if (runbar && !document.getElementById('cancelExecutionBtn')) {
-      const cancel = document.createElement('button');
-      cancel.id = 'cancelExecutionBtn';
-      cancel.type = 'button';
-      cancel.className = 'btn ghost';
-      cancel.textContent = 'Cancel Run';
-      runbar.insertBefore(cancel, runBtn);
-      cancel.addEventListener('click', cancelRun);
+    if (!runBtn || !runbar) return;
+
+    let actions = document.getElementById('executionRunActions');
+    if (!actions) {
+      actions = document.createElement('div');
+      actions.id = 'executionRunActions';
+      actions.className = 'execution-run-actions';
+      runbar.appendChild(actions);
     }
 
-    const status = document.getElementById('runStatus');
-    const head = status?.closest('.section-head');
-    if (head && !document.getElementById('resetExecutionBtn')) {
-      const actions = document.createElement('div');
-      actions.className = 'execution-control-actions';
+    if (!document.getElementById('stopExecutionBtn')) {
+      const stop = document.createElement('button');
+      stop.id = 'stopExecutionBtn';
+      stop.type = 'button';
+      stop.className = 'btn ghost';
+      stop.textContent = 'Stop Execution';
+      stop.addEventListener('click', stopExecution);
+      actions.appendChild(stop);
+    }
+
+    if (!document.getElementById('resetExecutionBtn')) {
       const reset = document.createElement('button');
       reset.id = 'resetExecutionBtn';
       reset.type = 'button';
       reset.className = 'btn ghost';
-      reset.textContent = 'Reset Execution & Analytics';
-      actions.appendChild(reset);
-      head.insertBefore(actions, status);
+      reset.textContent = 'Reset Execution';
       reset.addEventListener('click', resetExecution);
+      actions.appendChild(reset);
     }
 
+    if (runBtn.parentElement !== actions) actions.appendChild(runBtn);
     refreshControls();
   }
 
@@ -130,72 +148,100 @@
       body: '{}',
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.reply || 'Could not cancel the automation run.');
+    if (!response.ok) throw new Error(data.reply || 'Could not stop the automation execution.');
     return data;
   }
 
-  async function cancelRun() {
-    const session = sid();
-    if (!session || cancellationRequested) return;
-    const confirmed = window.confirm('Cancel the currently running automation? Any unfinished test cases will stop, while the reviewed test suite will remain available for re-run.');
-    if (!confirmed) return;
+  async function requestStopUntilAccepted(session) {
+    let data = null;
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      data = await requestCancellation(session);
+      if (data.cancelled) return data;
+      if (String(data.state || '').toUpperCase() !== 'RUNNING') return data;
+      await delay(250);
+    }
+    if (!data?.cancelled && String(data?.state || '').toUpperCase() === 'RUNNING') {
+      throw new Error('The execution is still preparing. Try Stop Execution again in a moment.');
+    }
+    return data;
+  }
 
-    const button = document.getElementById('cancelExecutionBtn');
+  async function stopExecution() {
+    const session = sid();
+    if (!session || cancellationRequested || resetting) return;
+    if (!window.confirm('Stop the currently running execution? Any unfinished test cases will stop, while the reviewed test suite will remain available for re-run.')) return;
+
+    const button = document.getElementById('stopExecutionBtn');
     cancellationRequested = true;
-    if (button) { button.disabled = true; button.textContent = 'Cancelling…'; }
+    if (button) { button.disabled = true; button.textContent = 'Stopping…'; }
     try {
-      try { if (typeof setActivityStatus === 'function') setActivityStatus('Cancelling', true); } catch {}
-      let data = null;
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        data = await requestCancellation(session);
-        if (data.cancelled) break;
-        if (String(data.state || '').toUpperCase() !== 'RUNNING') break;
-        await delay(250);
-      }
-      if (!data?.cancelled && String(data?.state || '').toUpperCase() === 'RUNNING') {
-        throw new Error('The run is still preparing. Try Cancel Run again in a moment.');
-      }
-      if (!data?.cancelled) finishCancellation();
+      try { if (typeof setActivityStatus === 'function') setActivityStatus('Stopping', true); } catch {}
+      const data = await requestStopUntilAccepted(session);
+      if (!data?.cancelled) finishStopped();
     } catch (err) {
       cancellationRequested = false;
       try { if (typeof showError === 'function') showError(err.message); } catch {}
-      const cancel = document.getElementById('cancelExecutionBtn');
-      if (cancel) { cancel.disabled = false; cancel.textContent = 'Cancel Run'; }
+      if (button) { button.disabled = false; button.textContent = 'Stop Execution'; }
       refreshControls();
     }
   }
 
-  function finishCancellation() {
+  function finishStopped() {
     cancellationRequested = false;
-    const cancel = document.getElementById('cancelExecutionBtn');
-    if (cancel) { cancel.disabled = false; cancel.textContent = 'Cancel Run'; cancel.style.display = 'none'; }
+    const stop = document.getElementById('stopExecutionBtn');
+    if (stop) { stop.disabled = false; stop.textContent = 'Stop Execution'; stop.style.display = 'none'; }
     try { if (typeof clearError === 'function') clearError(); } catch {}
-    try { if (typeof setActivityStatus === 'function') setActivityStatus('Cancelled', false); } catch {}
+    try { if (typeof setActivityStatus === 'function') setActivityStatus('Stopped', false); } catch {}
     const results = document.getElementById('results');
-    if (results) results.innerHTML = '<div class="empty">Run cancelled. Reviewed test cases remain available for re-run.</div>';
+    if (results) results.innerHTML = '<div class="empty">Execution stopped. Reviewed test cases remain available for re-run.</div>';
     const runBtn = document.getElementById('runBtn');
     if (runBtn && hasReviewedCases()) runBtn.disabled = false;
     setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
     refreshControls();
   }
 
+  async function requestReset(session) {
+    const response = await fetch(`/api/test-runs/reset/${encodeURIComponent(session)}`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: '{}',
+    });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data };
+  }
+
   async function resetExecution() {
     if (resetting) return;
     const session = sid();
     if (!session) return;
-    if (!window.confirm('Reset the current Execution & Analytics view? Reviewed test cases and run history will be preserved.')) return;
+
+    const running = isRunningStatus();
+    const prompt = running
+      ? 'Stop the current execution and reset Execution & Analytics? Reviewed test cases and run history will be preserved.'
+      : 'Reset the current Execution & Analytics view? Reviewed test cases and run history will be preserved.';
+    if (!window.confirm(prompt)) return;
 
     const button = document.getElementById('resetExecutionBtn');
     resetting = true;
-    if (button) { button.disabled = true; button.textContent = 'Resetting…'; }
+    if (button) { button.disabled = true; button.textContent = running ? 'Stopping & resetting…' : 'Resetting…'; }
+
     try {
-      const response = await fetch(`/api/test-runs/reset/${encodeURIComponent(session)}`, {
-        method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: '{}',
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.reply || 'Could not reset Execution & Analytics.');
+      if (running) {
+        cancellationRequested = false;
+        try { if (typeof setActivityStatus === 'function') setActivityStatus('Stopping', true); } catch {}
+        await requestStopUntilAccepted(session);
+      }
+
+      let result = null;
+      for (let attempt = 0; attempt < 32; attempt += 1) {
+        result = await requestReset(session);
+        if (result.ok) break;
+        if (result.status !== 409) throw new Error(result.data.reply || 'Could not reset Execution & Analytics.');
+        await delay(250);
+      }
+      if (!result?.ok) throw new Error(result?.data?.reply || 'Execution is still stopping. Try Reset Execution again in a moment.');
+
+      const data = result.data || {};
       if (Array.isArray(data.approvedIds) && data.approvedIds.length) lastApprovedIds = [...data.approvedIds];
       clearExecutionUi();
       applyApprovedIds(lastApprovedIds);
@@ -206,30 +252,41 @@
     } catch (err) {
       try { if (typeof showError === 'function') showError(err.message); } catch {}
     } finally {
+      cancellationRequested = false;
       resetting = false;
-      if (button) { button.disabled = false; button.textContent = 'Reset Execution & Analytics'; }
+      if (button) { button.disabled = false; button.textContent = 'Reset Execution'; }
       refreshControls();
     }
   }
 
   function refreshControls() {
-    const statusText = String(document.getElementById('runStatus')?.textContent || '').trim().toLowerCase();
-    const running = statusText === 'running' || statusText === 'cancelling';
-    const generating = statusText === 'generating';
-    const completed = statusText === 'completed' || statusText === 'analysis complete';
-    const cancelled = statusText === 'cancelled';
-    const cancel = document.getElementById('cancelExecutionBtn');
+    const current = statusText();
+    const running = isRunningStatus(current);
+    const generating = current === 'generating';
+    const completed = current.startsWith('completed') || current === 'analysis complete';
+    const stopped = current === 'stopped' || current === 'cancelled';
+    const errored = current === 'error';
+    const stop = document.getElementById('stopExecutionBtn');
     const reset = document.getElementById('resetExecutionBtn');
+    const runBtn = document.getElementById('runBtn');
 
-    if (cancel) {
-      cancel.style.display = running ? 'inline-flex' : 'none';
-      if (!running) { cancel.disabled = false; cancel.textContent = 'Cancel Run'; }
+    if (stop) {
+      stop.style.display = running ? 'inline-flex' : 'none';
+      if (!running) { stop.disabled = false; stop.textContent = 'Stop Execution'; }
     }
-    if (reset) reset.disabled = running || generating || resetting || !hasExecutionData();
 
-    if (completed || cancelled) setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
+    if (reset) {
+      const showReset = running || completed || stopped || errored || hasExecutionData();
+      reset.style.display = showReset ? 'inline-flex' : 'none';
+      reset.disabled = generating || resetting;
+    }
 
-    if (cancellationRequested && statusText === 'error') finishCancellation();
+    if (runBtn) {
+      runBtn.style.display = running ? 'none' : 'inline-flex';
+      if (completed || stopped) setRunLabel(lastApprovedIds.length ? 'Re-run Approved Tests' : 'Run Approved Tests');
+    }
+
+    if (cancellationRequested && current === 'error' && !resetting) finishStopped();
   }
 
   function bindLifecycle() {
@@ -241,10 +298,7 @@
         if (rerun && lastApprovedIds.length) applyApprovedIds(lastApprovedIds);
         else lastApprovedIds = checkedIds();
         cancellationRequested = false;
-        const cancel = document.getElementById('cancelExecutionBtn');
-        if (cancel) { cancel.disabled = false; cancel.textContent = 'Cancel Run'; cancel.style.display = 'inline-flex'; }
-        const reset = document.getElementById('resetExecutionBtn');
-        if (reset) reset.disabled = true;
+        setTimeout(refreshControls, 0);
       }, true);
     }
 
@@ -255,20 +309,28 @@
         cancellationRequested = false;
         lastApprovedIds = [];
         setRunLabel('Run Approved Tests');
+        setTimeout(refreshControls, 0);
       }, true);
     }
 
     const status = document.getElementById('runStatus');
-    if (status) new MutationObserver(refreshControls).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
+    if (status && status.dataset.executionControlsObserved !== '1') {
+      status.dataset.executionControlsObserved = '1';
+      new MutationObserver(refreshControls).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
+    }
 
     const results = document.getElementById('results');
-    if (results) new MutationObserver(refreshControls).observe(results, { childList: true, subtree: true });
+    if (results && results.dataset.executionControlsObserved !== '1') {
+      results.dataset.executionControlsObserved = '1';
+      new MutationObserver(refreshControls).observe(results, { childList: true, subtree: true });
+    }
 
     const errorBox = document.getElementById('errorBox');
-    if (errorBox) {
+    if (errorBox && errorBox.dataset.executionControlsObserved !== '1') {
+      errorBox.dataset.executionControlsObserved = '1';
       new MutationObserver(() => {
-        if (!cancellationRequested) return;
-        if (/cancel/i.test(String(errorBox.textContent || ''))) finishCancellation();
+        if (!cancellationRequested || resetting) return;
+        if (/cancel|stop/i.test(String(errorBox.textContent || ''))) finishStopped();
       }).observe(errorBox, { childList: true, characterData: true, subtree: true, attributes: true });
     }
   }
@@ -279,8 +341,9 @@
     let attempts = 0;
     const timer = setInterval(() => {
       ensureControls();
+      bindLifecycle();
       refreshControls();
-      if (++attempts > 40) clearInterval(timer);
+      if (++attempts > 80) clearInterval(timer);
     }, 250);
   }
 
