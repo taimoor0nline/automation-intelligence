@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   ACTIVE_GROUNDING_SAFEGUARDS,
-  FUTURE_GROUNDING_GAPS,
+  ADVANCED_CAPABILITY_AVAILABILITY,
   supportedFamilies,
   runGroundingSummary,
 } = require("./assertionGroundingCatalog");
@@ -86,8 +86,10 @@ function analysisHtml(analysis,test){
 
 function groundingStatusBadge(status){
   const value=String(status||"").toUpperCase();
-  const bg=value==="ACTIVE"||value==="READY"?"#dcfce7":value==="PARTIAL"?"#fef3c7":value==="MANUAL"||value==="FRAMEWORK_REQUIRED"?"#fee2e2":"#e0e7ff";
-  const color=value==="ACTIVE"||value==="READY"?"#166534":value==="PARTIAL"?"#92400e":value==="MANUAL"||value==="FRAMEWORK_REQUIRED"?"#b91c1c":"#3730a3";
+  const success=value==="ACTIVE"||value==="READY"||value==="AVAILABLE";
+  const warning=value==="PARTIAL"||value==="CONFIG_REQUIRED";
+  const bg=success?"#dcfce7":warning?"#fef3c7":value==="MANUAL"||value==="FRAMEWORK_REQUIRED"?"#fee2e2":"#e0e7ff";
+  const color=success?"#166534":warning?"#92400e":value==="MANUAL"||value==="FRAMEWORK_REQUIRED"?"#b91c1c":"#3730a3";
   return `<span style="display:inline-block;padding:3px 7px;border-radius:999px;background:${bg};color:${color};font-size:9px;font-weight:900">${esc(value||"UNKNOWN")}</span>`;
 }
 
@@ -96,17 +98,18 @@ function assertionGroundingHtml(testCases,summary){
   const families=supportedFamilies();
   const familyRows=families.map((family)=>`<tr><td><b>${esc(family.category.replaceAll("_"," "))}</b></td><td>${esc(family.count)}</td><td>${esc(family.assertions.map((item)=>item.operation).join(", "))}</td></tr>`).join("");
   const safeguardRows=ACTIVE_GROUNDING_SAFEGUARDS.map((rule)=>`<tr><td>${groundingStatusBadge(rule.status)}</td><td><b>${esc(rule.title)}</b><div class="muted">${esc(rule.code)}</div></td><td>${esc(rule.description)}</td></tr>`).join("");
-  const futureRows=FUTURE_GROUNDING_GAPS.map((gap)=>`<tr><td>${groundingStatusBadge(gap.status)}</td><td><b>${esc(gap.scenario)}</b><div class="muted">${esc(gap.capability)}</div></td><td>${esc(gap.proposed)}</td><td>${esc(gap.note)}</td></tr>`).join("");
+  const advancedRows=ADVANCED_CAPABILITY_AVAILABILITY.map((item)=>`<tr><td>${groundingStatusBadge(item.status)}</td><td><b>${esc(item.scenario)}</b><div class="muted">${esc(item.capability)}</div></td><td>${esc(item.implementation)}</td><td>${esc(item.note)}</td></tr>`).join("");
   const caseRows=(run.details||[]).map((item)=>{
     const coverage=item.coverage||{};
     const coverageText=coverage.total?`${coverage.compiled||0}/${coverage.total} (${coverage.percent||0}%)`:"—";
     const unresolved=(item.unresolvedExpectations||[]).length;
-    return `<tr><td><code>${esc(item.id)}</code></td><td>${groundingStatusBadge(item.readinessStatus)}</td><td>${esc(item.reasonCode||"—")}</td><td>${esc(coverageText)}</td><td>${esc((item.assertionOperations||[]).join(", ")||"—")}</td><td>${esc(unresolved)}</td></tr>`;
+    const advanced=(item.advancedCapabilities||[]).join(", ");
+    return `<tr><td><code>${esc(item.id)}</code></td><td>${groundingStatusBadge(item.readinessStatus)}</td><td>${esc(item.reasonCode||"—")}</td><td>${esc(coverageText)}</td><td>${esc((item.assertionOperations||[]).join(", ")||"—")}${advanced?`<div class="muted" style="margin-top:4px">Advanced: ${esc(advanced)}</div>`:""}</td><td>${esc(unresolved)}</td></tr>`;
   }).join("");
   const used=(run.usedOperations||[]).map((item)=>`${item.operation} ×${item.count}`).join(" · ")||"No compiled assertion operations were available for this execution snapshot.";
 
   return `<h2 class="section-title">Assertion grounding & capability coverage</h2>
-  <div class="card readiness-note"><strong>Grounding is checked before execution</strong><div class="muted">Automation Ready means the reviewed case compiled into grounded deterministic actions/assertions. It does not mean the application will pass. Identity-as-text conflicts such as using <code>success-panel</code> as visible text are now blocked during readiness.</div></div>
+  <div class="card readiness-note"><strong>Grounding is checked before execution</strong><div class="muted">Automation Ready means the reviewed case compiled into grounded deterministic actions/assertions. It does not mean the application will pass. Identity-as-text conflicts such as using <code>success-panel</code> as visible text are blocked during readiness. Adapter-backed capabilities are also blocked until their required runtime configuration is present.</div></div>
   <div class="cards" style="grid-template-columns:repeat(4,1fr);margin-top:14px">
     <div class="card"><div class="label">Executed cases reviewed</div><div class="metric">${esc(run.caseCount)}</div></div>
     <div class="card"><div class="label">Assertions compiled</div><div class="metric">${esc(run.assertionCount)}</div></div>
@@ -116,7 +119,7 @@ function assertionGroundingHtml(testCases,summary){
   <details class="card" open style="margin-top:14px"><summary style="cursor:pointer;font-weight:900">Grounding result for executed test cases</summary><div class="muted" style="margin:8px 0">Used operations: ${esc(used)}</div><div style="overflow:auto"><table><thead><tr><th>Case</th><th>Readiness</th><th>Grounding result</th><th>Expectation coverage</th><th>Compiled assertions</th><th>Unresolved expectations</th></tr></thead><tbody>${caseRows||'<tr><td colspan="6">No readiness snapshot was available for this run.</td></tr>'}</tbody></table></div></details>
   <details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:900">Active assertion-grounding safeguards</summary><div style="overflow:auto;margin-top:10px"><table><thead><tr><th>Status</th><th>Safeguard</th><th>Behavior</th></tr></thead><tbody>${safeguardRows}</tbody></table></div></details>
   <details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:900">Supported deterministic assertion families</summary><div class="muted" style="margin:8px 0">These are engine capabilities. A specific assertion is emitted only when the expected result and discovery evidence justify it.</div><div style="overflow:auto"><table><thead><tr><th>Family</th><th>Operations</th><th>Available assertions</th></tr></thead><tbody>${familyRows}</tbody></table></div></details>
-  <details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:900">Known gaps / future grounding scenarios</summary><div class="muted" style="margin:8px 0">These scenarios are not silently treated as supported. They remain roadmap, partial, manual, or framework-required capabilities until a deterministic grounding contract exists.</div><div style="overflow:auto"><table><thead><tr><th>Status</th><th>Scenario</th><th>Proposed capability</th><th>Notes</th></tr></thead><tbody>${futureRows}</tbody></table></div></details>`;
+  <details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:900">Advanced capability availability & prerequisites</summary><div class="muted" style="margin:8px 0"><b>AVAILABLE</b> capabilities execute directly in the TestNexus browser/runtime. <b>CONFIG_REQUIRED</b> capabilities are implemented through a deterministic adapter contract and cannot become Automation Ready until that adapter is configured.</div><div style="overflow:auto"><table><thead><tr><th>Status</th><th>Scenario</th><th>Implementation</th><th>Runtime notes</th></tr></thead><tbody>${advancedRows}</tbody></table></div></details>`;
 }
 
 function reportFileName(sessionId){const safe=String(sessionId||"run").replace(/[^a-zA-Z0-9_-]/g,"_");return `${safe}.html`;}
