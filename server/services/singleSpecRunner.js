@@ -14,6 +14,7 @@ const ENGINE_CONFIG = path.join(AUTOMATION_DIR, "engine.config.js");
 const REPORTER_PATH = path.join(AUTOMATION_DIR, "reporters", "result-file-reporter.js");
 const RESULT_FILE = path.join(ARTIFACT_DIR, "latest-run-result.json");
 const TEST_ID_REGEX = /TC(?:\d{3}|-H\d{3})/i;
+const activeExecutions = new Map();
 
 function boolEnv(value, fallback) {
   if (value == null || value === "") return fallback;
@@ -169,6 +170,34 @@ function killProcessTree(pid) {
   return Promise.resolve();
 }
 
+function cancellationError(control) {
+  const err = new Error(control?.cancelReason || "Automation execution cancelled by user.");
+  err.code = "AUTOMATION_CANCELLED";
+  return err;
+}
+
+function getActiveExecution(runId) {
+  const control = activeExecutions.get(String(runId || ""));
+  if (!control) return null;
+  return {
+    runId: control.runId,
+    cancelRequested: Boolean(control.cancelRequested),
+    startedAt: control.startedAt,
+    childPid: control.childPid || null,
+  };
+}
+
+async function cancelActiveExecution(runId, reason = "Automation execution cancelled by user.") {
+  const key = String(runId || "");
+  const control = activeExecutions.get(key);
+  if (!control) return { cancelled: false, runId: key || null, state: "NOT_RUNNING" };
+  control.cancelRequested = true;
+  control.cancelReason = reason;
+  if (control.childPid) await killProcessTree(control.childPid);
+  await cleanupAutomationBrowsers({ runId: control.runId, reason: `cancel request ${control.runId}`, log: true });
+  return { cancelled: true, runId: control.runId, state: "CANCELLING" };
+}
+
 function validateRuntimeContext(executionContext = {}) {
   if (String(executionContext.targetType || 'WEB').toUpperCase() === 'REST') {
     const auth = executionContext.apiAuth || { type: 'NONE' };
@@ -202,10 +231,11 @@ function validateRuntimeContext(executionContext = {}) {
   }
 }
 
-async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, screenshotEachTest, completionPauseMs, runId, progressFile, expectedTotal, onProgress }) {
+async function runAutomationCli({ prepared, executionContext, browser, headed, demoStepDelayMs, video, screenshotOnRunFailure, screenshotEachTest, completionPauseMs, runId, progressFile, expectedTotal, onProgress, control }) {
   const cypressBin = path.join(AUTOMATION_DIR, "node_modules", "cypress", "bin", "cypress");
   if (!fs.existsSync(cypressBin)) throw new Error("Automation engine dependency is not installed inside automation-system/. Run: cd automation-system && npm install.");
   if (!fs.existsSync(REPORTER_PATH)) throw new Error(`Automation result reporter is missing: ${REPORTER_PATH}`);
+  if (control?.cancelRequested) throw cancellationError(control);
 
   validateRuntimeContext(executionContext);
 
@@ -256,6 +286,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
       windowsHide: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    if (control) control.childPid = child.pid;
     child.stdout.on("data", (chunk) => process.stdout.write(chunk));
     child.stderr.on("data", (chunk) => process.stderr.write(chunk));
     child.on("close", (code) => { closed = true; exitCode = code; });
@@ -266,6 +297,10 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     let reporterResult = null;
 
     while (Date.now() - startedAt < overallTimeoutMs) {
+      if (control?.cancelRequested) {
+        await killProcessTree(child.pid);
+        throw cancellationError(control);
+      }
       if (progressFile && fs.existsSync(progressFile)) {
         try {
           const rawProgress = JSON.parse(fs.readFileSync(progressFile, "utf8"));
@@ -283,6 +318,11 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
       await delay(150);
     }
 
+    if (control?.cancelRequested) {
+      await killProcessTree(child.pid);
+      throw cancellationError(control);
+    }
+
     if (!reporterResult) {
       await killProcessTree(child.pid);
       throw new Error(closed
@@ -292,7 +332,13 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
 
     console.log(`[single-spec-runner] Test results captured before teardown: ${reporterResult.passed} passed, ${reporterResult.failed} failed.`);
     const graceStartedAt = Date.now();
-    while (!closed && Date.now() - graceStartedAt < exitGraceMs) await delay(200);
+    while (!closed && Date.now() - graceStartedAt < exitGraceMs) {
+      if (control?.cancelRequested) {
+        await killProcessTree(child.pid);
+        throw cancellationError(control);
+      }
+      await delay(200);
+    }
 
     let forcedTeardown = false;
     if (!closed) {
@@ -306,6 +352,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
 
     return { reporterResult, forcedTeardown };
   } finally {
+    if (control) control.childPid = null;
     if (child && !closed) await killProcessTree(child.pid);
     await cleanupAutomationBrowsers({ runId, reason: `post-run ${runId}`, log: true });
   }
@@ -315,6 +362,14 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
   let prepared = null;
   const runId = `run-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const progressFile = path.join(PROGRESS_DIR, `${runId}.json`);
+  const control = {
+    runId,
+    childPid: null,
+    cancelRequested: false,
+    cancelReason: null,
+    startedAt: new Date().toISOString(),
+  };
+  activeExecutions.set(runId, control);
   try {
     prepared = prepareSpec(generated);
     const headed = options.headed == null ? boolEnv(process.env.AUTOMATION_HEADED, true) : Boolean(options.headed);
@@ -348,6 +403,7 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
       progressFile,
       expectedTotal,
       onProgress: options.onProgress,
+      control,
     });
     const summarized = summarizeReporterResult(run.reporterResult, browser, run.forcedTeardown);
     if (typeof options.onProgress === "function") {
@@ -360,10 +416,14 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
     }
     return { ok: true, runId, specPath: prepared.specPath, summary: summarized.summary, artifacts: summarized.artifacts, error: null };
   } catch (err) {
-    console.error("[single-spec-runner] Automation execution failed:", err);
-    await cleanupAutomationBrowsers({ runId, reason: `failed run ${runId}`, log: true });
-    return { ok: false, runId, specPath: prepared?.specPath || null, summary: null, artifacts: null, error: err.message || String(err) };
+    const cancelled = err?.code === "AUTOMATION_CANCELLED";
+    if (cancelled) console.log(`[single-spec-runner] ${runId} cancelled by user request.`);
+    else console.error("[single-spec-runner] Automation execution failed:", err);
+    await cleanupAutomationBrowsers({ runId, reason: `${cancelled ? "cancelled" : "failed"} run ${runId}`, log: true });
+    return { ok: false, cancelled, runId, specPath: prepared?.specPath || null, summary: null, artifacts: null, error: err.message || String(err) };
+  } finally {
+    if (activeExecutions.get(runId) === control) activeExecutions.delete(runId);
   }
 }
 
-module.exports = { executeSingleGeneratedSpec };
+module.exports = { executeSingleGeneratedSpec, cancelActiveExecution, getActiveExecution };
