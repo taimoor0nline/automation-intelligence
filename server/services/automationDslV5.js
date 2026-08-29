@@ -1,4 +1,5 @@
 const v4 = require("./automationDslV4");
+const { resolveExpectedResults } = require("./expectationGrounding");
 
 function humanizeActionName(value) {
   return String(value || "")
@@ -20,6 +21,9 @@ function normalizeActionAlias(step) {
     ["enter input", "fill"],
     ["type input", "fill"],
     ["click element", "click"],
+    ["click button", "click"],
+    ["click radio", "click"],
+    ["click checkbox", "choose"],
     ["select option", "select"],
     ["choose option", "select"],
     ["check checkbox", "choose"],
@@ -84,7 +88,7 @@ function normalizeExpectedResult(value) {
   return text;
 }
 
-function normalizeTestCase(testCase) {
+function normalizeTestCase(testCase, context = {}) {
   if (!testCase || typeof testCase !== "object") return testCase;
   const sourceSteps = Array.isArray(testCase.steps) ? testCase.steps : [];
   const normalizedSteps = [];
@@ -99,8 +103,10 @@ function normalizeTestCase(testCase) {
     normalizedSteps.push(normalizeKeyStep(sourceStep));
   }
 
+  const humanExpectedResults = Array.isArray(testCase.expectedResults) ? testCase.expectedResults : [];
+  const grounding = resolveExpectedResults(humanExpectedResults, context.pageDiscoveries || []);
   const expectedResults = [
-    ...(Array.isArray(testCase.expectedResults) ? testCase.expectedResults.map(normalizeExpectedResult) : []),
+    ...grounding.results.map(normalizeExpectedResult),
     ...promotedAssertions,
   ];
 
@@ -108,6 +114,8 @@ function normalizeTestCase(testCase) {
     ...testCase,
     steps: normalizedSteps,
     expectedResults,
+    _expectationGrounding: grounding,
+    _humanExpectationCount: humanExpectedResults.length,
   };
 }
 
@@ -191,11 +199,50 @@ function removeFalseStructuralAssertions(compiled, normalizedTestCase) {
   return { ...compiled, plan: { ...compiled.plan, assertions } };
 }
 
+function attachExpectationCoverage(compiled, normalizedTestCase) {
+  const grounding = normalizedTestCase?._expectationGrounding;
+  const total = Number(normalizedTestCase?._humanExpectationCount || 0);
+  if (!grounding || !total) return compiled;
+
+  const unresolvedNarratives = new Set(
+    (compiled?.plan?.narrativeExpectations || compiled?.uncompiledExpectations || []).map((value) => String(value))
+  );
+  const records = grounding.records || [];
+  const details = records.map((record, index) => {
+    const resolvedText = normalizeExpectedResult(record.text);
+    const compiledExpectation = !unresolvedNarratives.has(resolvedText);
+    return {
+      index,
+      expectation: record.original,
+      resolvedText,
+      grounded: Boolean(record.resolved || record.source === "explicit"),
+      groundingSource: record.source,
+      compiled: compiledExpectation,
+    };
+  });
+  const compiledCount = details.filter((item) => item.compiled).length;
+  const percent = total ? Math.round((compiledCount / total) * 100) : 0;
+  const expectationCoverage = {
+    total,
+    compiled: compiledCount,
+    unresolved: Math.max(0, total - compiledCount),
+    percent,
+    quality: compiledCount === total ? "COMPLETE" : compiledCount > 0 ? "PARTIAL" : "NONE",
+    details,
+  };
+
+  if (compiled?.ok && compiled.plan) {
+    return { ...compiled, expectationCoverage, plan: { ...compiled.plan, expectationCoverage } };
+  }
+  return { ...compiled, expectationCoverage };
+}
+
 function compileTestCase(testCase, context = {}) {
-  const normalized = normalizeTestCase(testCase);
+  const normalized = normalizeTestCase(testCase, context);
   let compiled = v4.compileTestCase(normalized, context);
   compiled = removeFalseStructuralAssertions(compiled, normalized);
-  return ensureStartNavigation(compiled, context.pageDiscoveries || []);
+  compiled = ensureStartNavigation(compiled, context.pageDiscoveries || []);
+  return attachExpectationCoverage(compiled, normalized);
 }
 
 module.exports = {
@@ -207,4 +254,5 @@ module.exports = {
   semanticAssertionText,
   hasStructuralIntent,
   removeFalseStructuralAssertions,
+  attachExpectationCoverage,
 };
