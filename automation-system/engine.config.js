@@ -35,6 +35,7 @@ function publishLiveState(status, details = {}) {
   writeJsonAtomic(LIVE_STATE_FILE, {
     status,
     at: new Date().toISOString(),
+    runId: AUTOMATION_RUN_ID || null,
     ...details,
   });
 }
@@ -114,6 +115,17 @@ module.exports = defineConfig({
       TEST_COMPLETION_PAUSE_MS: Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS, 5000), 30000)),
     },
     setupNodeEvents(on, config) {
+      on("task", {
+        markTestStarted(details = {}) {
+          publishLiveState("running", {
+            browser: String(details.browser || config.browser?.name || "chrome"),
+            testTitle: String(details.testTitle || ""),
+            testCaseId: String(details.testCaseId || ""),
+          });
+          return null;
+        },
+      });
+
       on("before:browser:launch", (browser, launchOptions) => {
         if (browser.family === "chromium" && AUTOMATION_RUN_ID) {
           const marker = `--ai-testpilot-run-id=${AUTOMATION_RUN_ID}`;
@@ -143,9 +155,9 @@ module.exports = defineConfig({
         }
 
         writeJsonAtomic(LIVE_INFO_FILE, { port: debugPort, browser: browser.name, runId: AUTOMATION_RUN_ID || null, at: new Date().toISOString() });
-        publishLiveState("running", { browser: browser.name, port: debugPort, passed: 0, failed: 0, total: 0 });
+        publishLiveState("preparing", { browser: browser.name, port: debugPort, passed: 0, failed: 0, total: 0 });
 
-        console.log(`[automation-engine] Live browser stream attached to Cypress Chrome DevTools port ${debugPort}.`);
+        console.log(`[automation-engine] Live browser stream prepared on Chrome DevTools port ${debugPort}; waiting for the first test to start.`);
         return launchOptions;
       });
 
