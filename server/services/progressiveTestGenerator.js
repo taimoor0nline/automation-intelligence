@@ -15,7 +15,7 @@ function ensureConfigured() {
 function parseJsonContent(raw) {
   const cleaned = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   try { return JSON.parse(cleaned); }
-  catch { throw new Error('AI provider returned invalid JSON for a generation batch.'); }
+  catch { throw new Error('AI provider returned invalid JSON for test generation.'); }
 }
 
 async function callModel(systemPrompt, userPayload, { modelTier = 'fast', attempt = 0 } = {}) {
@@ -44,22 +44,128 @@ async function callModel(systemPrompt, userPayload, { modelTier = 'fast', attemp
     }
     const data = await response.json();
     const raw = data.choices?.[0]?.message?.content;
-    if (!raw) throw new Error('AI provider returned an empty generation batch.');
+    if (!raw) throw new Error('AI provider returned an empty response.');
     return parseJsonContent(raw);
   } catch (err) {
     if (err.name === 'AbortError') {
       if (attempt < MAX_RETRIES) return callModel(systemPrompt, userPayload, { modelTier: profile, attempt: attempt + 1 });
-      throw new Error(`AI generation batch timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s.`);
+      throw new Error(`AI request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s.`);
     }
     throw err;
   } finally { clearTimeout(timeout); }
+}
+
+const PLAN_PROMPT = `You are a senior QA test architect. Propose the SMALLEST evidence-grounded test suite that gives useful coverage of the supplied business requirement.
+
+Important rules:
+- maxTestCases is a HARD UPPER LIMIT, never a target. Never pad the suite just to reach it.
+- Decide how many tests are actually justified by the business story and discovered UI evidence. Return between 1 and maxTestCases.
+- The business story defines scope. Discovery provides evidence and must not broaden the requirement.
+- Use only categories in allowedCategories and scenario types in allowedScenarioTypes.
+- Positive, negative and boundary are scenario types. FUNCTIONAL is a test category, not a scenario type.
+- Each planned test must cover a materially distinct behavior, rule, risk, state or boundary.
+- Do not invent validation rules, boundaries, messages, controls, selectors or business rules that are absent from the story/discovery.
+- If the configured ceiling prevents fuller coverage, explicitly list the remaining gaps.
+- coverageScore is an AI ESTIMATE of requirement/scenario coverage achieved by this proposed suite, from 0 to 100. It is NOT source-code coverage and NOT a measured execution metric.
+- Prefer fewer strong tests over redundant tests.
+
+Return JSON only:
+{
+  "recommendedTestCaseCount": number,
+  "coverageScore": number,
+  "coverageSummary": string,
+  "coveredAreas": [string],
+  "knownGaps": [string],
+  "units": [{
+    "category": string,
+    "scenarioType": "positive"|"negative"|"boundary"|"custom",
+    "rationale": string
+  }]
+}`;
+
+function cleanTextArray(value, max = 20) {
+  return [...new Set((Array.isArray(value) ? value : []).map((x) => String(x || '').trim()).filter(Boolean))].slice(0, max);
+}
+
+function clampCoverage(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0;
+}
+
+async function proposeGenerationPlan({
+  story,
+  pageDiscoveries,
+  allowedCategories = [],
+  allowedScenarioTypes = [],
+  customCategories = [],
+  customScenarioTypes = [],
+  securitySubcategories = [],
+  securitySeverities = [],
+  maxTestCases = 6,
+  modelTier = 'fast',
+}) {
+  const ceiling = Math.max(1, Math.min(Number(maxTestCases) || 1, 50));
+  const categories = cleanTextArray(allowedCategories.map((x) => String(x).toUpperCase()), 50);
+  const scenarioTypes = cleanTextArray(allowedScenarioTypes.map((x) => String(x).toLowerCase()), 20);
+  if (!categories.length) throw new Error('At least one test category is required for AI coverage planning.');
+  if (!scenarioTypes.length) throw new Error('At least one scenario type is required for AI coverage planning.');
+
+  const result = await callModel(PLAN_PROMPT, {
+    story,
+    pageDiscoveries,
+    allowedCategories: categories,
+    allowedScenarioTypes: scenarioTypes,
+    customCategories: cleanTextArray(customCategories),
+    customScenarioTypes: cleanTextArray(customScenarioTypes),
+    securityScope: categories.includes('SECURITY') ? {
+      subcategories: cleanTextArray(securitySubcategories, 50),
+      severities: cleanTextArray(securitySeverities, 20),
+    } : null,
+    maxTestCases: ceiling,
+  }, { modelTier });
+
+  const rawUnits = Array.isArray(result?.units) ? result.units : [];
+  const units = [];
+  for (const raw of rawUnits) {
+    if (units.length >= ceiling) break;
+    const category = String(raw?.category || '').trim().toUpperCase();
+    const scenarioType = String(raw?.scenarioType || '').trim().toLowerCase();
+    if (!categories.includes(category) || !scenarioTypes.includes(scenarioType)) continue;
+    units.push({
+      category,
+      scenarioType,
+      rationale: String(raw?.rationale || '').trim().slice(0, 500),
+    });
+  }
+
+  let requested = Math.max(1, Math.min(Math.trunc(Number(result?.recommendedTestCaseCount) || units.length || 1), ceiling));
+  if (units.length > requested) units.length = requested;
+  while (units.length < requested) {
+    const index = units.length;
+    units.push({
+      category: categories[index % categories.length],
+      scenarioType: scenarioTypes[index % scenarioTypes.length],
+      rationale: 'Fallback allocation within the AI-recommended suite size.',
+    });
+  }
+  requested = units.length;
+
+  return {
+    recommendedTestCaseCount: requested,
+    maxTestCases: ceiling,
+    coverageScore: clampCoverage(result?.coverageScore),
+    coverageSummary: String(result?.coverageSummary || '').trim().slice(0, 1200),
+    coveredAreas: cleanTextArray(result?.coveredAreas, 30),
+    knownGaps: cleanTextArray(result?.knownGaps, 30),
+    units,
+  };
 }
 
 const BATCH_PROMPT = `You are a senior QA test analyst. Generate a SMALL evidence-grounded batch for one explicit testing scope.
 
 Rules:
 - The business story defines scope. Discovered pages/controls provide evidence; discovery never broadens the requirement.
-- Generate exactly requestedTestCaseCount cases.
+- Generate exactly requestedTestCaseCount cases for this already-approved planning unit.
 - Generate only requestedCategory. Do not include or discuss other categories.
 - If requestedCategory is CUSTOM and requestedCustomCategory is supplied, use that custom label as the testing-purpose sub-scope.
 - Generate only requestedScenarioType. Category and scenario type are separate dimensions.
@@ -78,7 +184,7 @@ Return JSON only:
   "feature": string,
   "testCases": [{
     "title": string,
-    "type": "positive"|"negative"|"boundary"|"functional"|"custom",
+    "type": "positive"|"negative"|"boundary"|"custom",
     "priority": "low"|"medium"|"high",
     "testCategory": string,
     "securitySubcategory": string|null,
@@ -92,7 +198,7 @@ Return JSON only:
 
 function normalizeCaseShape(testCase, category, scenarioType, customCategory = null, customScenarioType = null) {
   const tc = testCase && typeof testCase === 'object' ? testCase : {};
-  const requestedType = ['positive','negative','boundary','functional','custom'].includes(String(scenarioType || '').toLowerCase()) ? String(scenarioType).toLowerCase() : 'functional';
+  const requestedType = ['positive','negative','boundary','custom'].includes(String(scenarioType || '').toLowerCase()) ? String(scenarioType).toLowerCase() : 'positive';
   return {
     title: String(tc.title || '').trim(),
     type: requestedType,
@@ -109,7 +215,7 @@ function normalizeCaseShape(testCase, category, scenarioType, customCategory = n
   };
 }
 
-async function generateBatch({ story, pageDiscoveries, environment, category, scenarioType = 'functional', customCategory = null, customScenarioType = null, count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
+async function generateBatch({ story, pageDiscoveries, environment, category, scenarioType = 'positive', customCategory = null, customScenarioType = null, count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
   const requestedCount = Math.max(1, Math.min(Number(count) || 1, 5));
   const result = await callModel(BATCH_PROMPT, {
     story,
@@ -129,4 +235,4 @@ async function generateBatch({ story, pageDiscoveries, environment, category, sc
   return { feature: result.feature || null, testCases: cases };
 }
 
-module.exports = { generateBatch };
+module.exports = { proposeGenerationPlan, generateBatch };
