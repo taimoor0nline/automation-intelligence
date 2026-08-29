@@ -37,6 +37,8 @@
       generateBtn.addEventListener('click', () => setFastProfile(), true);
     }
 
+    // Navigation is intentionally first and has no dependency on health, database, auth, AI, or readiness.
+    loadScript('/fast-mode-navigation.js', 'data-fast-mode-navigation');
     loadScript('/testnexus-branding.js', 'data-testnexus-branding');
     loadScript('/generation-types.js', 'data-generation-types');
     loadScript('/selection-master-fix.js', 'data-selection-master-fix');
