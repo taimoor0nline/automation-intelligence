@@ -39,14 +39,15 @@
 
     loadScript('/generation-types.js', 'data-generation-types');
     loadScript('/selection-master-fix.js', 'data-selection-master-fix');
-    loadScript('/web-category-capabilities.js', 'data-web-category-capabilities');
+    loadScript('/generation-loading-ux.js', 'data-generation-loading-ux');
     loadScript('/progressive-generation.js', 'data-progressive-generation');
     loadScript('/review-filters.js', 'data-review-filters');
-    loadScript('/review-security-visibility.js', 'data-review-security-visibility');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/test-case-compare.js', 'data-test-case-compare');
-    loadScript('/execution-error-classification.js', 'data-execution-error-classification');
     loadScript('/execution-report-actions.js', 'data-execution-report-actions');
+    loadScript('/web-capability-matrix.js', 'data-web-capability-matrix');
+    loadScript('/review-security-context.js', 'data-review-security-context');
+    loadScript('/execution-failure-category.js', 'data-execution-failure-category');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
