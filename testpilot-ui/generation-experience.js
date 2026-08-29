@@ -44,6 +44,7 @@
     loadScript('/generation-loading-ux.js', 'data-generation-loading-ux');
     loadScript('/progressive-generation.js', 'data-progressive-generation');
     loadScript('/review-filters.js', 'data-review-filters');
+    loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/test-case-compare.js', 'data-test-case-compare');
     loadScript('/execution-report-actions.js', 'data-execution-report-actions');
