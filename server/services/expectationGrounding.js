@@ -1,4 +1,5 @@
 const INDEX_CACHE = new WeakMap();
+const { phrasesForSelector, hasSelectorIntent } = require('./expectationIntentRegistry');
 
 const STOP_WORDS = new Set([
   'the','a','an','is','are','be','becomes','become','with','without','and','or','to','of','in','on','for','after','before','successfully','successful','user','element','field','form','page','text','message','displayed','visible','shown','appears','appear','accept','accepts','input','valid','validation','errors','error','feedback','submission','submit','button','value','data','all','reference','generated',
@@ -36,26 +37,12 @@ function semanticWords(value) {
 }
 
 function itemText(item, selector) {
-  return [
-    selector,
-    item?.testId,
-    item?.id,
-    item?.name,
-    item?.label,
-    item?.text,
-    item?.placeholder,
-    item?.ariaLabel,
-    item?.title,
-    item?.type,
-    item?.tag,
-  ].filter(Boolean).join(' ');
+  return [selector,item?.testId,item?.id,item?.name,item?.label,item?.text,item?.placeholder,item?.ariaLabel,item?.title,item?.type,item?.tag]
+    .filter(Boolean).join(' ');
 }
 
 function buildIndex(pageDiscoveries = []) {
-  if (pageDiscoveries && typeof pageDiscoveries === 'object' && INDEX_CACHE.has(pageDiscoveries)) {
-    return INDEX_CACHE.get(pageDiscoveries);
-  }
-
+  if (pageDiscoveries && typeof pageDiscoveries === 'object' && INDEX_CACHE.has(pageDiscoveries)) return INDEX_CACHE.get(pageDiscoveries);
   const entries = [];
   const paths = new Set();
   const seenSelectors = new Set();
@@ -63,10 +50,8 @@ function buildIndex(pageDiscoveries = []) {
     const selector = selectorFor(item);
     if (!selector || seenSelectors.has(selector)) return;
     seenSelectors.add(selector);
-    const words = new Set(semanticWords(itemText(item, selector)));
-    entries.push({ selector, item, path, words });
+    entries.push({ selector, item, path, words: new Set(semanticWords(itemText(item, selector))) });
   };
-
   for (const page of pageDiscoveries || []) {
     const path = pathForPage(page);
     paths.add(path);
@@ -76,7 +61,6 @@ function buildIndex(pageDiscoveries = []) {
     }
     for (const message of page?.messages || []) register(message, path);
   }
-
   const index = { entries, paths };
   if (pageDiscoveries && typeof pageDiscoveries === 'object') INDEX_CACHE.set(pageDiscoveries, index);
   return index;
@@ -96,16 +80,18 @@ function quotedValues(text) {
 
 function resolvePathExpectation(text, index) {
   const lower = String(text || '').toLowerCase();
-  if (!/redirect|navigat|land|arriv|open/.test(lower)) return null;
+  if (!/redirect|navigat|land|arriv|open|route|path/.test(lower)) return null;
+  let best = null;
   for (const path of index.paths) {
     if (path === '/') continue;
-    const pathWords = semanticWords(path);
-    if (!pathWords.length) continue;
-    if (pathWords.some((word) => lower.includes(word))) {
-      return { text: `Path equals "${path}"`, source: 'discovery-path', path, confidence: 1 };
-    }
+    const words = semanticWords(path);
+    if (!words.length) continue;
+    const score = words.reduce((sum, word) => sum + (lower.includes(word) ? 1 : 0), 0);
+    if (!score) continue;
+    if (!best || score > best.score) best = { path, score };
   }
-  return null;
+  if (!best) return null;
+  return { text: `Path equals "${best.path}"`, source: 'discovery-path', path: best.path, confidence: best.score };
 }
 
 function candidateScore(expectationWords, entry) {
@@ -115,9 +101,7 @@ function candidateScore(expectationWords, entry) {
 }
 
 function resolveSelectorExpectation(text, index) {
-  const lower = String(text || '').toLowerCase();
-  if (!/visible|shown|displayed|appears?|exists?|present|hidden|absent|checked|enabled|disabled|text|message|panel|reference/.test(lower)) return null;
-
+  if (!hasSelectorIntent(text)) return null;
   const words = semanticWords(text);
   if (!words.length) return null;
   let best = null;
@@ -127,43 +111,22 @@ function resolveSelectorExpectation(text, index) {
     if (!best || score > best.score) {
       secondScore = best?.score || 0;
       best = { entry, score };
-    } else if (score > secondScore) {
-      secondScore = score;
-    }
+    } else if (score > secondScore) secondScore = score;
   }
-
-  // Require two semantic matches and a clear winner. This avoids inventing selectors
-  // from vague prose while still grounding phrases such as "success panel" or
-  // "username error message" against test ids discovered from the page.
+  // Strong, unambiguous local evidence only. This keeps the resolver scalable without guessing.
   if (!best || best.score < 2 || best.score === secondScore) return null;
 
   const selector = best.entry.selector;
   const quotes = quotedValues(text).filter((value) => !value.includes('data-testid') && value !== selector);
-  const message = quotes.length ? quotes[quotes.length - 1] : '';
-  const visible = /visible|shown|displayed|appears?|present/.test(lower);
-  const hidden = /hidden|not visible|absent|not present/.test(lower);
-  const checked = /\bchecked\b/.test(lower) && !/not checked|unchecked/.test(lower);
-  const disabled = /\bdisabled\b/.test(lower);
-  const enabled = /\benabled\b/.test(lower) && !disabled;
+  const quotedMessage = quotes.length ? quotes[quotes.length - 1] : '';
+  const parts = phrasesForSelector(text, selector);
+  if (!parts.length) parts.push(`Element ${selector} exists`);
 
-  const parts = [];
-  if (hidden) parts.push(`Element ${selector} is hidden`);
-  else if (visible) parts.push(`Element ${selector} is visible`);
-  else if (checked) parts.push(`Element ${selector} is checked`);
-  else if (disabled) parts.push(`Element ${selector} is disabled`);
-  else if (enabled) parts.push(`Element ${selector} is enabled`);
-  else parts.push(`Element ${selector} exists`);
-
-  if (message && /text|message|panel|reference|thank|error|required/.test(lower)) {
-    parts.push(`Text contains "${message}" in ${selector}`);
+  if (quotedMessage && /text|message|panel|reference|label|thank|error|required|success/i.test(text)) {
+    parts.push(`Text contains "${quotedMessage}" in ${selector}`);
   }
 
-  return {
-    text: parts.join(' and '),
-    source: 'discovery-selector',
-    selector,
-    confidence: best.score,
-  };
+  return { text: parts.join(' and '), source: 'discovery-selector', selector, confidence: best.score };
 }
 
 function normalizeTestIdPhrase(text) {
@@ -176,29 +139,17 @@ function resolveExpectation(value, index) {
   if (hasExplicitSelector(normalized)) {
     return { original, text: normalized, resolved: normalized !== original, source: normalized !== original ? 'testid-normalization' : 'explicit', confidence: 1 };
   }
-
   const path = resolvePathExpectation(normalized, index);
   if (path) return { original, resolved: true, ...path };
-
   const selector = resolveSelectorExpectation(normalized, index);
   if (selector) return { original, resolved: true, ...selector };
-
   return { original, text: normalized, resolved: false, source: 'narrative', confidence: 0 };
 }
 
 function resolveExpectedResults(expectedResults = [], pageDiscoveries = []) {
   const index = buildIndex(pageDiscoveries);
   const records = (expectedResults || []).map((value) => resolveExpectation(value, index));
-  return {
-    results: records.map((record) => record.text),
-    records,
-    indexStats: { selectors: index.entries.length, paths: index.paths.size },
-  };
+  return { results: records.map((record) => record.text), records, indexStats: { selectors: index.entries.length, paths: index.paths.size } };
 }
 
-module.exports = {
-  buildIndex,
-  resolveExpectedResults,
-  resolveExpectation,
-  normalizeTestIdPhrase,
-};
+module.exports = { buildIndex, resolveExpectedResults, resolveExpectation, normalizeTestIdPhrase };
