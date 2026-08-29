@@ -61,14 +61,16 @@ Rules:
 - The business story defines scope. Discovered pages/controls provide evidence; discovery never broadens the requirement.
 - Generate exactly requestedTestCaseCount cases.
 - Generate only requestedCategory. Do not include or discuss other categories.
+- If requestedCategory is CUSTOM and requestedCustomCategory is supplied, use that custom label as the testing-purpose sub-scope.
 - Generate only requestedScenarioType. Category and scenario type are separate dimensions.
+- If requestedScenarioType is custom and requestedCustomScenarioType is supplied, use that label to describe how the scenario should behave.
 - Never invent selectors, pages, validation rules, messages, boundaries, options or business rules absent from story/discovery evidence.
 - Use discovered selectors exactly when technical targets are needed.
+- Prefer human-readable actions from the supported interaction vocabulary: navigate, fill, clear, click, select, check, uncheck, submit, verify. Avoid arbitrary sleeps; use verify when an element must be available.
 - Avoid titles listed in excludeTitles and produce materially different scenarios.
 - Tests describe EXPECTED behavior. Do not manufacture failures.
 - SECURITY means safe security-functional checks only and must remain within supplied evidence.
 - PERFORMANCE means single-user page/API timing expectations only.
-- LOAD/STRESS may be classified/planned but must not claim concurrent execution behavior.
 - Do not include passwords or secrets.
 
 Return JSON only:
@@ -76,7 +78,7 @@ Return JSON only:
   "feature": string,
   "testCases": [{
     "title": string,
-    "type": "positive"|"negative"|"boundary"|"functional",
+    "type": "positive"|"negative"|"boundary"|"functional"|"custom",
     "priority": "low"|"medium"|"high",
     "testCategory": string,
     "securitySubcategory": string|null,
@@ -88,14 +90,16 @@ Return JSON only:
   }]
 }`;
 
-function normalizeCaseShape(testCase, category, scenarioType) {
+function normalizeCaseShape(testCase, category, scenarioType, customCategory = null, customScenarioType = null) {
   const tc = testCase && typeof testCase === 'object' ? testCase : {};
-  const requestedType = ['positive','negative','boundary','functional'].includes(String(scenarioType || '').toLowerCase()) ? String(scenarioType).toLowerCase() : 'functional';
+  const requestedType = ['positive','negative','boundary','functional','custom'].includes(String(scenarioType || '').toLowerCase()) ? String(scenarioType).toLowerCase() : 'functional';
   return {
     title: String(tc.title || '').trim(),
     type: requestedType,
+    customScenarioType: requestedType === 'custom' ? String(customScenarioType || '').trim() || null : null,
     priority: ['low','medium','high'].includes(String(tc.priority || '').toLowerCase()) ? String(tc.priority).toLowerCase() : 'medium',
     testCategory: category,
+    customCategory: category === 'CUSTOM' ? String(customCategory || '').trim() || null : null,
     securitySubcategory: category === 'SECURITY' ? String(tc.securitySubcategory || '').trim().toUpperCase() || null : null,
     severity: category === 'SECURITY' ? String(tc.severity || '').trim().toUpperCase() || null : null,
     preconditions: Array.isArray(tc.preconditions) ? tc.preconditions.map(String).filter(Boolean) : [],
@@ -105,20 +109,22 @@ function normalizeCaseShape(testCase, category, scenarioType) {
   };
 }
 
-async function generateBatch({ story, pageDiscoveries, environment, category, scenarioType = 'functional', count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
+async function generateBatch({ story, pageDiscoveries, environment, category, scenarioType = 'functional', customCategory = null, customScenarioType = null, count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
   const requestedCount = Math.max(1, Math.min(Number(count) || 1, 5));
   const result = await callModel(BATCH_PROMPT, {
     story,
     pageDiscoveries,
     environment,
     requestedCategory: category,
+    requestedCustomCategory: category === 'CUSTOM' ? customCategory : null,
     requestedScenarioType: scenarioType,
+    requestedCustomScenarioType: scenarioType === 'custom' ? customScenarioType : null,
     requestedTestCaseCount: requestedCount,
     excludeTitles: excludeTitles.slice(-20),
     securityScope: category === 'SECURITY' ? { subcategories: securitySubcategories, severities: securitySeverities } : null,
   }, { modelTier });
   if (!Array.isArray(result?.testCases) || result.testCases.length === 0) throw new Error(`AI returned no ${category}/${scenarioType} test cases.`);
-  const cases = result.testCases.slice(0, requestedCount).map((tc) => normalizeCaseShape(tc, category, scenarioType));
+  const cases = result.testCases.slice(0, requestedCount).map((tc) => normalizeCaseShape(tc, category, scenarioType, customCategory, customScenarioType));
   if (cases.some((tc) => !tc.title || !tc.steps.length || !tc.expectedResults.length)) throw new Error(`AI returned an incomplete ${category}/${scenarioType} generation batch.`);
   return { feature: result.feature || null, testCases: cases };
 }
