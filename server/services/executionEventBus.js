@@ -9,9 +9,9 @@ function channel(sessionId) {
 
 function publishExecutionEvent(sessionId, type, payload = {}) {
   const event = {
+    ...payload,
     type: String(type || 'MESSAGE').toUpperCase(),
     at: new Date().toISOString(),
-    ...payload,
   };
   emitter.emit(channel(sessionId), event);
   return event;
