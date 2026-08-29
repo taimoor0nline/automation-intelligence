@@ -8,6 +8,7 @@ const { compactDiscoveriesForModel } = require("../services/modelDiscoveryView")
 const { normalizeProfile } = require("../services/aiModelProfiles");
 const qwen = require("../services/qwenClient");
 const { readinessSummary } = require("../services/testCaseFeasibility");
+const { validateStoryDiscoveryCompatibility, mismatchMessage } = require("../services/storyDiscoveryCompatibility");
 const { MAX_GENERATED_CASES, pruneGeneratedTestCases } = require("../services/testCaseScopeFilter");
 const { TEST_CATEGORIES, normalizeTestCategory, inferTestCategory } = require("../services/testCategories");
 const {
@@ -53,7 +54,7 @@ function normalizeSelectedSecuritySeverities(input) {
 
 function categoryGenerationInstruction(categories, securitySubcategories, securitySeverities) {
   const labels = categories.join(", ");
-  let instruction = `\n\nTEST CATEGORY SCOPE SELECTED BY THE HUMAN REVIEWER:\n${labels}\nGenerate scenarios only for these selected testing categories. Treat category as the PURPOSE of the test, separately from scenario type (positive/negative/boundary/functional). Make each scenario's title, preconditions and expected behaviour clearly reflect its intended testing category without inventing requirements that are absent from the business story or discovery evidence. When multiple categories are selected, distribute the suite across them where the supplied evidence genuinely supports doing so. SECURITY means evidence-supported security-functional checks only; do not invent vulnerabilities. PERFORMANCE means evidence-supported response/page timing checks only. ACCESSIBILITY means evidence-supported accessibility checks. API applies only when the supplied story/discovery supports an API-related scenario. LOAD and STRESS are planning/reporting categories in this browser flow; do not simulate concurrency or claim true load/stress execution through normal browser actions.`;
+  let instruction = `\n\nTEST CATEGORY SCOPE SELECTED BY THE HUMAN REVIEWER:\n${labels}\nGenerate scenarios only for these selected testing categories. Treat category as the PURPOSE of the test, separately from scenario type (positive/negative/boundary). Functional is a Test Category and must never be used as a Scenario Type. Make each scenario's title, preconditions and expected behaviour clearly reflect its intended testing category without inventing requirements that are absent from the business story or discovery evidence. Never repurpose an unrelated discovered control to imitate a story feature. When multiple categories are selected, distribute the suite across them where the supplied evidence genuinely supports doing so. SECURITY means evidence-supported security-functional checks only; do not invent vulnerabilities. PERFORMANCE means evidence-supported response/page timing checks only. ACCESSIBILITY means evidence-supported accessibility checks. API applies only when the supplied story/discovery supports an API-related scenario. LOAD and STRESS are planning/reporting categories in this browser flow; do not simulate concurrency or claim true load/stress execution through normal browser actions.`;
   if (categories.includes('SECURITY')) {
     instruction += `\n\nSECURITY SCOPE SELECTED BY THE HUMAN REVIEWER:\nSubcategories: ${securitySubcategories.join(', ')}\nSeverities: ${securitySeverities.join(', ')}\nFor every SECURITY case, include securitySubcategory and severity fields. Use only the selected security subcategories and severities. Severity describes security impact, not execution priority. Generate only safe security-functional checks grounded in the supplied story/page evidence. Dependency vulnerability scanning, active exploitation, network attacks, password spraying and destructive tests must not be represented as ordinary executable browser tests.`;
   }
@@ -115,9 +116,21 @@ router.post("/api/chat", async (req, res) => {
       const discoveryResult = await discoverPagesCached(discoveryUrls, Boolean(bypassDiscoveryCache));
       session.pageDiscoveries = discoveryResult.pages;
       const discoveryMs = Date.now() - discoveryStartedAt;
+      const modelDiscoveries = compactDiscoveriesForModel(session.pageDiscoveries);
+
+      stage = "story/discovery validation";
+      const compatibility = validateStoryDiscoveryCompatibility(story, modelDiscoveries);
+      session.storyDiscoveryCompatibility = compatibility;
+      if (!compatibility.compatible) {
+        return res.status(422).json({
+          reply: mismatchMessage(compatibility, targetUrl),
+          code: "STORY_DISCOVERY_MISMATCH",
+          scopeCompatibility: compatibility,
+          pageDiscoveries: session.pageDiscoveries,
+        });
+      }
 
       stage = "AI test generation";
-      const modelDiscoveries = compactDiscoveriesForModel(session.pageDiscoveries);
       const aiStartedAt = Date.now();
       const generationStory = `${story}${categoryGenerationInstruction(categories, securitySubcategories, securitySeverities)}`;
       const generated = await qwen.generateTestCases({ story: generationStory, pageDiscoveries: modelDiscoveries, environment: FIXED_ENVIRONMENT, modelTier: session.aiModelTier });
@@ -141,6 +154,7 @@ router.post("/api/chat", async (req, res) => {
         automationReadiness: session.automationReadiness, readinessPending: true, selectedTestCategories: categories,
         selectedSecuritySubcategories: securitySubcategories, selectedSecuritySeverities: securitySeverities,
         maxGeneratedCases: MAX_GENERATED_CASES, aiModelTier: session.aiModelTier,
+        storyDiscoveryCompatibility: compatibility,
         generationTiming: { discoveryMs, discoveryCacheHit: discoveryResult.cacheHit, discoveryCacheBypassed: discoveryResult.bypassed, aiGenerationMs, totalMs },
       });
     }
