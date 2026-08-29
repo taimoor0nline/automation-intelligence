@@ -7,6 +7,7 @@ const qwen = require("../services/qwenClient");
 const { buildAnalyticsReport } = require("../services/reportGenerator");
 
 const jobs = new Map();
+const JOB_TTL_MS = 30 * 60 * 1000;
 
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
@@ -20,6 +21,11 @@ function analysisConcurrency() {
 
 function key(sessionId, jobId) {
   return `${sessionId}:${jobId}`;
+}
+
+function scheduleExpiry(job) {
+  const timer = setTimeout(() => jobs.delete(key(job.sessionId, job.jobId)), JOB_TTL_MS);
+  timer.unref?.();
 }
 
 function send(job, type, payload = {}) {
@@ -138,8 +144,8 @@ async function runJob(job, sessionId, session, failures) {
         });
       }
 
-      // Avoid rewriting a potentially large HTML report for every single result.
-      // The UI receives every result immediately; server report checkpoints every 5 items.
+      // UI receives every result immediately; the server-side HTML report checkpoints
+      // every five results to avoid repeated large file writes for 100+ failures.
       if (job.completed % 5 === 0 || job.completed === failures.length) {
         updateReport(sessionId, session, job.results);
         send(job, "ANALYSIS_CHECKPOINT", {
@@ -177,6 +183,7 @@ async function runJob(job, sessionId, session, failures) {
     try { client.end(); } catch {}
   }
   job.clients.clear();
+  scheduleExpiry(job);
 }
 
 router.post("/api/test-results/analyze/start", (req, res) => {
@@ -226,6 +233,7 @@ router.post("/api/test-results/analyze/start", (req, res) => {
       try { client.end(); } catch {}
     }
     job.clients.clear();
+    scheduleExpiry(job);
   }));
 
   return res.status(202).json({
