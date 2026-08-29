@@ -97,7 +97,7 @@
     ensureModeSwitch();
     setupOptionalWebAuth();
     try{
-      const health=await fetch('/health').then(r=>r.json());
+      const health=window.aiTestPilotGetHealth?await window.aiTestPilotGetHealth():await fetch('/health').then(r=>r.json());
       if(!health.database?.configured&&!sessionStorage.getItem(MODE_KEY))showDemoModeChooser();
     }catch{}
   }
