@@ -224,8 +224,6 @@
       const onEvent = async (type, data) => {
         if (type === 'DISCOVERY_COMPLETED') {
           status(`Page discovery complete in ${data.durationMs || 0} ms · generating ${total} test case(s)…`);
-        } else if (type === 'GENERATION_PLAN') {
-          status(`${data.units?.length || total} generation unit(s) planned · generation + readiness streaming together…`);
         } else if (type === 'BATCH_COMPLETED') {
           mergeGeneratedCases(data.cases || []);
           generatedCount = Math.max((testCases || []).length, Number(data.generatedSoFar || 0));
