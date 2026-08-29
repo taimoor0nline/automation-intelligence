@@ -165,11 +165,11 @@
     const remaining = Math.max(0, total - completed);
     let waiting = '';
     if (progress.type === 'TEST_STARTED' && progress.currentTestCaseId) {
-      waiting = `<div class="empty" style="padding:18px 12px">Executing ${esc(progress.currentTestCaseId)} in a fresh controlled Chrome instance…</div>`;
+      waiting = `<div class="empty" style="padding:18px 12px">Executing ${esc(progress.currentTestCaseId)} in a controlled Chrome instance…</div>`;
     } else if (progress.status === 'FINALIZING') {
-      waiting = '<div class="empty" style="padding:18px 12px">All tests executed · verifying final Chromium cleanup and building analytics…</div>';
+      waiting = '<div class="empty" style="padding:18px 12px">All tests executed · verifying final Chromium cleanup and preparing results…</div>';
     } else if (remaining > 0) {
-      waiting = `<div class="empty" style="padding:18px 12px">${remaining} test${remaining === 1 ? '' : 's'} remaining · next test starts in a fresh Chrome instance after evidence capture and cleanup.</div>`;
+      waiting = `<div class="empty" style="padding:18px 12px">${remaining} test${remaining === 1 ? '' : 's'} remaining · the next approved test will start after evidence capture and browser cleanup.</div>`;
     }
     results.innerHTML = rows + waiting;
   }
@@ -192,7 +192,7 @@
       if (event.type === 'RUN_COMPLETED') state.completed = true;
       else if (event.type === 'RUN_FAILED') {
         state.completed = true;
-        state.error = event.error || 'Isolated execution failed.';
+        state.error = event.error || 'Execution failed.';
       }
     } catch (err) {
       console.warn('[execution-sse] Could not parse event', err);
@@ -248,14 +248,17 @@
       clearError();
       const approved = [...document.querySelectorAll('.case-check:checked')].map((el) => el.value);
       if (!approved.length) { showError('Select at least one test case.'); return; }
-      setBusy(runButton, true, 'Starting isolated tests…');
-      setActivityStatus('Starting run', true);
+      setBusy(runButton, true, 'Starting tests…');
+      setActivityStatus('Starting execution', true);
+      window.dispatchEvent(new CustomEvent('testnexus:execution-starting', { detail: { approvedIds: approved } }));
       const results = document.getElementById('results');
-      if (results) results.innerHTML = `<div class="activity-alert">Starting isolated browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will execute one-by-one. Each test captures evidence, pauses, closes its owned Chrome, then starts the next test in a fresh browser.</small></div>`;
+      if (results) results.innerHTML = `<div class="activity-alert">Starting browser execution…<small>${approved.length} approved test${approved.length === 1 ? '' : 's'} will execute one-by-one. Each test captures evidence, closes its controlled Chrome instance, then continues with the next approved test.</small></div>`;
       const analysis = document.getElementById('analysis');
       if (analysis) analysis.innerHTML = '';
       const reportBox = document.getElementById('reportBox');
       if (reportBox) reportBox.style.display = 'none';
+      const reportActions = document.getElementById('executionReportActions');
+      if (reportActions) reportActions.style.display = 'none';
 
       const streamState = { controller: new AbortController(), completed: false, error: null, lastEvent: null };
       let streamPromise = null;
@@ -266,28 +269,33 @@
           body: JSON.stringify({ sessionId, approvedIds: approved, reviewedTestCases: testCases }),
         });
         const startData = await startResponse.json();
-        if (!startResponse.ok) throw new Error(startData.reply || 'Could not start isolated execution.');
+        if (!startResponse.ok) throw new Error(startData.reply || 'Could not start execution.');
         setActivityStatus(`Running 0/${startData.total}`, true);
+        window.dispatchEvent(new CustomEvent('testnexus:execution-started', { detail: { total: startData.total, approvedIds: approved } }));
         await streamPromise;
         if (streamState.error) throw new Error(streamState.error);
 
         const finalData = await loadFinalResult();
-        if (typeof window.renderResults === 'function') window.renderResults(finalData.summary, finalData.failureAnalyses || []);
-        else if (typeof renderResults === 'function') renderResults(finalData.summary, finalData.failureAnalyses || []);
+        if (typeof window.renderResults === 'function') window.renderResults(finalData.summary, []);
+        else if (typeof renderResults === 'function') renderResults(finalData.summary, []);
         setTimeout(() => decorateFinalEvidence(finalData.summary), 0);
 
         if (finalData.reportUrl) {
           const link = document.getElementById('reportLink');
           const box = document.getElementById('reportBox');
           if (link) link.href = finalData.reportUrl;
-          if (box) box.style.display = 'block';
+          if (box) box.style.display = 'none';
         }
         setActivityStatus('Completed', false);
+        window.dispatchEvent(new CustomEvent('testnexus:execution-completed', {
+          detail: { summary: finalData.summary, reportUrl: finalData.reportUrl || null }
+        }));
       } catch (err) {
         streamState.controller.abort();
         if (streamPromise) await streamPromise.catch(() => {});
         showError(err.message || 'Execution failed.');
         setActivityStatus('Error', false);
+        window.dispatchEvent(new CustomEvent('testnexus:execution-failed', { detail: { error: err.message || 'Execution failed.' } }));
       } finally {
         streamState.controller.abort();
         setBusy(runButton, false, '');
