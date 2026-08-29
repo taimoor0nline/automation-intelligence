@@ -84,6 +84,7 @@ router.use(require('./defectWorkflows'));
 router.use(require('./progressiveGeneration'));
 router.use(require('./readinessBatch'));
 router.use(require('./isolatedExecution'));
+router.use(require('./failureAnalysisStream'));
 router.use(require('./restDemo'));
 router.use(require('./restApi'));
 
