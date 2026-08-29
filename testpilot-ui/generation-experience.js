@@ -39,6 +39,7 @@
 
     loadScript('/generation-types.js', 'data-generation-types');
     loadScript('/progressive-generation.js', 'data-progressive-generation');
+    loadScript('/review-filters.js', 'data-review-filters');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
