@@ -41,6 +41,7 @@ const jsFiles = [
   'testpilot-ui/generation-experience.js',
   'testpilot-ui/readiness.js',
   'testpilot-ui/readiness-batch.js',
+  'testpilot-ui/rest-request-template.js',
 ];
 
 const errors = [];
@@ -164,6 +165,11 @@ for (const marker of ['/api/test-runs/start', '/api/test-runs/events/:sessionId'
 const isolatedRunner = fs.readFileSync(path.join(root, 'server/services/isolatedSuiteRunner.js'), 'utf8');
 for (const marker of ['generateAutomation', 'runnerOptions', 'isolated-per-test', 'post-test verification']) {
   if (!isolatedRunner.includes(marker)) errors.push(`isolated suite runner missing marker: ${marker}`);
+}
+
+const restHelper = fs.readFileSync(path.join(root, 'testpilot-ui/rest-request-template.js'), 'utf8');
+for (const marker of ['__aiTestPilotRestIsolatedExecution', '/api/test-runs/start', '/api/test-runs/events/', '/api/test-runs/result/', 'isolated REST execution', 'completionPauseMs']) {
+  if (!restHelper.includes(marker)) errors.push(`REST isolated execution UI missing marker: ${marker}`);
 }
 
 const restUi = path.join(root, 'testpilot-ui/rest.html');
