@@ -85,6 +85,7 @@ router.post("/api/reports/:sessionId/generate", allowQaManager, (req, res) => {
       environment: session.environment,
       summary,
       analyses: Array.isArray(session.failureAnalyses) ? session.failureAnalyses : [],
+      testCases: Array.isArray(session.testCases) ? session.testCases : [],
     });
 
     if (!html) {
