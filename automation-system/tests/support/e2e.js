@@ -1,4 +1,4 @@
-// AI TestPilot — automation support file
+// TestNexus AI — automation support file
 // Global behaviour for deterministic browser automation specs.
 
 require("cypress-axe");
@@ -43,6 +43,7 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
   const username = Cypress.env("TEST_USERNAME");
   const password = Cypress.env("TEST_PASSWORD");
   const loginPath = Cypress.env("LOGIN_PATH") || "/";
+  const successPath = Cypress.env("LOGIN_SUCCESS_PATH") || "";
   const usernameSelector = Cypress.env("LOGIN_USERNAME_SELECTOR");
   const passwordSelector = Cypress.env("LOGIN_PASSWORD_SELECTOR");
   const submitSelector = Cypress.env("LOGIN_SUBMIT_SELECTOR");
@@ -54,6 +55,13 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
   cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
   cy.get(passwordSelector).clear({ log: false }).type(String(password), { log: false });
   cy.get(submitSelector).click();
+
+  // Do not let the next-page actions run until the application proves that
+  // authentication completed. The expected path is derived from discovery and
+  // the approved automation plan, not hard-coded for a specific application.
+  if (successPath && successPath !== loginPath) {
+    cy.location("pathname", { timeout: 15000 }).should("eq", successPath);
+  }
 });
 
 ["click", "type", "select", "check", "uncheck", "clear"].forEach((commandName) => {
