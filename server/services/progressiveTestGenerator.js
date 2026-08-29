@@ -9,9 +9,7 @@ const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_T
 const MAX_RETRIES = Math.max(0, Math.min(Math.trunc(numberEnv(process.env.QWEN_MAX_RETRIES, 1)), 3));
 
 function ensureConfigured() {
-  if (!process.env.QWEN_API_KEY || !process.env.QWEN_BASE_URL) {
-    throw new Error('AI provider is not configured.');
-  }
+  if (!process.env.QWEN_API_KEY || !process.env.QWEN_BASE_URL) throw new Error('AI provider is not configured.');
 }
 
 function parseJsonContent(raw) {
@@ -32,10 +30,7 @@ async function callModel(systemPrompt, userPayload, { modelTier = 'fast', attemp
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.QWEN_API_KEY}` },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: JSON.stringify(userPayload) },
-        ],
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: JSON.stringify(userPayload) }],
         response_format: { type: 'json_object' },
         temperature: 0.05,
       }),
@@ -60,16 +55,16 @@ async function callModel(systemPrompt, userPayload, { modelTier = 'fast', attemp
   } finally { clearTimeout(timeout); }
 }
 
-const BATCH_PROMPT = `You are a senior QA test analyst. Generate a SMALL evidence-grounded batch of test cases for one explicit testing scope.
+const BATCH_PROMPT = `You are a senior QA test analyst. Generate a SMALL evidence-grounded batch for one explicit testing scope.
 
 Rules:
-- The business story defines scope. Discovered pages/controls provide evidence; discovery never broadens the business requirement.
+- The business story defines scope. Discovered pages/controls provide evidence; discovery never broadens the requirement.
 - Generate exactly requestedTestCaseCount cases.
-- Generate only the requestedCategory for this batch. Do not include or discuss other categories.
-- Scenario type is separate from category and may be positive, negative, boundary or functional.
-- Never invent selectors, pages, validation rules, messages, boundaries, options or business rules absent from the story/discovery.
+- Generate only requestedCategory. Do not include or discuss other categories.
+- Generate only requestedScenarioType. Category and scenario type are separate dimensions.
+- Never invent selectors, pages, validation rules, messages, boundaries, options or business rules absent from story/discovery evidence.
 - Use discovered selectors exactly when technical targets are needed.
-- Avoid duplicating titles listed in excludeTitles. Prefer materially different scenarios.
+- Avoid titles listed in excludeTitles and produce materially different scenarios.
 - Tests describe EXPECTED behavior. Do not manufacture failures.
 - SECURITY means safe security-functional checks only and must remain within supplied evidence.
 - PERFORMANCE means single-user page/API timing expectations only.
@@ -93,11 +88,12 @@ Return JSON only:
   }]
 }`;
 
-function normalizeCaseShape(testCase, category) {
+function normalizeCaseShape(testCase, category, scenarioType) {
   const tc = testCase && typeof testCase === 'object' ? testCase : {};
+  const requestedType = ['positive','negative','boundary','functional'].includes(String(scenarioType || '').toLowerCase()) ? String(scenarioType).toLowerCase() : 'functional';
   return {
     title: String(tc.title || '').trim(),
-    type: ['positive','negative','boundary','functional'].includes(String(tc.type || '').toLowerCase()) ? String(tc.type).toLowerCase() : 'functional',
+    type: requestedType,
     priority: ['low','medium','high'].includes(String(tc.priority || '').toLowerCase()) ? String(tc.priority).toLowerCase() : 'medium',
     testCategory: category,
     securitySubcategory: category === 'SECURITY' ? String(tc.securitySubcategory || '').trim().toUpperCase() || null : null,
@@ -109,20 +105,21 @@ function normalizeCaseShape(testCase, category) {
   };
 }
 
-async function generateBatch({ story, pageDiscoveries, environment, category, count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
+async function generateBatch({ story, pageDiscoveries, environment, category, scenarioType = 'functional', count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
   const requestedCount = Math.max(1, Math.min(Number(count) || 1, 5));
   const result = await callModel(BATCH_PROMPT, {
     story,
     pageDiscoveries,
     environment,
     requestedCategory: category,
+    requestedScenarioType: scenarioType,
     requestedTestCaseCount: requestedCount,
     excludeTitles: excludeTitles.slice(-20),
     securityScope: category === 'SECURITY' ? { subcategories: securitySubcategories, severities: securitySeverities } : null,
   }, { modelTier });
-  if (!Array.isArray(result?.testCases) || result.testCases.length === 0) throw new Error(`AI returned no ${category} test cases.`);
-  const cases = result.testCases.slice(0, requestedCount).map((tc) => normalizeCaseShape(tc, category));
-  if (cases.some((tc) => !tc.title || !tc.steps.length || !tc.expectedResults.length)) throw new Error(`AI returned an incomplete ${category} generation batch.`);
+  if (!Array.isArray(result?.testCases) || result.testCases.length === 0) throw new Error(`AI returned no ${category}/${scenarioType} test cases.`);
+  const cases = result.testCases.slice(0, requestedCount).map((tc) => normalizeCaseShape(tc, category, scenarioType));
+  if (cases.some((tc) => !tc.title || !tc.steps.length || !tc.expectedResults.length)) throw new Error(`AI returned an incomplete ${category}/${scenarioType} generation batch.`);
   return { feature: result.feature || null, testCases: cases };
 }
 
