@@ -12,7 +12,6 @@
     document.getElementById('exportExecutionExcelBtn').addEventListener('click',exportExcel);
     return box;
   }
-  function currentSessionId(){try{return window.sessionId||sessionId||'';}catch{return window.sessionId||'';}}
   function testCaseFor(id){try{return (window.testCases||testCases||[]).find(x=>String(x.id).toUpperCase()===String(id).toUpperCase())||{};}catch{return {};}}
   function renderedRows(){
     const rows=[];
@@ -46,6 +45,7 @@
   function wrap(){const original=window.renderResults;if(typeof original!=='function'||original.__reportActionsWrapped)return;function wrapped(summary,analyses){const out=original.apply(this,arguments);capture(summary,analyses);return out;}wrapped.__reportActionsWrapped=true;window.renderResults=wrapped;try{renderResults=wrapped}catch{}}
   function start(){
     ensure();wrap();
+    window.addEventListener('testnexus:analysis-progress',(event)=>{const detail=event.detail||{};capture(detail.summary,detail.analyses);});
     let scheduled=false;const schedule=()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;wrap();refresh();});};
     const results=document.getElementById('results'),analysis=document.getElementById('analysis');
     const observer=new MutationObserver(schedule);if(results)observer.observe(results,{childList:true,subtree:true});if(analysis)observer.observe(analysis,{childList:true,subtree:true});
