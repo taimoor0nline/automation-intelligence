@@ -21,9 +21,7 @@
       .review-filter-row+.review-filter-row{margin-top:7px;grid-template-columns:repeat(3,minmax(140px,1fr)) auto}
       .review-filter-input,.review-filter-select{width:100%;height:36px;border:1px solid #dfe4ee;border-radius:8px;background:#fff;padding:0 10px;color:#344054;font-size:10.8px}
       .review-filter-input:focus,.review-filter-select:focus{outline:none;border-color:#7c91ff;box-shadow:0 0 0 3px rgba(47,91,255,.08)}
-      .review-filter-clear{width:36px;height:36px;min-width:36px!important;padding:0!important;display:inline-flex!important;align-items:center;justify-content:center;border-radius:9px!important;color:#64748b}
-      .review-filter-clear:hover{color:#1d4ed8;background:#eef2ff}
-      .review-filter-clear svg{width:16px;height:16px;pointer-events:none}
+      .review-filter-clear{width:36px;height:36px;display:grid;place-items:center;padding:0;border-radius:8px;font-size:15px;line-height:1}
       .review-filter-summary{font-size:10.5px;color:#667085;white-space:nowrap;text-align:right}
       .review-filter-empty{padding:34px 16px;text-align:center;color:#667085;font-size:11.5px}
       #cases.cases{max-height:680px;overflow-y:auto;scrollbar-gutter:stable}
@@ -43,7 +41,7 @@
         <select id="reviewType" class="review-filter-select" aria-label="Filter by scenario type">${optionHtml(TYPE_OPTIONS,'All scenario types')}</select>
         <select id="reviewCategory" class="review-filter-select" aria-label="Filter by test category">${optionHtml(CATEGORY_OPTIONS,'All categories')}</select>
         <select id="reviewPriority" class="review-filter-select" aria-label="Filter by priority">${optionHtml(PRIORITY_OPTIONS,'All priorities')}</select>
-        <button id="reviewClearFilters" class="btn ghost review-filter-clear" type="button" title="Clear review filters" aria-label="Clear review filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg></button>
+        <button id="reviewClearFilters" class="btn ghost review-filter-clear" type="button" title="Clear filters" aria-label="Clear filters">↺</button>
       </div>
       <div class="review-filter-row">
         <select id="reviewSecuritySubcategory" class="review-filter-select" aria-label="Filter by security subcategory">${optionHtml(SECURITY_OPTIONS,'All security areas')}</select>
@@ -53,13 +51,13 @@
       </div>`;
     cases.insertAdjacentElement('beforebegin', shell);
 
-    const bind = (id,key,event='change') => document.getElementById(id)?.addEventListener(event,(e)=>{state[key]=e.target.value; applyFilters();});
+    const bind = (id,key,event='change') => document.getElementById(id)?.addEventListener(event,(e)=>{state[key]=e.target.value; scheduleApply(0);});
     bind('reviewSearch','search','input'); bind('reviewType','type'); bind('reviewCategory','category'); bind('reviewPriority','priority'); bind('reviewSecuritySubcategory','securitySubcategory'); bind('reviewSeverity','severity'); bind('reviewReadiness','readiness');
     document.getElementById('reviewClearFilters')?.addEventListener('click',()=>{
       Object.assign(state,{search:'',type:'ALL',category:'ALL',priority:'ALL',securitySubcategory:'ALL',severity:'ALL',readiness:'ALL'});
       document.getElementById('reviewSearch').value='';
       ['reviewType','reviewCategory','reviewPriority','reviewSecuritySubcategory','reviewSeverity','reviewReadiness'].forEach((id)=>{const el=document.getElementById(id);if(el)el.value='ALL';});
-      applyFilters();
+      scheduleApply(0);
     });
   }
 
@@ -77,6 +75,7 @@
   }
 
   function applyFilters() {
+    if (window.__aiTestPilotSuspendReviewFilters) return;
     const cards = [...document.querySelectorAll('#cases .case')];
     let shown = 0;
     cards.forEach((card,index)=>{
@@ -97,12 +96,21 @@
     } else if (empty) empty.style.display='none';
   }
 
+  let applyTimer = 0;
+  function scheduleApply(delay=80) {
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(() => {
+      applyTimer = 0;
+      if (!window.__aiTestPilotSuspendReviewFilters) requestAnimationFrame(applyFilters);
+    }, delay);
+  }
+
   function observeCases() {
     const cases = document.getElementById('cases');
     if (!cases) return;
-    new MutationObserver(()=>queueMicrotask(applyFilters)).observe(cases,{childList:true,subtree:false});
+    new MutationObserver(()=>scheduleApply(120)).observe(cases,{childList:true,subtree:false});
   }
 
-  function start(){installStyles();installToolbar();observeCases();applyFilters();}
+  function start(){installStyles();installToolbar();observeCases();scheduleApply(0);}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
