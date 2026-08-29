@@ -3,6 +3,20 @@
   const sessionId = body?.dataset?.reportSessionId || '';
   if (!sessionId) return;
 
+  function removeAssertionGroundingSection() {
+    const heading = Array.from(document.querySelectorAll('h2.section-title'))
+      .find((node) => String(node.textContent || '').trim().toLowerCase() === 'assertion grounding & capability coverage');
+    if (!heading) return;
+    let node = heading;
+    while (node) {
+      const next = node.nextElementSibling;
+      node.remove();
+      node = next;
+    }
+  }
+
+  removeAssertionGroundingSection();
+
   const cells = new Map(
     Array.from(document.querySelectorAll('[data-analysis-case]'))
       .map((cell) => [String(cell.dataset.analysisCase || '').toUpperCase(), cell])
