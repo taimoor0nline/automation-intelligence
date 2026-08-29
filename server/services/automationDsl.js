@@ -1,1 +1,1 @@
-module.exports = require("./automationDslV6");
+module.exports = require("./automationDslV7");
