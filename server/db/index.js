@@ -1,27 +1,37 @@
-const { Pool } = require('pg');
+function envTrue(value, fallback = false) {
+  if (value == null || value === '') return fallback;
+  return ['true', '1', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
 
-const explicitlyEnabled = !['false','0','no','off'].includes(String(process.env.DATABASE_ENABLED ?? 'true').toLowerCase());
+// PostgreSQL is strictly opt-in. A DATABASE_URL alone must never enable it.
+const explicitlyEnabled = envTrue(process.env.DATABASE_ENABLED, false);
 const connectionString = process.env.DATABASE_URL || '';
-const required = explicitlyEnabled && String(process.env.DATABASE_REQUIRED || '').toLowerCase() === 'true';
+const required = explicitlyEnabled && envTrue(process.env.DATABASE_REQUIRED, false);
 const connectionTimeoutMs = Math.max(500, Math.min(Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS || 1500), 10000));
 const healthTimeoutMs = Math.max(750, Math.min(Number(process.env.DATABASE_HEALTH_TIMEOUT_MS || 1800), 12000));
+let Pool = null;
 let pool = null;
 
 function isEnabled() { return explicitlyEnabled; }
 function isConfigured() { return explicitlyEnabled && Boolean(connectionString); }
 function isRequired() { return required; }
+
 function getPool() {
+  // Hard gate: when disabled, do not load pg, create a pool, resolve the host,
+  // open a socket, or perform any PostgreSQL network activity.
   if (!explicitlyEnabled) return null;
   if (!isConfigured()) {
-    if (required) throw new Error('DATABASE_URL is required but not configured.');
+    if (required) throw new Error('DATABASE_URL is required because DATABASE_ENABLED=true and DATABASE_REQUIRED=true.');
     return null;
   }
+
+  if (!Pool) ({ Pool } = require('pg'));
   if (!pool) {
     pool = new Pool({
       connectionString,
       max: Number(process.env.DATABASE_POOL_MAX || 10),
       connectionTimeoutMillis: connectionTimeoutMs,
-      ssl: String(process.env.DATABASE_SSL || '').toLowerCase() === 'true' ? { rejectUnauthorized: false } : undefined,
+      ssl: envTrue(process.env.DATABASE_SSL, false) ? { rejectUnauthorized: false } : undefined,
     });
     pool.on('error', (err) => console.error('[postgres] pool error', err));
   }
@@ -52,7 +62,16 @@ async function withTransaction(work) {
 }
 
 async function health() {
-  if (!explicitlyEnabled) return { enabled: false, configured: false, connected: false, required: false };
+  if (!explicitlyEnabled) {
+    return {
+      enabled: false,
+      configured: false,
+      connected: false,
+      required: false,
+      skipped: true,
+      reason: 'DATABASE_ENABLED=false',
+    };
+  }
   if (!isConfigured()) return { enabled: true, configured: false, connected: false, required };
 
   let timer = null;
