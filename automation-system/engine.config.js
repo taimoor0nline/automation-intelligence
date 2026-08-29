@@ -110,6 +110,8 @@ module.exports = defineConfig({
       REST_AUTH_SECRET: process.env.REST_AUTH_SECRET || "",
       REST_AUTH_HEADER: process.env.REST_AUTH_HEADER || "",
       DEMO_STEP_DELAY_MS: Math.max(0, Math.min(numberEnv(process.env.DEMO_STEP_DELAY_MS, 0), 3000)),
+      SCREENSHOT_EACH_TEST: boolEnv(process.env.AUTOMATION_SCREENSHOT_EACH_TEST, true),
+      TEST_COMPLETION_PAUSE_MS: Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS, 5000), 30000)),
     },
     setupNodeEvents(on, config) {
       on("before:browser:launch", (browser, launchOptions) => {
