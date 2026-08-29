@@ -12,6 +12,12 @@ function boolEnv(value, fallback = false) {
   return !['false', '0', 'no', 'off'].includes(String(value).toLowerCase());
 }
 
+function visualBaselineMode() {
+  const explicit = String(process.env.AUTOMATION_VISUAL_BASELINE_MODE || '').trim().toLowerCase();
+  if (['compare', 'create-missing'].includes(explicit)) return explicit;
+  return boolEnv(process.env.AUTOMATION_VISUAL_UPDATE_BASELINES, false) ? 'create-missing' : 'compare';
+}
+
 function safeName(value, label = 'file') {
   const name = String(value || '').trim();
   if (!name || name.includes('..') || /[\\/]/.test(name)) throw new Error(`${label} must be a safe file name.`);
@@ -56,8 +62,8 @@ function compareVisual({ actualName, baselineName, threshold = 0.1, maxDiffRatio
   fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
 
   if (!fs.existsSync(baselinePath)) {
-    if (!boolEnv(process.env.AUTOMATION_VISUAL_UPDATE_BASELINES, false)) {
-      throw new Error(`Visual baseline does not exist: ${baselineFile}. Set AUTOMATION_VISUAL_UPDATE_BASELINES=true only when intentionally approving a new baseline.`);
+    if (visualBaselineMode() !== 'create-missing') {
+      throw new Error(`Visual baseline does not exist: ${baselineFile}. Keep AUTOMATION_VISUAL_BASELINE_MODE=compare for normal runs; use create-missing only while intentionally approving the first baseline.`);
     }
     fs.copyFileSync(actualPath, baselinePath);
     return { matched: true, createdBaseline: true, diffPixels: 0, totalPixels: 0, diffRatio: 0, baseline: baselineFile };
@@ -131,6 +137,19 @@ function namedDbQueries() {
   }
 }
 
+function namedDbQueryDefinition(queryName) {
+  const value = namedDbQueries()[String(queryName || '')];
+  if (!value) throw new Error(`Named database assertion query is not configured: ${queryName || 'missing query name'}`);
+  if (typeof value === 'string') return { sql: value, params: [] };
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return {
+      sql: String(value.sql || ''),
+      params: Array.isArray(value.params) ? value.params.map(String).filter(Boolean) : [],
+    };
+  }
+  throw new Error(`Named database assertion query has an invalid definition: ${queryName}`);
+}
+
 function validateReadOnlySql(sql) {
   const text = String(sql || '').trim();
   if (!/^(select|with)\b/i.test(text)) throw new Error('Named database assertions must be read-only SELECT/WITH queries.');
@@ -144,12 +163,16 @@ async function databaseAssertion({ queryName, params = [] } = {}) {
   if (!boolEnv(process.env.AUTOMATION_DB_ASSERTIONS_ENABLED, false)) throw new Error('Database assertions are disabled. Set AUTOMATION_DB_ASSERTIONS_ENABLED=true to use named read-only checks.');
   const connectionString = String(process.env.AUTOMATION_DB_ASSERTION_URL || '').trim();
   if (!connectionString) throw new Error('AUTOMATION_DB_ASSERTION_URL is required for database assertions.');
-  const queries = namedDbQueries();
-  const sql = validateReadOnlySql(queries[String(queryName || '')]);
+  const definition = namedDbQueryDefinition(queryName);
+  const sql = validateReadOnlySql(definition.sql);
+  const suppliedParams = Array.isArray(params) ? params : [];
+  if (definition.params.length !== suppliedParams.length) {
+    throw new Error(`Named database assertion ${queryName} requires ${definition.params.length} parameter(s): ${definition.params.join(', ') || 'none'}.`);
+  }
   const { Pool } = require('pg');
   const pool = new Pool({ connectionString, max: 1, connectionTimeoutMillis: Math.max(500, Number(process.env.AUTOMATION_DB_ASSERTION_TIMEOUT_MS || 3000)) });
   try {
-    const result = await pool.query(sql, Array.isArray(params) ? params : []);
+    const result = await pool.query(sql, suppliedParams);
     return { rowCount: result.rowCount, rows: result.rows, first: result.rows?.[0] || null };
   } finally {
     await pool.end().catch(() => {});
@@ -177,7 +200,9 @@ async function externalAdapter({ capability, action = 'assert', payload = {} } =
   const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(process.env.AUTOMATION_EXTERNAL_ADAPTER_TIMEOUT_MS || 15000)));
   try {
     const headers = { 'Content-Type': 'application/json' };
-    if (process.env.AUTOMATION_EXTERNAL_ADAPTER_TOKEN) headers.Authorization = `Bearer ${process.env.AUTOMATION_EXTERNAL_ADAPTER_TOKEN}`;
+    const tokenEnvKey = String(process.env.AUTOMATION_EXTERNAL_ADAPTER_TOKEN_ENV || '').trim();
+    const token = String(process.env.AUTOMATION_EXTERNAL_ADAPTER_TOKEN || (tokenEnvKey ? process.env[tokenEnvKey] : '') || '').trim();
+    if (token) headers.Authorization = `Bearer ${token}`;
     const response = await fetch(`${baseUrl}/capabilities/${encodeURIComponent(cap.toLowerCase())}`, {
       method: 'POST', headers, signal: controller.signal,
       body: JSON.stringify({ capability: cap, action: String(action || 'assert'), payload: payload && typeof payload === 'object' ? payload : {} }),
@@ -209,5 +234,7 @@ module.exports = {
   extractDownloadedDocument,
   databaseAssertion,
   externalAdapter,
+  namedDbQueryDefinition,
+  visualBaselineMode,
   EXTERNAL_CAPABILITIES,
 };
