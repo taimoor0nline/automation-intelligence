@@ -21,11 +21,13 @@
       .review-filter-row+.review-filter-row{margin-top:7px;grid-template-columns:repeat(3,minmax(140px,1fr)) auto}
       .review-filter-input,.review-filter-select{width:100%;height:36px;border:1px solid #dfe4ee;border-radius:8px;background:#fff;padding:0 10px;color:#344054;font-size:10.8px}
       .review-filter-input:focus,.review-filter-select:focus{outline:none;border-color:#7c91ff;box-shadow:0 0 0 3px rgba(47,91,255,.08)}
-      .review-filter-clear{height:36px;white-space:nowrap}
+      .review-filter-clear{width:36px;height:36px;min-width:36px!important;padding:0!important;display:inline-flex!important;align-items:center;justify-content:center;border-radius:9px!important;color:#64748b}
+      .review-filter-clear:hover{color:#1d4ed8;background:#eef2ff}
+      .review-filter-clear svg{width:16px;height:16px;pointer-events:none}
       .review-filter-summary{font-size:10.5px;color:#667085;white-space:nowrap;text-align:right}
       .review-filter-empty{padding:34px 16px;text-align:center;color:#667085;font-size:11.5px}
       #cases.cases{max-height:680px;overflow-y:auto;scrollbar-gutter:stable}
-      @media(max-width:1000px){.review-filter-row,.review-filter-row+.review-filter-row{grid-template-columns:1fr 1fr}.review-filter-summary{text-align:left}.review-filter-clear{width:100%}}
+      @media(max-width:1000px){.review-filter-row,.review-filter-row+.review-filter-row{grid-template-columns:1fr 1fr}.review-filter-summary{text-align:left}.review-filter-clear{width:36px}}
     `;
     document.head.appendChild(style);
   }
@@ -41,7 +43,7 @@
         <select id="reviewType" class="review-filter-select" aria-label="Filter by scenario type">${optionHtml(TYPE_OPTIONS,'All scenario types')}</select>
         <select id="reviewCategory" class="review-filter-select" aria-label="Filter by test category">${optionHtml(CATEGORY_OPTIONS,'All categories')}</select>
         <select id="reviewPriority" class="review-filter-select" aria-label="Filter by priority">${optionHtml(PRIORITY_OPTIONS,'All priorities')}</select>
-        <button id="reviewClearFilters" class="btn ghost review-filter-clear" type="button">Clear filters</button>
+        <button id="reviewClearFilters" class="btn ghost review-filter-clear" type="button" title="Clear review filters" aria-label="Clear review filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg></button>
       </div>
       <div class="review-filter-row">
         <select id="reviewSecuritySubcategory" class="review-filter-select" aria-label="Filter by security subcategory">${optionHtml(SECURITY_OPTIONS,'All security areas')}</select>
