@@ -111,6 +111,7 @@ router.patch('/api/defects/:id/resolve', requireAuth, requireRole('DEV','QA','MA
 });
 
 router.use(require('./readinessBatch'));
+router.use(require('./isolatedExecution'));
 router.use(require('./restDemo'));
 router.use(require('./restApi'));
 
