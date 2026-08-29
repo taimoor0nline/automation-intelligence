@@ -13,6 +13,17 @@
     };
   }
 
+  function resetExecutionState() {
+    ['mTotal','mPassed','mFailed'].forEach((id) => { const el = $(id); if (el) el.textContent = '0'; });
+    if ($('mRate')) $('mRate').textContent = '0%';
+    if ($('results')) $('results').innerHTML = '<div class="empty">Waiting for execution.</div>';
+    if ($('analysis')) $('analysis').innerHTML = '';
+    if ($('reportBox')) $('reportBox').style.display = 'none';
+    if ($('reportLink')) $('reportLink').removeAttribute('href');
+    if ($('runBtn')) $('runBtn').disabled = true;
+    setActivityStatus('Generating 0', true);
+  }
+
   function queuedReadiness() {
     return {
       status: 'NEEDS_PREFLIGHT', automatable: false, reasonCode: 'READINESS_QUEUED',
@@ -72,13 +83,9 @@
     humanCounter = 1;
     testCases = [];
     window.__aiTestPilotProgressiveGenerationActive = true;
+    resetExecutionState();
     renderCases();
-    $('runBtn').disabled = true;
-    $('reportBox').style.display = 'none';
-    $('analysis').innerHTML = '';
-    $('results').innerHTML = '<div class="empty">Waiting for execution.</div>';
     $('cases').innerHTML = '<div class="activity-alert">Preparing progressive test generation…<small>Generated cases will appear here as each small AI work unit completes.</small></div>';
-    setActivityStatus('Generating 0', true);
     setBusy($('generateBtn'), true, 'Generating test cases…');
 
     const selection = generationSelection();
