@@ -10,6 +10,8 @@ const discovery = [{
     { selector: '#dragSource', id: 'dragSource', tag: 'div', text: 'Source' },
     { selector: '#dropTarget', id: 'dropTarget', tag: 'div', text: 'Target' },
     { selector: '#copyBtn', id: 'copyBtn', tag: 'button', text: 'Copy' },
+    { selector: '#submitBtn', id: 'submitBtn', tag: 'button', text: 'Submit' },
+    { selector: '#panel', id: 'panel', tag: 'div', text: 'Panel' },
   ],
   messages: [],
 }];
@@ -18,21 +20,35 @@ function tc(id, steps, expectedResults) {
   return { id, title: `Capability ${id}`, type: 'positive', priority: 'medium', preconditions: [], testData: {}, steps, expectedResults };
 }
 
+const oldVisualUpdate = process.env.AUTOMATION_VISUAL_UPDATE_BASELINES;
+process.env.AUTOMATION_VISUAL_UPDATE_BASELINES = 'true';
+
 const directCases = [
   tc('TC101', [{ action: 'Navigate to', target: 'page', value: '/feedback' }], ['LCP at most 2500 ms']),
-  tc('TC102', [{ action: 'Upload file', target: '#file', value: 'sample.pdf' }], ['Element #file exists']),
+  tc('TC102', [{ action: 'Upload file', target: '#file', value: 'sample.txt' }], ['Element #file exists']),
   tc('TC103', [{ action: 'Drag and drop', target: '#dragSource', value: '#dropTarget' }], ['Element #dropTarget is visible']),
   tc('TC104', [{ action: 'Navigate to', target: 'page', value: '/feedback' }], ['WebSocket message contains "ready"']),
   tc('TC105', [{ action: 'Click', target: '#copyBtn', value: null }], ['Clipboard contains "copied"']),
   tc('TC106', [{ action: 'Navigate to', target: 'page', value: '/feedback' }], ['Downloaded file "report.pdf" contains "Approved"']),
   tc('TC107', [{ action: 'Set browser permission', target: 'geolocation', value: 'granted' }, { action: 'Navigate to', target: 'page', value: '/feedback' }], ['Permission "geolocation" is granted']),
+  tc('TC108', [{ action: 'Navigate to', target: 'page', value: '/feedback' }], ['Visual screenshot #panel matches baseline "panel.png"']),
+  tc('TC109', [
+    { action: 'Navigate to', target: 'page', value: '/feedback' },
+    { action: 'Click', target: '#copyBtn', value: null },
+    { action: 'Upload file', target: '#file', value: 'sample.txt' },
+    { action: 'Click', target: '#submitBtn', value: null },
+  ], ['Element #panel is visible']),
 ];
 
 for (const item of directCases) {
   const compiled = compileTestCase(item, { pageDiscoveries: discovery, hasCredentials: false });
   assert.strictEqual(compiled.ok, true, `${item.id} should compile: ${compiled.reason || ''}`);
   item.automationReadiness = { status: 'READY', automationPlan: compiled.plan };
+  assert.strictEqual(compiled.plan.expectationCoverage?.percent, 100, `${item.id} advanced expectation coverage should be complete`);
 }
+
+if (oldVisualUpdate === undefined) delete process.env.AUTOMATION_VISUAL_UPDATE_BASELINES;
+else process.env.AUTOMATION_VISUAL_UPDATE_BASELINES = oldVisualUpdate;
 
 const operations = new Set(directCases.flatMap((item) => item.automationReadiness.automationPlan.assertions.map((assertion) => assertion.operation)));
 for (const expected of [
@@ -41,6 +57,7 @@ for (const expected of [
   'ASSERT_CLIPBOARD_CONTAINS',
   'ASSERT_DOWNLOADED_DOCUMENT_CONTAINS',
   'ASSERT_BROWSER_PERMISSION_EQUALS',
+  'ASSERT_VISUAL_MATCH',
 ]) assert.ok(operations.has(expected), `missing ${expected}`);
 
 const actionOperations = new Set(directCases.flatMap((item) => item.automationReadiness.automationPlan.actions.map((action) => action.operation)));
@@ -48,8 +65,18 @@ assert.ok(actionOperations.has('SELECT_FILE'));
 assert.ok(actionOperations.has('DRAG_DROP'));
 assert.ok(actionOperations.has('SET_PERMISSION_STATE'));
 
+const permissionOrder = directCases.find((item) => item.id === 'TC107').automationReadiness.automationPlan.actions.map((action) => action.operation);
+assert.ok(permissionOrder.indexOf('SET_PERMISSION_STATE') < permissionOrder.indexOf('NAVIGATE'), 'permission simulation must be installed before navigation');
+
+const mixedOrder = directCases.find((item) => item.id === 'TC109').automationReadiness.automationPlan.actions;
+const copyIndex = mixedOrder.findIndex((action) => action.operation === 'CLICK' && action.selector === '#copyBtn');
+const uploadIndex = mixedOrder.findIndex((action) => action.operation === 'SELECT_FILE');
+const submitIndex = mixedOrder.findIndex((action) => action.operation === 'CLICK' && action.selector === '#submitBtn');
+assert.ok(copyIndex >= 0 && uploadIndex > copyIndex && submitIndex > uploadIndex, 'reviewed click/upload/submit order must be preserved');
+
 const generated = generateDeterministicAutomation(directCases);
 assert.match(generated.script, /testNexusResolveUploadFixture/);
+assert.match(generated.script, /testNexusCompareVisual/);
 assert.match(generated.script, /DataTransfer/);
 assert.match(generated.script, /__testNexusWebVitals/);
 assert.match(generated.script, /__testNexusStreamMessages/);
