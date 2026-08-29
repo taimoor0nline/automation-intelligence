@@ -27,15 +27,8 @@
   function setGenerationUiState(active) {
     document.documentElement.classList.toggle('generation-active', active);
     document.body.classList.toggle('generation-active', active);
-    if (active) {
-      document.documentElement.style.overflowY = 'auto';
-      document.body.style.overflowY = 'auto';
-      document.body.style.overflowX = 'hidden';
-    } else {
-      document.documentElement.style.removeProperty('overflow-y');
-      document.body.style.removeProperty('overflow-y');
-      document.body.style.removeProperty('overflow-x');
-    }
+    const filters = document.getElementById('reviewFilterShell');
+    if (filters) filters.style.display = active ? 'none' : '';
   }
 
   function queuedReadiness() {
@@ -58,12 +51,8 @@
       const category = String(tc.testCategory || 'FUNCTIONAL').replaceAll('_',' ');
       const type = String(tc.type || 'functional');
       return `<div class="case generation-preview-case">
-        <div></div>
-        <div>
-          <div class="case-title">${escapeText(tc.id)} — ${escapeText(tc.title)}</div>
-          <div class="case-meta"><span class="tag">${escapeText(type)}</span><span class="tag">${escapeText(category)}</span><span class="tag preflight">Readiness queued</span></div>
-        </div>
-        <div></div>
+        <div></div><div><div class="case-title">${escapeText(tc.id)} — ${escapeText(tc.title)}</div>
+        <div class="case-meta"><span class="tag">${escapeText(type)}</span><span class="tag">${escapeText(category)}</span><span class="tag preflight">Readiness queued</span></div></div><div></div>
       </div>`;
     }).join('');
     casesEl.innerHTML = rows || '<div class="empty">Generating first test case…</div>';
@@ -73,10 +62,7 @@
   let previewFrame = 0;
   function scheduleStreamingPreview() {
     if (previewFrame) return;
-    previewFrame = requestAnimationFrame(() => {
-      previewFrame = 0;
-      renderStreamingPreview();
-    });
+    previewFrame = requestAnimationFrame(() => { previewFrame = 0; renderStreamingPreview(); });
   }
 
   function mergeIncoming(cases) {
@@ -86,8 +72,37 @@
     scheduleStreamingPreview();
   }
 
-  async function consumeSse(url, onEvent) {
-    const response = await fetch(url, { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
+  function authTokenPresent() {
+    try { return Boolean(sessionStorage.getItem('aiTestPilotToken')); } catch { return false; }
+  }
+
+  function consumeEventSource(url, onEvent) {
+    return new Promise((resolve, reject) => {
+      const source = new EventSource(url);
+      const eventNames = ['DISCOVERY_COMPLETED','GENERATION_PLAN','BATCH_STARTED','BATCH_COMPLETED','GENERATION_COMPLETED','GENERATION_FAILED'];
+      let finished = false;
+      const close = () => { if (!finished) finished = true; try { source.close(); } catch {} };
+      for (const name of eventNames) {
+        source.addEventListener(name, (event) => {
+          if (finished) return;
+          let data;
+          try { data = JSON.parse(event.data); } catch (err) { close(); reject(err); return; }
+          Promise.resolve(onEvent(name, data)).then(() => {
+            if (name === 'GENERATION_COMPLETED') { close(); resolve(); }
+            else if (name === 'GENERATION_FAILED') { close(); reject(new Error(data.message || 'Progressive generation failed.')); }
+          }).catch((err) => { close(); reject(err); });
+        });
+      }
+      source.onerror = () => {
+        if (finished) return;
+        if (source.readyState === EventSource.CLOSED) { close(); reject(new Error('Generation event stream closed unexpectedly.')); }
+      };
+    });
+  }
+
+  async function consumeFetchStream(url, onEvent) {
+    const fetchFn = window.__aiTestPilotNativeFetch || window.fetch.bind(window);
+    const response = await fetchFn(url, { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
     if (!response.ok) {
       let message = `Generation stream failed (${response.status}).`;
       try { const body = await response.json(); message = body.reply || message; } catch {}
@@ -101,10 +116,11 @@
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      let boundary;
-      while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+      let match;
+      while ((match = /\r?\n\r?\n/.exec(buffer))) {
+        const boundary = match.index;
         const frame = buffer.slice(0, boundary).trim();
-        buffer = buffer.slice(boundary + 2);
+        buffer = buffer.slice(boundary + match[0].length);
         if (!frame || frame.startsWith(':')) continue;
         let eventType = 'message', dataText = '';
         for (const line of frame.split(/\r?\n/)) {
@@ -113,9 +129,13 @@
         }
         if (!dataText) continue;
         await onEvent(eventType, JSON.parse(dataText));
-        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
+  }
+
+  async function consumeSse(url, onEvent) {
+    if (!authTokenPresent() && typeof EventSource !== 'undefined') return consumeEventSource(url, onEvent);
+    return consumeFetchStream(url, onEvent);
   }
 
   async function progressiveGenerate(event) {
@@ -134,7 +154,7 @@
     setGenerationUiState(true);
     resetExecutionState();
     renderStreamingPreview();
-    if ($('caseSubtitle')) $('caseSubtitle').textContent = 'Starting generation · you can continue scrolling and reviewing the page';
+    if ($('caseSubtitle')) $('caseSubtitle').textContent = 'Starting generation · page remains fully interactive';
     setBusy($('generateBtn'), true, 'Generating test cases…');
 
     const selection = generationSelection();
@@ -210,7 +230,11 @@
 
   function install() {
     const style = document.createElement('style');
-    style.textContent = `.generation-active{scroll-behavior:auto!important}.generation-preview-case{min-height:64px}.generation-preview-case .preflight{background:#dbeafe;color:#1d4ed8;font-weight:800}`;
+    style.textContent = `
+      html.generation-active,body.generation-active{overflow-y:auto!important;overflow-x:hidden!important;height:auto!important;position:static!important}
+      .generation-active #cases.cases{max-height:none!important;overflow:visible!important;overscroll-behavior:auto!important}
+      .generation-preview-case{min-height:64px}.generation-preview-case .preflight{background:#dbeafe;color:#1d4ed8;font-weight:800}
+    `;
     document.head.appendChild(style);
     const button = $('generateBtn');
     if (!button || button.dataset.progressiveGenerationInstalled === 'true') return;
