@@ -140,4 +140,8 @@ router.post("/api/test-runs/reset/:sessionId", allowQaManager, async (req, res) 
   });
 });
 
+// Generation is mounted here as part of the already-active failure-analysis/control route tree.
+// This keeps /api/generation/* available without adding startup coupling to the main server bootstrap.
+router.use(require("./progressiveGeneration"));
+
 module.exports = router;
