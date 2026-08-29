@@ -48,15 +48,19 @@
     cards.forEach((card, index) => {
       const title = card.querySelector('.case-title, .generation-case-preview-title');
       if (!title) return;
+      const value = String(index + 1);
       let serial = title.querySelector(':scope > .test-case-serial');
       if (!serial) {
         serial = document.createElement('span');
         serial.className = 'test-case-serial';
+        serial.textContent = value;
+        serial.setAttribute('aria-label', `Test ${value}`);
         title.prepend(serial);
+      } else if (serial.textContent !== value) {
+        serial.textContent = value;
+        serial.setAttribute('aria-label', `Test ${value}`);
       }
-      serial.textContent = String(index + 1);
-      serial.setAttribute('aria-label', `Test ${index + 1}`);
-      card.dataset.testSerial = String(index + 1);
+      if (card.dataset.testSerial !== value) card.dataset.testSerial = value;
     });
   }
 
