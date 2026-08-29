@@ -12,6 +12,8 @@ const RESOLUTION_USER_INPUT_REQUIRED = "USER_INPUT_REQUIRED";
 const RESOLUTION_MANUAL_TESTING = "MANUAL_TESTING";
 const RESOLUTION_FRAMEWORK_CHANGE_REQUIRED = "FRAMEWORK_CHANGE_REQUIRED";
 
+const MIN_EXPECTATION_COVERAGE_PERCENT = Math.max(1, Math.min(Number(process.env.AUTOMATION_MIN_EXPECTATION_COVERAGE_PERCENT || 100) || 100, 100));
+
 const CAPABILITY_RULES = [
   { pattern: /\b(captcha|recaptcha|hcaptcha|face\s?id|fingerprint|biometric|touch\s?id)\b/i, capability: "CAPTCHA_BIOMETRIC", reasonCode: "SECURITY_CHALLENGE_ADAPTER_REQUIRED", reason: "This real security challenge requires the configured non-production security-challenge adapter; TestNexus never guesses or bypasses it implicitly." },
   { pattern: /\b(native\s+file\s+(?:dialog|picker)|windows\s+(?:dialog|prompt)|os\s+(?:dialog|prompt)|native\s+(?:os\s+)?dialog)\b/i, capability: "OS_DIALOG", reasonCode: "OS_DIALOG_ADAPTER_REQUIRED", reason: "Native operating-system dialogs require the configured OS automation adapter." },
@@ -157,25 +159,41 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   const suggestions = compiled.plan.assertionSuggestions || [];
   const narratives = compiled.plan.narrativeExpectations || [];
   const coverage = compiled.expectationCoverage || compiled.plan.expectationCoverage || null;
-  const partialCoverage = coverage && coverage.total > 0 && coverage.compiled < coverage.total;
+  const coveragePercent = coverage?.total > 0 ? Number(coverage.percent || 0) : 0;
+  if (coverage?.total > 0 && coveragePercent < MIN_EXPECTATION_COVERAGE_PERCENT) {
+    return result({
+      status: INSUFFICIENT_EVIDENCE,
+      automatable: false,
+      reasonCode: "EXPECTED_RESULT_COVERAGE_INCOMPLETE",
+      reason: `${coverage.compiled} of ${coverage.total} human expected result(s) compiled into deterministic assertions (${coveragePercent}%). Automation Ready requires at least ${MIN_EXPECTATION_COVERAGE_PERCENT}% expected-result grounding so unrelated structural assertions cannot make an unverified test executable.`,
+      reasons: (coverage.details || []).filter((item) => !item.compiled).map((item) => `Unresolved expected result: ${item.expectation}`),
+      resolutionType: RESOLUTION_AI_REPAIRABLE,
+      evidence: [
+        `${compiled.plan.actions.length} deterministic action(s) compiled`,
+        `${compiled.plan.assertions.length} deterministic assertion(s) compiled`,
+        `${coverage.compiled}/${coverage.total} expected result(s) compiled`,
+      ],
+      automationPlan: compiled.plan,
+      assertionSuggestions: suggestions,
+      uncompiledExpectations: narratives,
+      expectationCoverage: coverage,
+    });
+  }
+
   const advanced = Array.isArray(compiled.plan.advancedCapabilities) ? compiled.plan.advancedCapabilities : [];
   return result({
     status: READY,
     automatable: true,
     reasonCode: suggestions.length
       ? "SUPPORTED_WITH_ASSERTION_SUGGESTIONS"
-      : partialCoverage
-        ? "SUPPORTED_WITH_PARTIAL_EXPECTATION_COVERAGE"
-        : advanced.length
-          ? "SUPPORTED_ADVANCED_CAPABILITIES"
-          : "SUPPORTED_GROUNDED_AND_COMPILED",
+      : advanced.length
+        ? "SUPPORTED_ADVANCED_CAPABILITIES"
+        : "SUPPORTED_GROUNDED_AND_COMPILED",
     reason: suggestions.length
-      ? "The test has deterministic assertions and can run. Some narrative expectations also have optional assertion-capability suggestions for stronger coverage. Execution PASS/FAIL is determined only when the browser runs the test."
-      : partialCoverage
-        ? `The test is executable and grounded. ${coverage.compiled} of ${coverage.total} human expectation(s) compile into deterministic assertions; unresolved narrative expectations remain visible for review. Automation Ready does not predict PASS/FAIL.`
-        : advanced.length
-          ? `The test is grounded and executable with advanced capability support: ${advanced.join(", ")}.`
-          : "The test case is grounded and compiled successfully into the deterministic automation contract. Automation Ready means executable; it does not predict PASS/FAIL. The execution outcome is determined only when the browser runs the test.",
+      ? "The test has fully grounded deterministic expected results and can run. Optional assertion-capability suggestions remain available for stronger coverage. Execution PASS/FAIL is determined only when the browser runs the test."
+      : advanced.length
+        ? `The test is grounded and executable with advanced capability support: ${advanced.join(", ")}.`
+        : "The test case is grounded and compiled successfully into the deterministic automation contract. Automation Ready means executable; it does not predict PASS/FAIL. The execution outcome is determined only when the browser runs the test.",
     resolutionType: RESOLUTION_NONE,
     automationPlan: compiled.plan,
     assertionSuggestions: suggestions,
@@ -231,6 +249,7 @@ module.exports = {
   RESOLUTION_USER_INPUT_REQUIRED,
   RESOLUTION_MANUAL_TESTING,
   RESOLUTION_FRAMEWORK_CHANGE_REQUIRED,
+  MIN_EXPECTATION_COVERAGE_PERCENT,
   classifyTestCase,
   assessTestCases,
   readinessSummary,
