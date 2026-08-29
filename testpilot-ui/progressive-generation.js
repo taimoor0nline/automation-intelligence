@@ -5,9 +5,9 @@
   }
 
   function generationSelection() {
-    if (typeof window.aiTestPilotGenerationSelection === 'function') return window.aiTestPilotGenerationSelection();
     return {
       categories: selected('#generationCategoryMenu input[data-test-category]'),
+      scenarioTypes: selected('#generationTypeMenu input[data-scenario-type]'),
       securitySubcategories: selected('#securitySubcategoryMenu input[data-security-subcategory]'),
       securitySeverities: selected('#securitySeverityMenu input[data-security-severity]'),
     };
@@ -15,20 +15,10 @@
 
   function queuedReadiness() {
     return {
-      status: 'NEEDS_PREFLIGHT',
-      automatable: false,
-      reasonCode: 'READINESS_QUEUED',
+      status: 'NEEDS_PREFLIGHT', automatable: false, reasonCode: 'READINESS_QUEUED',
       reason: 'Generated successfully. Deterministic readiness validation will begin when progressive generation finishes.',
-      reasons: ['Generated successfully. Deterministic readiness validation is queued.'],
-      resolutionType: 'NONE',
-      repairable: false,
-      requiredInputs: [],
-      evidence: [],
-      automationPlan: null,
-      assertionSuggestions: [],
-      uncompiledExpectations: [],
-      canSuggestAssertion: false,
-      validationSource: 'queued',
+      reasons: ['Generated successfully. Deterministic readiness validation is queued.'], resolutionType: 'NONE', repairable: false,
+      requiredInputs: [], evidence: [], automationPlan: null, assertionSuggestions: [], uncompiledExpectations: [], canSuggestAssertion: false, validationSource: 'queued'
     };
   }
 
@@ -59,16 +49,13 @@
         const frame = buffer.slice(0, boundary).trim();
         buffer = buffer.slice(boundary + 2);
         if (!frame || frame.startsWith(':')) continue;
-        let eventType = 'message';
-        let dataText = '';
+        let eventType = 'message', dataText = '';
         for (const line of frame.split(/\r?\n/)) {
           if (line.startsWith('event:')) eventType = line.slice(6).trim();
           else if (line.startsWith('data:')) dataText += line.slice(5).trim();
         }
         if (!dataText) continue;
-        let data;
-        try { data = JSON.parse(dataText); } catch { continue; }
-        await onEvent(eventType, data);
+        try { await onEvent(eventType, JSON.parse(dataText)); } catch (err) { if (eventType === 'GENERATION_FAILED') throw err; }
       }
     }
   }
@@ -90,21 +77,19 @@
     $('reportBox').style.display = 'none';
     $('analysis').innerHTML = '';
     $('results').innerHTML = '<div class="empty">Waiting for execution.</div>';
-    $('cases').innerHTML = '<div class="activity-alert">Preparing test generation…<small>Cases will appear here as soon as each AI batch completes.</small></div>';
+    $('cases').innerHTML = '<div class="activity-alert">Preparing progressive test generation…<small>Generated cases will appear here as each small AI work unit completes.</small></div>';
     setActivityStatus('Generating 0', true);
     setBusy($('generateBtn'), true, 'Generating test cases…');
 
     const selection = generationSelection();
     const paths = $('additionalPaths').value.split(',').map((v) => v.trim()).filter(Boolean);
     const payload = {
-      sessionId,
-      message: story,
-      targetUrl,
-      additionalPaths: paths,
+      sessionId, message: story, targetUrl, additionalPaths: paths,
       credentials: { username: $('username').value, password: $('password').value },
       aiModelTier: $('aiModelTier')?.value || 'fast',
       bypassDiscoveryCache: Boolean($('bypassDiscoveryCache')?.checked),
       selectedTestCategories: selection.categories,
+      selectedScenarioTypes: selection.scenarioTypes,
       selectedSecuritySubcategories: selection.securitySubcategories,
       selectedSecuritySeverities: selection.securitySeverities,
     };
@@ -119,23 +104,25 @@
       let completed = false;
       await consumeSse(start.eventsUrl, async (type, data) => {
         if (type === 'DISCOVERY_COMPLETED') {
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Page discovery complete · ${data.pageCount || 0} page(s) · generating first test batch…`;
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Page discovery complete · ${data.pageCount || 0} page(s) · generating first test…`;
           return;
         }
-        if (type === 'CATEGORY_PLAN') {
-          const labels = (data.categories || []).map((x) => String(x).replaceAll('_', ' ').toLowerCase());
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generation plan ready · ${labels.join(', ') || 'functional'} · cases will appear progressively`;
+        if (type === 'GENERATION_PLAN') {
+          const units = (data.units || []).slice(0, 5).map((u) => `${String(u.category || '').replaceAll('_',' ').toLowerCase()} / ${u.scenarioType || 'functional'}`);
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generation plan ready · ${units.join(' · ')} · streaming results progressively`;
           return;
         }
         if (type === 'BATCH_STARTED') {
           setActivityStatus(`Generating ${data.generatedSoFar || 0}/${data.totalRequested || total}`, true);
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generating ${String(data.category || '').replaceAll('_', ' ').toLowerCase()} test case(s) · ${data.generatedSoFar || 0}/${data.totalRequested || total} available`;
+          const scope = `${String(data.category || '').replaceAll('_',' ').toLowerCase()} / ${String(data.scenarioType || 'functional').toLowerCase()}`;
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `Generating ${scope} · ${data.generatedSoFar || 0}/${data.totalRequested || total} available`;
           return;
         }
         if (type === 'BATCH_COMPLETED') {
           mergeIncoming(data.cases || []);
           setActivityStatus(`Generating ${data.generatedSoFar || testCases.length}/${data.totalRequested || total}`, true);
-          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${data.generatedSoFar || testCases.length}/${data.totalRequested || total} generated · latest ${String(data.category || '').replaceAll('_', ' ').toLowerCase()} batch in ${((data.durationMs || 0) / 1000).toFixed(1)}s · continuing…`;
+          const scope = `${String(data.category || '').replaceAll('_',' ').toLowerCase()} / ${String(data.scenarioType || 'functional').toLowerCase()}`;
+          if ($('caseSubtitle')) $('caseSubtitle').textContent = `${data.generatedSoFar || testCases.length}/${data.totalRequested || total} generated · latest ${scope} in ${((data.durationMs || 0) / 1000).toFixed(1)}s · continuing…`;
           return;
         }
         if (type === 'GENERATION_COMPLETED') {
@@ -149,19 +136,14 @@
         }
         if (type === 'GENERATION_FAILED') throw new Error(data.message || 'Progressive generation failed.');
       });
-
       if (!completed) throw new Error('Generation stream ended before the suite completed.');
     } catch (err) {
       window.__aiTestPilotProgressiveGenerationActive = false;
       showError(err.message || 'Progressive generation failed.');
       setActivityStatus('Error', false);
-      if (testCases.length) {
-        testCases = testCases.map((tc) => ({ ...tc, automationReadiness: null }));
-        renderCases();
-      } else renderCases();
-    } finally {
-      setBusy($('generateBtn'), false, '');
-    }
+      if (testCases.length) testCases = testCases.map((tc) => ({ ...tc, automationReadiness: null }));
+      renderCases();
+    } finally { setBusy($('generateBtn'), false, ''); }
   }
 
   function install() {
@@ -171,6 +153,5 @@
     button.addEventListener('click', progressiveGenerate, true);
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
-  else install();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true }); else install();
 })();
