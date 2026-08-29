@@ -1,5 +1,6 @@
 (function () {
   let readinessRefreshInFlight = false;
+  let readinessRefreshFailed = false;
   let readinessTimer = null;
   let pendingGeneratedCase = null;
   let lastGenerationMeta = null;
@@ -13,6 +14,27 @@
     if (runBtn) runBtn.disabled = true;
     const hint = $('runHint');
     if (hint) hint.textContent = message;
+  }
+
+  function normalizeBatchSize(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return 2;
+    return Math.max(1, Math.min(50, parsed));
+  }
+
+  function currentBatchSize() {
+    const input = $('readinessBatchSize');
+    if (input) return normalizeBatchSize(input.value);
+    const cookie = document.cookie.split(';').map((part) => part.trim()).find((part) => part.startsWith('aiTestPilotReadinessBatchSize='));
+    return cookie ? normalizeBatchSize(decodeURIComponent(cookie.split('=').slice(1).join('='))) : 2;
+  }
+
+  function mergeReadinessBatch(assessedCases) {
+    const byId = new Map((assessedCases || []).map((tc) => [String(tc?.id || '').toUpperCase(), tc]));
+    testCases = testCases.map((current) => {
+      const replacement = byId.get(String(current?.id || '').toUpperCase());
+      return replacement ? { ...current, ...replacement, automationReadiness: replacement.automationReadiness } : current;
+    });
   }
 
   // Add provider-neutral AI quality controls without exposing server-side model IDs.
@@ -52,38 +74,75 @@
 
   async function refreshReadiness() {
     if (!sessionId || !testCases.length || readinessRefreshInFlight) return;
+
     readinessRefreshInFlight = true;
-    lockRunForReadiness('Checking automation readiness… Run Approved Tests is locked.');
+    readinessRefreshFailed = false;
+    const sourceCases = testCases.map((tc) => ({ ...tc, automationReadiness: null }));
+    const batchSize = currentBatchSize();
+    const batchCount = Math.ceil(sourceCases.length / batchSize);
+    const total = sourceCases.length;
+    let validated = 0;
+
+    testCases = sourceCases;
+    lockRunForReadiness(`Checking automation readiness 0/${total} · batch size ${batchSize}`);
+    renderCases();
+
     try {
-      const r = await fetch('/api/test-cases/revalidate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, testCases, credentials: credentialsPayload() })
-      });
-      const data = await r.json();
-      if (r.ok && Array.isArray(data.testCases)) {
-        testCases = data.testCases;
+      for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
+        const start = batchIndex * batchSize;
+        const batch = sourceCases.slice(start, start + batchSize);
+        lockRunForReadiness(`Checking automation readiness ${validated}/${total} · batch ${batchIndex + 1}/${batchCount}`);
+        if ($('caseSubtitle')) $('caseSubtitle').textContent = `Deterministic readiness · validating batch ${batchIndex + 1}/${batchCount} · ${validated}/${total} checked`;
+
+        const r = await nativeFetch('/api/test-cases/revalidate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            testCases: batch,
+            credentials: credentialsPayload(),
+            batchIndex: batchIndex + 1,
+            batchCount,
+            totalCases: total,
+          })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.reply || `Automation readiness batch ${batchIndex + 1} failed.`);
+        if (!Array.isArray(data.testCases)) throw new Error(`Automation readiness batch ${batchIndex + 1} returned no test cases.`);
+
+        mergeReadinessBatch(data.testCases);
+        validated += data.testCases.length;
         renderCases();
-      } else if (!r.ok) {
-        lockRunForReadiness('Readiness validation did not complete. Resolve the error before running tests.');
-        showError(data.reply || 'Automation readiness validation failed.');
+        lockRunForReadiness(`Automation readiness ${validated}/${total} · completed batch ${batchIndex + 1}/${batchCount}`);
+        if ($('caseSubtitle')) $('caseSubtitle').textContent = `Deterministic readiness · ${validated}/${total} checked · batch ${batchIndex + 1}/${batchCount} complete`;
       }
     } catch (err) {
-      lockRunForReadiness('Readiness validation did not complete. Resolve the connection error before running tests.');
-      console.warn('[readiness] refresh failed', err);
-      showError('Automation readiness could not be checked. Run Approved Tests remains locked.');
+      readinessRefreshFailed = true;
+      lockRunForReadiness(`Readiness paused after ${validated}/${total} case(s). Retry after resolving the error.`);
+      console.warn('[readiness] batch refresh failed', err);
+      showError(err.message || 'Automation readiness could not be checked. Run Approved Tests remains locked.');
     } finally {
       readinessRefreshInFlight = false;
-      if (testCases.every((tc) => tc.automationReadiness)) renderCases();
+      renderCases();
+      if (!readinessRefreshFailed && testCases.every((tc) => tc.automationReadiness)) {
+        const profile = $('aiModelTier')?.selectedOptions?.[0]?.textContent || 'Strong';
+        const timing = lastGenerationMeta?.totalMs ? ' · generated in ' + (lastGenerationMeta.totalMs / 1000).toFixed(1) + 's' : '';
+        if ($('caseSubtitle')) $('caseSubtitle').textContent = `${profile} AI profile · automation readiness completed${timing}`;
+      }
     }
   }
 
   function scheduleReadiness(delayMs = 180) {
     clearTimeout(readinessTimer);
+    readinessRefreshFailed = false;
     lockRunForReadiness();
     readinessTimer = setTimeout(refreshReadiness, delayMs);
   }
 
-  window.refreshTestReadiness = refreshReadiness;
+  window.refreshTestReadiness = function () {
+    readinessRefreshFailed = false;
+    return refreshReadiness();
+  };
 
   renderCases = function () {
     $('caseCount').textContent = testCases.length;
@@ -138,13 +197,13 @@
       $('runBtn').disabled = ready === 0;
     }
 
-    if (needsRefresh) {
+    if (needsRefresh && !readinessRefreshInFlight && !readinessRefreshFailed) {
       setTimeout(() => {
         const cacheText = lastGenerationMeta?.discoveryCacheBypassed ? ' · fresh discovery' : lastGenerationMeta?.discoveryCacheHit ? ' · discovery cache used' : '';
         $('caseSubtitle').textContent = 'AI test cases generated · applying automation readiness checks…' + cacheText;
       }, 0);
       scheduleReadiness(1500);
-    } else if (!readinessRefreshInFlight) {
+    } else if (!needsRefresh && !readinessRefreshInFlight) {
       setTimeout(() => {
         const profile = $('aiModelTier')?.selectedOptions?.[0]?.textContent || 'Strong';
         const timing = lastGenerationMeta?.totalMs ? ' · generated in ' + (lastGenerationMeta.totalMs / 1000).toFixed(1) + 's' : '';
