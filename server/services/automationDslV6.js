@@ -70,6 +70,19 @@ function selectorPaths(pageDiscoveries = []) {
   return map;
 }
 
+function normalizePassiveWaits(testCase) {
+  if (!testCase || typeof testCase !== 'object' || !Array.isArray(testCase.steps)) return testCase;
+  const steps = testCase.steps.map((step) => {
+    const action = String(step?.action || '').trim().toLowerCase();
+    const target = String(step?.target || '').trim();
+    if (/^wait(?:\s+for)?$|^wait\s+until$/.test(action) && target && (target.startsWith('[') || target.startsWith('#') || target.startsWith('.'))) {
+      return { ...step, action: 'verify', value: null };
+    }
+    return step;
+  });
+  return { ...testCase, steps };
+}
+
 function normalizeCrossPageLogin(testCase, context = {}) {
   if (!testCase || typeof testCase !== 'object' || !context.hasCredentials) return testCase;
   if (explicitNegativeLoginIntent(testCase)) return testCase;
@@ -98,7 +111,7 @@ function normalizeCrossPageLogin(testCase, context = {}) {
   const firstLoginIndex = Math.min(...loginIndexes);
   const beforeCount = steps.slice(0, firstLoginIndex).filter((step) => !loginTargets.has(String(step?.target || '').trim())).length;
   retained.splice(beforeCount, 0, {
-    action: 'Use configured test credentials',
+    action: 'Use runtime credentials',
     target: '',
     value: null,
   });
@@ -116,7 +129,8 @@ function normalizeCrossPageLogin(testCase, context = {}) {
 }
 
 function compileTestCase(testCase, context = {}) {
-  const normalized = normalizeCrossPageLogin(testCase, context);
+  const passiveNormalized = normalizePassiveWaits(testCase);
+  const normalized = normalizeCrossPageLogin(passiveNormalized, context);
   const compiled = v5.compileTestCase(normalized, context);
   if (compiled && normalized?._runtimeLoginNormalization) {
     return {
@@ -134,6 +148,7 @@ function compileTestCase(testCase, context = {}) {
 module.exports = {
   ...v5,
   compileTestCase,
+  normalizePassiveWaits,
   normalizeCrossPageLogin,
   loginRuntimeFromDiscovery,
   explicitNegativeLoginIntent,
