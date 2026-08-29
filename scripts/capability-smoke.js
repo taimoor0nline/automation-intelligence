@@ -2,24 +2,49 @@ const assert = require("assert");
 const { ASSERTION_OPERATIONS } = require("../server/services/assertionRegistry");
 const { compileTestCase, ACTION_OPERATIONS } = require("../server/services/automationDsl");
 const { generateDeterministicAutomation } = require("../server/services/deterministicAutomationGenerator");
+const { annotatePageDiscovery, buildWebCapabilityMatrix } = require("../server/services/webCapabilityMatrix");
+const { resolveExpectedResults } = require("../server/services/expectationGrounding");
 
 assert(ASSERTION_OPERATIONS.length >= 100, `Expected at least 100 assertions, found ${ASSERTION_OPERATIONS.length}`);
 assert(ACTION_OPERATIONS.includes("SET_VIEWPORT"));
 assert(ACTION_OPERATIONS.includes("DBLCLICK"));
 assert(ACTION_OPERATIONS.includes("PRESS_KEY"));
 
-const pageDiscoveries = [{
+const pageDiscoveries = [annotatePageDiscovery({
   url: "http://localhost:4000/feedback.html",
   finalUrl: "http://localhost:4000/feedback.html",
   pageTitle: "Customer Feedback",
   documentLanguage: "en",
   elements: [
-    { tag: "input", type: "email", testId: "email", selector: '[data-testid="email"]', required: true },
-    { tag: "button", type: "submit", testId: "submit-feedback", selector: '[data-testid="submit-feedback"]' },
+    { tag: "input", type: "email", testId: "email", selector: '[data-testid="email"]', label: "Email", required: true },
+    { tag: "input", type: "checkbox", testId: "consent", selector: '[data-testid="consent"]', label: "Consent", required: true },
+    { tag: "select", type: "select", testId: "category", selector: '[data-testid="category"]', label: "Category", options: [{ value: "product", label: "Product" }] },
+    { tag: "div", type: "div", testId: "success-panel", selector: '[data-testid="success-panel"]', text: "Thank you for your feedback." },
+    { tag: "button", type: "submit", testId: "submit-feedback", selector: '[data-testid="submit-feedback"]', text: "Submit Feedback" },
   ],
   messages: [],
   networkHints: [{ method: "POST", url: "/api/feedback", source: "fetch" }],
-}];
+})];
+
+const matrix = buildWebCapabilityMatrix(pageDiscoveries);
+const bySelector = new Map(matrix.pages[0].elements.map((entry) => [entry.selector, new Set(entry.capabilities)]));
+assert(bySelector.get('[data-testid="consent"]').has('CHECKED'));
+assert(bySelector.get('[data-testid="consent"]').has('UNCHECKED'));
+assert(bySelector.get('[data-testid="category"]').has('SELECTED_VALUE'));
+assert(bySelector.get('[data-testid="category"]').has('OPTION_COUNT'));
+assert(bySelector.get('[data-testid="email"]').has('VALID'));
+assert(bySelector.get('[data-testid="email"]').has('REQUIRED'));
+assert(bySelector.get('[data-testid="success-panel"]').has('TEXT'));
+assert(!bySelector.get('[data-testid="success-panel"]').has('CHECKED'));
+
+const grounded = resolveExpectedResults([
+  'Consent is checked',
+  'Success panel with text "Thank you for your feedback." is visible',
+], pageDiscoveries);
+assert.equal(grounded.records[0].selector, '[data-testid="consent"]');
+assert(grounded.records[0].matchedCapabilities.includes('CHECKED'));
+assert.equal(grounded.records[1].selector, '[data-testid="success-panel"]');
+assert(grounded.records[1].matchedCapabilities.includes('TEXT'));
 
 const testCase = {
   id: "TC-H001",
@@ -74,4 +99,4 @@ const ungrounded = compileTestCase(ungroundedCase, { pageDiscoveries, hasCredent
 assert.equal(ungrounded.ok, false);
 assert.equal(ungrounded.reasonCode, "NETWORK_ENDPOINT_NOT_GROUNDED");
 
-console.log(`Capability smoke test passed: ${ASSERTION_OPERATIONS.length} assertions, ${ACTION_OPERATIONS.length} actions.`);
+console.log(`Capability smoke test passed: ${ASSERTION_OPERATIONS.length} assertions, ${ACTION_OPERATIONS.length} actions, ${matrix.elementCount} capability-mapped elements.`);
