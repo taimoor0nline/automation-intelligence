@@ -4,7 +4,7 @@ const router = express.Router();
 
 const { getSession } = require("../data/sessionStore");
 const qwen = require("../services/qwenClient");
-const { buildAnalyticsReport } = require("../services/reportGenerator");
+const { buildAnalyticsReport, analysisHtml } = require("../services/reportGenerator");
 
 const jobs = new Map();
 const JOB_TTL_MS = 30 * 60 * 1000;
@@ -55,6 +55,49 @@ function testCaseFor(session, test) {
     title: test?.title || id,
     expectedResults: [],
   };
+}
+
+function failedTestsFor(session) {
+  return (session.lastResults?.summary?.tests || []).filter((test) => test.fail);
+}
+
+function testForAnalysis(session, analysis) {
+  const id = String(analysis?.testCase || "").toUpperCase();
+  return failedTestsFor(session).find((test) => {
+    const tc = testCaseFor(session, test);
+    return String(tc.id || "").toUpperCase() === id;
+  }) || { fail: true, title: analysis?.testCase || "Failed test" };
+}
+
+function latestJobForSession(sessionId) {
+  return [...jobs.values()]
+    .filter((item) => item.sessionId === sessionId)
+    .sort((a, b) => Date.parse(b.startedAt || 0) - Date.parse(a.startedAt || 0))[0] || null;
+}
+
+function startedButIncomplete(job) {
+  const completed = new Set((job.results || []).map((item) => String(item.testCase || "").toUpperCase()));
+  const started = [];
+  const seen = new Set();
+  for (const event of job.events || []) {
+    if (event.type !== "ANALYSIS_ITEM_STARTED") continue;
+    const id = String(event.testCase || "").toUpperCase();
+    if (!id || completed.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    started.push(event.testCase);
+  }
+  return started;
+}
+
+function liveItems(session, results) {
+  return (results || []).map((analysis) => {
+    const test = testForAnalysis(session, analysis);
+    return {
+      testCase: analysis.testCase,
+      analysis,
+      analysisHtml: analysisHtml(analysis, test),
+    };
+  });
 }
 
 function updateReport(sessionId, session, analyses) {
@@ -116,6 +159,7 @@ async function runJob(job, sessionId, session, failures) {
           testCase: tc.id,
           title: tc.title,
           analysis,
+          analysisHtml: analysisHtml(analysis, test),
           completed: job.completed,
           totalFailed: failures.length,
         });
@@ -138,14 +182,16 @@ async function runJob(job, sessionId, session, failures) {
           testCase: tc.id,
           title: tc.title,
           analysis: fallback,
+          analysisHtml: analysisHtml(fallback, test),
           error: err.message,
           completed: job.completed,
           totalFailed: failures.length,
         });
       }
 
-      // UI receives every result immediately; the server-side HTML report checkpoints
-      // every five results to avoid repeated large file writes for 100+ failures.
+      // Live report/UI cells receive every result immediately through SSE.
+      // The server-side HTML file is checkpointed every five results so large
+      // reports do not trigger a full file rewrite for every AI completion.
       if (job.completed % 5 === 0 || job.completed === failures.length) {
         updateReport(sessionId, session, job.results);
         send(job, "ANALYSIS_CHECKPOINT", {
@@ -192,7 +238,7 @@ router.post("/api/test-results/analyze/start", (req, res) => {
   if (!session.lastResults?.summary) return res.status(409).json({ reply: "Run approved tests before requesting AI result analysis." });
   if (session.state === "RUNNING") return res.status(409).json({ reply: "Automation is still running. AI analysis starts only after execution completes." });
 
-  const failures = (session.lastResults.summary.tests || []).filter((test) => test.fail);
+  const failures = failedTestsFor(session);
   if (!failures.length) {
     return res.json({ ok: true, analysisNeeded: false, totalFailed: 0, failureAnalyses: [] });
   }
@@ -242,6 +288,50 @@ router.post("/api/test-results/analyze/start", (req, res) => {
     totalFailed: failures.length,
     concurrency: job.concurrency,
     eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(jobId)}`,
+  });
+});
+
+router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
+  const sessionId = req.params.sessionId || "default";
+  const session = getSession(sessionId);
+  const failures = failedTestsFor(session);
+  if (!failures.length) {
+    return res.json({
+      ok: true,
+      state: "NOT_REQUIRED",
+      totalFailed: 0,
+      completed: 0,
+      items: [],
+      startedTestCases: [],
+    });
+  }
+
+  const job = latestJobForSession(sessionId);
+  if (!job) {
+    const stored = Array.isArray(session.failureAnalyses) ? session.failureAnalyses : [];
+    return res.json({
+      ok: true,
+      state: stored.length >= failures.length ? "COMPLETED" : "PENDING",
+      totalFailed: failures.length,
+      completed: stored.length,
+      items: liveItems(session, stored),
+      startedTestCases: [],
+      eventsUrl: null,
+      jobId: null,
+    });
+  }
+
+  return res.json({
+    ok: true,
+    jobId: job.jobId,
+    state: job.state,
+    totalFailed: job.totalFailed,
+    completed: job.completed,
+    failedAnalysisCount: job.failedAnalysisCount,
+    concurrency: job.concurrency,
+    items: liveItems(session, job.results),
+    startedTestCases: startedButIncomplete(job),
+    eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(job.jobId)}`,
   });
 });
 
