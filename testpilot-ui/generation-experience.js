@@ -4,7 +4,6 @@
 
   if (!window.__aiTestPilotNativeFetch) window.__aiTestPilotNativeFetch = window.fetch.bind(window);
 
-  // Readiness batching remains an internal platform concern.
   const INTERNAL_READINESS_BATCH_SIZE = 5;
   window.__aiTestPilotReadinessBatchSize = INTERNAL_READINESS_BATCH_SIZE;
   try { document.cookie = `aiTestPilotReadinessBatchSize=${INTERNAL_READINESS_BATCH_SIZE}; Path=/; SameSite=Lax`; } catch {}
@@ -18,12 +17,12 @@
     select.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  function loadProgressiveGeneration() {
-    if (document.querySelector('script[data-progressive-generation]')) return;
+  function loadScript(src, marker) {
+    if (document.querySelector(`script[${marker}]`)) return;
     const script = document.createElement('script');
-    script.src = '/progressive-generation.js';
+    script.src = src;
     script.async = false;
-    script.dataset.progressiveGeneration = 'true';
+    script.setAttribute(marker, 'true');
     document.body.appendChild(script);
   }
 
@@ -37,7 +36,9 @@
       generateBtn.dataset.fastProfileBound = '1';
       generateBtn.addEventListener('click', () => setFastProfile(), true);
     }
-    loadProgressiveGeneration();
+
+    loadScript('/generation-types.js', 'data-generation-types');
+    loadScript('/progressive-generation.js', 'data-progressive-generation');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
