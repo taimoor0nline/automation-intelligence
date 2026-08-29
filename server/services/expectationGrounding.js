@@ -37,6 +37,26 @@ function semanticWords(value) {
   return normalizeWords(value).filter((word) => word.length > 1 && !STOP_WORDS.has(word));
 }
 
+function identityToken(value) {
+  return String(value || '').replace(/[^A-Za-z0-9]+/g, '').toLowerCase();
+}
+
+function quoteMatchesEntryIdentity(value, entry) {
+  const token = identityToken(value);
+  if (!token) return false;
+  const item = entry?.item || {};
+  const identities = [
+    entry?.selector,
+    item.selector,
+    item.testId,
+    item.id,
+    item.name,
+    item.className,
+    item.class,
+  ].filter(Boolean);
+  return identities.some((candidate) => identityToken(candidate) === token);
+}
+
 function itemText(item, selector) {
   return [selector,item?.testId,item?.id,item?.name,item?.label,item?.text,item?.placeholder,item?.ariaLabel,item?.title,item?.type,item?.tag]
     .filter(Boolean).join(' ');
@@ -209,7 +229,8 @@ function resolveSelectorExpectation(text, index) {
   const parts = phrasesForSelector(text, selector);
   if (!parts.length) parts.push(`Element ${selector} exists`);
 
-  if (quotedMessage && best.entry.capabilities.has('TEXT') && /text|message|panel|reference|label|thank|error|required|success/i.test(text)) {
+  const quotedValueIsIdentity = quotedMessage && quoteMatchesEntryIdentity(quotedMessage, best.entry);
+  if (quotedMessage && !quotedValueIsIdentity && best.entry.capabilities.has('TEXT') && /text|message|panel|reference|label|thank|error|required|success/i.test(text)) {
     parts.push(`Text contains "${quotedMessage}" in ${selector}`);
   }
 
@@ -220,6 +241,7 @@ function resolveSelectorExpectation(text, index) {
     confidence: best.score,
     requiredCapabilities,
     matchedCapabilities: [...best.entry.capabilities],
+    ignoredQuotedIdentity: quotedValueIsIdentity ? quotedMessage : null,
   };
 }
 
@@ -269,4 +291,5 @@ module.exports = {
   supportsRequiredCapabilities,
   resolveValueExpectation,
   resolveAdjacentErrorExpectation,
+  quoteMatchesEntryIdentity,
 };
