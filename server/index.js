@@ -13,6 +13,7 @@ const authRoutes = require("./routes/auth");
 const projectRoutes = require("./routes/projects");
 const sessionContextRoutes = require("./routes/sessionContext");
 const reportingRoutes = require("./routes/reporting");
+const failureAnalysisStreamRoutes = require("./routes/failureAnalysisStream");
 const qwen = require("./services/qwenClient");
 const { analyzeFailureWithResolution } = require("./services/failureResolutionAiService");
 const { buildSourceContext } = require("./services/sourceAwareService");
@@ -148,6 +149,7 @@ app.use(reportingRoutes);
 app.use(restApiRoutes);
 app.use(liveBrowserRoutes);
 app.use(testCaseLifecycleRoutes);
+app.use(failureAnalysisStreamRoutes);
 app.use(runRoutes);
 app.use(chatRoutes);
 
@@ -210,7 +212,7 @@ function serveUi(req, res, next) {
       .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checking`")
       .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The automation system is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
       .replace("Qwen failure analysis", "AI failure analysis")
-      .replace("</body>", `<script src="/platform-ui.js"></script><script src="/defect-assignment.js"></script><script src="/generation-experience.js"></script><script src="/readiness.js"></script><script src="/add-test-mode.js"></script><script src="/results-analysis.js"></script><script src="/test-case-export.js"></script><script src="/reporting-entry.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
+      .replace("</body>", `<script src="/platform-ui.js"></script><script src="/defect-assignment.js"></script><script src="/generation-experience.js"></script><script src="/readiness.js"></script><script src="/add-test-mode.js"></script><script src="/results-analysis.js"></script><script src="/streaming-failure-analysis.js"></script><script src="/test-case-export.js"></script><script src="/reporting-entry.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
 
     res.type("html").send(adjusted);
   });
