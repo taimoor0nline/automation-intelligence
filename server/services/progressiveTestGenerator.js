@@ -15,6 +15,8 @@ function boolEnv(value, fallback = false) {
 
 const REQUEST_TIMEOUT_MS = Math.max(30000, Math.min(numberEnv(process.env.QWEN_TIMEOUT_MS, 180000), 600000));
 const MAX_RETRIES = Math.max(0, Math.min(Math.trunc(numberEnv(process.env.QWEN_MAX_RETRIES, 1)), 3));
+const MAX_PLANNED_CASES = 250;
+const MAX_GENERATION_BATCH = 10;
 const EXTERNAL_CAPABILITIES = ['EMAIL_SMS_OTP','CROSS_ORIGIN_IFRAME','REAL_MULTI_TAB','CAPTCHA_BIOMETRIC','NATIVE_MOBILE','BROWSER_EXTENSION','OS_DIALOG'];
 
 function ensureConfigured() {
@@ -155,6 +157,7 @@ Important rules:
 - Use only categories in allowedCategories and scenario types in allowedScenarioTypes.
 - Positive, negative and boundary are scenario types. FUNCTIONAL is a test category, not a scenario type.
 - Each planned test must cover a materially distinct behavior, rule, risk, state or boundary.
+- For large suites, keep every unit rationale concise. It is valid to propose 100-200 units when the evidenced application surface genuinely justifies that many distinct tests.
 - Do not invent validation rules, boundaries, messages, controls, selectors or business rules that are absent from the story/discovery.
 - runtimeCapabilities is authoritative for advanced automation availability. Use an advanced capability only when the story actually requires it AND runtimeCapabilities marks it available.
 - If the story requires an advanced capability that is unavailable, put that limitation in knownGaps instead of allocating an unrunnable test solely for it.
@@ -200,7 +203,7 @@ async function proposeGenerationPlan({
   modelTier = 'fast',
 }) {
   await refreshCapabilityConfiguration();
-  const ceiling = Math.max(1, Math.min(Number(maxTestCases) || 1, 50));
+  const ceiling = Math.max(1, Math.min(Number(maxTestCases) || 1, MAX_PLANNED_CASES));
   const categories = cleanTextArray(allowedCategories.map((x) => String(x).toUpperCase()), 50);
   const scenarioTypes = cleanTextArray(allowedScenarioTypes.map((x) => String(x).toLowerCase()), 20);
   if (!categories.length) throw new Error('At least one test category is required for AI coverage planning.');
@@ -253,8 +256,8 @@ async function proposeGenerationPlan({
     maxTestCases: ceiling,
     coverageScore: clampCoverage(result?.coverageScore),
     coverageSummary: String(result?.coverageSummary || '').trim().slice(0, 1200),
-    coveredAreas: cleanTextArray(result?.coveredAreas, 30),
-    knownGaps: cleanTextArray(result?.knownGaps, 30),
+    coveredAreas: cleanTextArray(result?.coveredAreas, 100),
+    knownGaps: cleanTextArray(result?.knownGaps, 100),
     runtimeCapabilities: capabilities,
     units,
   };
@@ -264,11 +267,12 @@ const BATCH_PROMPT = `You are a senior QA test analyst. Generate a SMALL evidenc
 
 Rules:
 - The business story defines scope. Discovered pages/controls provide evidence; discovery never broadens the requirement.
-- Generate exactly requestedTestCaseCount cases for this already-approved planning unit.
+- Generate exactly requestedTestCaseCount cases for this already-approved planning batch.
 - Generate only requestedCategory. Do not include or discuss other categories.
 - If requestedCategory is CUSTOM and requestedCustomCategory is supplied, use that custom label as the testing-purpose sub-scope.
 - Generate only requestedScenarioType. Category and scenario type are separate dimensions.
 - If requestedScenarioType is custom and requestedCustomScenarioType is supplied, use that label to describe how the scenario should behave.
+- The batch may contain several materially distinct cases in the same category/scenario scope. Avoid duplicate titles and duplicate behavior.
 - NEVER repurpose an unrelated discovered control to imitate story behavior. If the story says feedback but discovery only has search, do not use the search box as feedback.
 - Never invent selectors, pages, validation rules, messages, boundaries, options or business rules absent from story/discovery evidence.
 - Use discovered selectors exactly when technical targets are needed.
@@ -344,7 +348,7 @@ function normalizeCaseShape(testCase, category, scenarioType, customCategory = n
 }
 
 async function generateBatch({ story, pageDiscoveries, environment, category, scenarioType = 'positive', customCategory = null, customScenarioType = null, count, excludeTitles = [], securitySubcategories = [], securitySeverities = [], modelTier = 'fast' }) {
-  const requestedCount = Math.max(1, Math.min(Number(count) || 1, 5));
+  const requestedCount = Math.max(1, Math.min(Number(count) || 1, MAX_GENERATION_BATCH));
   const capabilities = runtimeCapabilities();
   const result = await callModel(BATCH_PROMPT, {
     story,
@@ -356,11 +360,12 @@ async function generateBatch({ story, pageDiscoveries, environment, category, sc
     requestedScenarioType: scenarioType,
     requestedCustomScenarioType: scenarioType === 'custom' ? customScenarioType : null,
     requestedTestCaseCount: requestedCount,
-    excludeTitles: excludeTitles.slice(-20),
+    excludeTitles: excludeTitles.slice(-100),
     securityScope: category === 'SECURITY' ? { subcategories: securitySubcategories, severities: securitySeverities } : null,
   }, { modelTier });
   if (!Array.isArray(result?.testCases) || result.testCases.length === 0) throw new Error(`AI returned no ${category}/${scenarioType} test cases.`);
   const cases = result.testCases.slice(0, requestedCount).map((tc) => normalizeCaseShape(tc, category, scenarioType, customCategory, customScenarioType));
+  if (cases.length !== requestedCount) throw new Error(`AI returned ${cases.length}/${requestedCount} ${category}/${scenarioType} cases for the requested batch.`);
   if (cases.some((tc) => !tc.title || !tc.steps.length || !tc.expectedResults.length)) throw new Error(`AI returned an incomplete ${category}/${scenarioType} generation batch.`);
   return { feature: result.feature || null, testCases: cases, runtimeCapabilities: capabilities };
 }
