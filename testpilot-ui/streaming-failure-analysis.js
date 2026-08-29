@@ -134,6 +134,11 @@
       if (event.reportUrl && reportLink) reportLink.href = event.reportUrl;
       if (reportBox) reportBox.style.display = "block";
       finish("Analysis complete");
+    } else if (type === "ANALYSIS_CANCELLED") {
+      active = false;
+      try { currentSource?.close?.(); } catch {}
+      currentSource = null;
+      document.getElementById("analysisStreamShell")?.remove();
     } else if (type === "ANALYSIS_FAILED") {
       finish("Analysis failed", true);
     }
@@ -176,12 +181,12 @@
     return new Promise((resolve, reject) => {
       const source = new EventSource(url);
       currentSource = source;
-      const types = ["ANALYSIS_STARTED","ANALYSIS_ITEM_STARTED","ANALYSIS_ITEM_COMPLETED","ANALYSIS_ITEM_FAILED","ANALYSIS_CHECKPOINT","ANALYSIS_COMPLETED","ANALYSIS_FAILED"];
+      const types = ["ANALYSIS_STARTED","ANALYSIS_ITEM_STARTED","ANALYSIS_ITEM_COMPLETED","ANALYSIS_ITEM_FAILED","ANALYSIS_CHECKPOINT","ANALYSIS_CANCEL_REQUESTED","ANALYSIS_CANCELLED","ANALYSIS_COMPLETED","ANALYSIS_FAILED"];
       types.forEach((type) => source.addEventListener(type, (event) => {
         try {
           const data = JSON.parse(event.data);
           handleEvent(type, data);
-          if (type === "ANALYSIS_COMPLETED") { source.close(); currentSource = null; resolve(); }
+          if (type === "ANALYSIS_COMPLETED" || type === "ANALYSIS_CANCELLED") { source.close(); currentSource = null; resolve(); }
           if (type === "ANALYSIS_FAILED") { source.close(); currentSource = null; reject(new Error(data.error || "Analysis failed.")); }
         } catch {}
       }));
@@ -234,6 +239,7 @@
       if (auth) await consumeFetchStream(data.eventsUrl);
       else await consumeEventSource(data.eventsUrl);
     } catch (err) {
+      if (!active) return;
       try { if (typeof showError === "function") showError(err.message); } catch {}
       finish("AI analysis did not complete. Execution results remain available.", true);
     }
