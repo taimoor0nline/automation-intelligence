@@ -5,7 +5,6 @@ const router = express.Router();
 
 const { getSession } = require("../data/sessionStore");
 const { cancelActiveExecution, getActiveExecution } = require("../services/singleSpecRunner");
-const failureAnalysisStreamRoutes = require("./failureAnalysisStream");
 const { REPORT_DIR, reportFileName } = require("../services/reportGenerator");
 
 function currentRunId(session) {
@@ -55,8 +54,8 @@ router.post("/api/test-runs/reset/:sessionId", async (req, res) => {
     });
   }
 
-  const analysisCancel = typeof failureAnalysisStreamRoutes.cancelAnalysisForSession === "function"
-    ? failureAnalysisStreamRoutes.cancelAnalysisForSession(sessionId, "Execution & Analytics reset by user.")
+  const analysisCancel = typeof global.__testNexusCancelFailureAnalysis === "function"
+    ? global.__testNexusCancelFailureAnalysis(sessionId, "Execution & Analytics reset by user.")
     : { cancelled: false };
 
   session.failureAnalyses = [];
