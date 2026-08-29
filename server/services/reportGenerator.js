@@ -2,12 +2,26 @@ const fs = require("fs");
 const path = require("path");
 
 const REPORT_DIR = path.join(__dirname, "..", "..", "automation-system", "artifacts", "reports");
+const REQUESTED_REPORTS = global.__testNexusRequestedReportSummaries || new WeakSet();
+const REQUESTED_BY_SESSION = global.__testNexusRequestedReportBySession || new Map();
+global.__testNexusRequestedReportSummaries = REQUESTED_REPORTS;
+global.__testNexusRequestedReportBySession = REQUESTED_BY_SESSION;
 
 function esc(value) { return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#039;"); }
 function pct(passed,total){ return total ? Math.round((passed/total)*100) : 0; }
 function tcIdFromTitle(title){ return String(title||"").match(/TC(?:\d{3}|-H\d{3})/)?.[0] || "—"; }
 function evidenceLinks(test){ if(!test.fail)return "—";const links=[];if(test.evidence?.videoUrl)links.push(`<a class="evidence-link" href="${esc(test.evidence.videoUrl)}" target="_blank" rel="noopener">▶ Video</a>`);if(test.evidence?.screenshotUrl)links.push(`<a class="evidence-link" href="${esc(test.evidence.screenshotUrl)}" target="_blank" rel="noopener">▣ Screenshot</a>`);return links.length?`<div class="evidence-links">${links.join("")}</div>`:"—"; }
 function ownerLabel(value){const labels={APPLICATION_TEAM:"Application team",TEST_AUTOMATION_TEAM:"Test automation team",TEST_DATA_OWNER:"Test data owner",ENVIRONMENT_TEAM:"Environment / DevOps team",BUSINESS_ANALYST:"Business analyst / product owner",MANUAL_REVIEW:"Manual review"};return labels[value]||String(value||"Manual review").replaceAll("_"," ");}
+
+function requestReportGeneration(sessionId, summary){
+  if(!summary || typeof summary!=="object")return false;
+  REQUESTED_REPORTS.add(summary);
+  REQUESTED_BY_SESSION.set(String(sessionId||"default"),summary);
+  return true;
+}
+function clearReportGenerationRequest(sessionId){REQUESTED_BY_SESSION.delete(String(sessionId||"default"));}
+function reportGenerationRequested(sessionId,summary){return Boolean(summary&&typeof summary==="object"&&REQUESTED_REPORTS.has(summary)&&REQUESTED_BY_SESSION.get(String(sessionId||"default"))===summary);}
+function removeReportFile(sessionId){const filePath=path.join(REPORT_DIR,reportFileName(sessionId));try{fs.rmSync(filePath,{force:true});}catch{}return filePath;}
 
 function sourceHtml(analysis){
   const level=String(analysis?.sourceGuidanceLevel||"BLACK_BOX");
@@ -22,7 +36,7 @@ function sourceHtml(analysis){
 
 function pendingAnalysisHtml(test){
   if(!test?.fail)return "—";
-  return `<div class="analysis-live pending"><div class="analysis-live-head"><span class="analysis-live-dot"></span><strong>Waiting for AI response…</strong></div><div class="analysis-live-note">Execution has finished. This failed case is queued for failed-only AI analysis; the PASS/FAIL result and evidence remain unchanged.</div></div>`;
+  return `<div class="analysis-live pending"><div class="analysis-live-head"><span class="analysis-live-dot"></span><strong>Generating AI analysis… Please wait.</strong></div><div class="analysis-live-note">This failed case is queued for failed-only AI analysis. Its execution result and evidence are already final; this column will update independently when the AI response arrives.</div></div>`;
 }
 
 function analysisHtml(analysis,test){
@@ -43,6 +57,7 @@ function reportFileName(sessionId){const safe=String(sessionId||"run").replace(/
 function saveReportHtml(sessionId,html){fs.mkdirSync(REPORT_DIR,{recursive:true});const filePath=path.join(REPORT_DIR,reportFileName(sessionId));fs.writeFileSync(filePath,html,"utf8");return filePath;}
 
 function buildAnalyticsReport({sessionId,story,targetUrl,environment,summary,analyses}){
+  if(!reportGenerationRequested(sessionId,summary)){removeReportFile(sessionId);return null;}
   const successRate=pct(summary.passed,summary.total),defectCount=(analyses||[]).filter(a=>a?.classification==="APPLICATION_DEFECT").length,analysisById=new Map((analyses||[]).map(a=>[String(a.testCase||"").toUpperCase(),a]));
   const rows=(summary.tests||[]).map(t=>{const id=tcIdFromTitle(t.title),analysis=analysisById.get(String(id).toUpperCase()),defectDetected=!t.pass&&analysis?.classification==="APPLICATION_DEFECT";return `<tr><td><code>${esc(id)}</code></td><td>${esc(t.title)}</td><td><span class="status ${t.pass?"pass":"fail"}">${t.pass?"PASS":"FAIL"}</span>${defectDetected?'<div class="detected">Application defect detected</div>':''}</td><td>${t.durationMs==null?"—":`${esc(t.durationMs)} ms`}</td><td>${evidenceLinks(t)}</td><td class="analysis-cell" data-analysis-case="${esc(id)}" data-analysis-failed="${t.fail?"true":"false"}">${analysisHtml(analysis,t)}</td></tr>`;}).join("");
   const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI TestPilot Analytics</title><style>
@@ -51,4 +66,4 @@ function buildAnalyticsReport({sessionId,story,targetUrl,environment,summary,ana
   saveReportHtml(sessionId,html);return html;
 }
 
-module.exports={buildAnalyticsReport,analysisHtml,REPORT_DIR,reportFileName};
+module.exports={buildAnalyticsReport,analysisHtml,REPORT_DIR,reportFileName,requestReportGeneration,clearReportGenerationRequest,reportGenerationRequested,removeReportFile};
