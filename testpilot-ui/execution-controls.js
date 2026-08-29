@@ -296,7 +296,6 @@
           runBtn.disabled = !hasReviewedCases() || checkedIds().length === 0;
         } else if (ready || hasReviewedCases()) {
           setRunLabel(START_LABEL, true);
-          // Readiness code may temporarily keep the button locked. Only explicitly unlock when all visible checked cases are already enabled.
           const checked = checkedIds();
           const readinessPending = Array.from(document.querySelectorAll('.case-check')).some((box) => box.disabled && box.checked);
           if (!readinessPending) runBtn.disabled = checked.length === 0;
@@ -336,14 +335,14 @@
 
     window.addEventListener('testnexus:execution-starting', (event) => {
       const approvedIds = event.detail?.approvedIds;
-      if (Array.isArray(approvedIds) && approvedIds.length) lastApprovedIds = [...approvedIds];
+      if (!event.detail?.individual && Array.isArray(approvedIds) && approvedIds.length) lastApprovedIds = [...approvedIds];
       hasCompletedExecution = false;
       setTimeout(refreshControls, 0);
     });
     window.addEventListener('testnexus:execution-started', refreshControls);
     window.addEventListener('testnexus:execution-completed', (event) => {
       const approvedIds = event.detail?.approvedIds;
-      if (Array.isArray(approvedIds) && approvedIds.length) lastApprovedIds = [...approvedIds];
+      if (!event.detail?.individual && Array.isArray(approvedIds) && approvedIds.length) lastApprovedIds = [...approvedIds];
       hasCompletedExecution = true;
       const runBtn = document.getElementById('runBtn');
       if (runBtn) runBtn.disabled = false;
