@@ -31,6 +31,11 @@
     const obsoleteBatchField = document.getElementById('readinessBatchSize')?.closest('.field');
     if (obsoleteBatchField) obsoleteBatchField.remove();
 
+    // Keep the review pane compact immediately. This lightweight helper removes the
+    // legacy review banner, shows an animated AI-working state and numbers test cards.
+    document.querySelectorAll('.human-note').forEach((node) => node.remove());
+    loadScript('/generation-activity-ui.js', 'data-generation-activity-ui');
+
     const generateBtn = document.getElementById('generateBtn');
     if (generateBtn && generateBtn.dataset.fastProfileBound !== '1') {
       generateBtn.dataset.fastProfileBound = '1';
