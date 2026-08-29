@@ -79,8 +79,9 @@
     if (!id || generatingReport) return;
 
     const button = document.getElementById('generateAiAnalysisReportBtn');
-    const popup = window.open('', '_blank', 'noopener');
+    const popup = window.open('', '_blank');
     if (popup) {
+      try { popup.opener = null; } catch {}
       try {
         popup.document.write('<!doctype html><title>Generating report…</title><body style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#334155">Generating AI analysis report…</body>');
       } catch {}
