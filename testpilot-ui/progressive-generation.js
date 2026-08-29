@@ -41,6 +41,38 @@
     if (subtitle && subtitle.textContent !== text) subtitle.textContent = text;
   }
 
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+  }
+
+  function mergeGeneratedCases(incoming) {
+    const map = new Map((testCases || []).map((tc) => [String(tc.id || '').toUpperCase(), tc]));
+    for (const tc of incoming || []) {
+      const key = String(tc.id || '').toUpperCase();
+      if (!key) continue;
+      map.set(key, { ...tc, source: tc.source || 'ai', automationReadiness: null });
+    }
+    testCases = [...map.values()].sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true }));
+  }
+
+  function renderGenerationPreview() {
+    const casesEl = $('cases');
+    if (!casesEl) return;
+    const html = (testCases || []).map((tc) => {
+      const category = String(tc.testCategory || 'FUNCTIONAL').replaceAll('_', ' ');
+      const scenarioType = String(tc.type || 'functional');
+      const priority = String(tc.priority || 'medium');
+      return `<div class="generation-case-preview">
+        <div class="generation-case-preview-title">${esc(tc.id)} — ${esc(tc.title)}</div>
+        <div class="generation-case-preview-meta">
+          <span>${esc(scenarioType)}</span><span>${esc(category)}</span><span>${esc(priority)}</span><span class="pending">Readiness pending</span>
+        </div>
+      </div>`;
+    }).join('');
+    casesEl.innerHTML = html || '<div class="empty">Waiting for the first generated test case…</div>';
+    if ($('caseCount')) $('caseCount').textContent = String((testCases || []).length);
+  }
+
   function consumeEventSource(url, onEvent) {
     return new Promise((resolve, reject) => {
       const source = new EventSource(url);
@@ -64,11 +96,7 @@
           }
         });
       }
-      source.onerror = () => {
-        if (settled) return;
-        // EventSource may briefly report a reconnect while the server is closing a completed stream.
-        // Completion/failure events above are authoritative, so wait for them rather than rebuilding UI.
-      };
+      source.onerror = () => {};
     });
   }
 
@@ -118,7 +146,7 @@
     testCases = [];
     resetExecutionState();
     setGenerationUi(true);
-    renderCases();
+    renderGenerationPreview();
     status('Starting generation…');
     setBusy($('generateBtn'), true, 'Generating test cases…');
 
@@ -151,20 +179,21 @@
         } else if (type === 'GENERATION_PLAN') {
           status(`${data.units?.length || total} generation unit(s) planned · AI generation in progress…`);
         } else if (type === 'BATCH_COMPLETED') {
-          generatedCount = Math.max(generatedCount, Number(data.generatedSoFar || 0));
+          mergeGeneratedCases(data.cases || []);
+          generatedCount = Math.max((testCases || []).length, Number(data.generatedSoFar || 0));
+          renderGenerationPreview();
           status(`AI generation in progress · ${generatedCount}/${data.totalRequested || total} completed`);
         }
       };
 
       let completed;
-      // Native EventSource is the lightest path in DB-free/demo mode. Authenticated deployments
-      // keep the fetch-stream fallback because EventSource cannot attach an Authorization header.
       const platformToken = sessionStorage.getItem('aiTestPilotToken') || '';
       if (!platformToken && typeof EventSource === 'function') completed = await consumeEventSource(start.eventsUrl, onEvent);
       else completed = await consumeFetchStream(start.eventsUrl, onEvent);
 
       if (!completed) throw new Error('Generation stream ended before the suite completed.');
-      testCases = (completed.cases || []).map((tc) => ({ ...tc, source: tc.source || 'ai', automationReadiness: null }));
+      mergeGeneratedCases(completed.cases || []);
+      testCases = (testCases || []).map((tc) => ({ ...tc, source: tc.source || 'ai', automationReadiness: null }));
       setGenerationUi(false);
       renderCases();
       setActivityStatus('Checking readiness', true);
@@ -173,7 +202,7 @@
       setGenerationUi(false);
       showError(err.message || 'Generation failed.');
       setActivityStatus('Error', false);
-      renderCases();
+      if ((testCases || []).length) renderCases(); else renderGenerationPreview();
     } finally {
       setGenerationUi(false);
       setBusy($('generateBtn'), false, '');
@@ -186,9 +215,14 @@
       style.id = 'generationStableStyles';
       style.textContent = `
         html.generation-active,body.generation-active{overflow-y:auto!important;pointer-events:auto!important}
-        body.generation-active #reviewFilterBar{display:none!important}
+        body.generation-active #reviewFilterBar,body.generation-active .review-filter-bar,body.generation-active [data-review-filter-bar]{display:none!important}
         body.generation-active #cases{max-height:none!important;overflow:visible!important}
         body.generation-active .modal:not(.show){display:none!important}
+        .generation-case-preview{padding:13px 14px;border-bottom:1px solid #eef1f6;background:#fff}
+        .generation-case-preview-title{font-size:12px;font-weight:800;color:#111827}
+        .generation-case-preview-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+        .generation-case-preview-meta span{padding:3px 7px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:9.5px;font-weight:800;text-transform:uppercase}
+        .generation-case-preview-meta .pending{background:#dbeafe;color:#1d4ed8}
       `;
       document.head.appendChild(style);
     }
