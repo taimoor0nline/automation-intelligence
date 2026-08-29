@@ -5,35 +5,14 @@ const { getSession } = require('../data/sessionStore');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
 const { normalizeTestCategory } = require('../services/testCategories');
 
-const DEFAULT_BATCH_SIZE = 2;
-const MAX_BATCH_SIZE = 50;
-
 function cleanString(value, max = 1000) {
   return String(value ?? '').trim().slice(0, max);
 }
 
-function normalizeBatchSize(value) {
+function normalizePositiveInt(value, fallback = 1, max = 10000) {
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) return DEFAULT_BATCH_SIZE;
-  return Math.max(1, Math.min(MAX_BATCH_SIZE, parsed));
-}
-
-function cookieValue(req, name) {
-  const raw = String(req.headers.cookie || '');
-  for (const part of raw.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
-  }
-  return null;
-}
-
-function requestedBatchSize(req) {
-  return normalizeBatchSize(
-    req.body?.batchSize ??
-    cookieValue(req, 'aiTestPilotReadinessBatchSize') ??
-    process.env.READINESS_BATCH_SIZE ??
-    DEFAULT_BATCH_SIZE
-  );
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(max, parsed);
 }
 
 function normalizeTestCase(raw, fallbackId = 'TC-H001') {
@@ -90,16 +69,20 @@ function context(session) {
 
 function mergeAssessedCases(sessionCases = [], assessed = []) {
   const byId = new Map(assessed.map((tc) => [String(tc?.id || '').toUpperCase(), tc]));
-  return (sessionCases || []).map((current) => {
-    const replacement = byId.get(String(current?.id || '').toUpperCase());
-    return replacement
-      ? { ...current, ...replacement, automationReadiness: replacement.automationReadiness }
-      : current;
+  const seen = new Set();
+  const merged = (sessionCases || []).map((current) => {
+    const id = String(current?.id || '').toUpperCase();
+    const replacement = byId.get(id);
+    if (!replacement) return current;
+    seen.add(id);
+    return { ...current, ...replacement, automationReadiness: replacement.automationReadiness };
   });
-}
 
-function yieldToEventLoop() {
-  return new Promise((resolve) => setImmediate(resolve));
+  for (const candidate of assessed) {
+    const id = String(candidate?.id || '').toUpperCase();
+    if (!seen.has(id) && !merged.some((item) => String(item?.id || '').toUpperCase() === id)) merged.push(candidate);
+  }
+  return merged;
 }
 
 router.post('/api/test-cases/revalidate', async (req, res) => {
@@ -107,6 +90,9 @@ router.post('/api/test-cases/revalidate', async (req, res) => {
     sessionId = 'default',
     testCases = null,
     credentials = null,
+    batchIndex = 1,
+    batchCount = 1,
+    totalCases = null,
   } = req.body || {};
 
   const session = getSession(sessionId);
@@ -119,54 +105,44 @@ router.post('/api/test-cases/revalidate', async (req, res) => {
     updateCredentials(session, credentials);
     session.readinessValidated = false;
 
-    const sourceCases = Array.isArray(testCases) ? testCases : session.testCases;
-    if (!Array.isArray(sourceCases) || !sourceCases.length) {
-      throw new Error('At least one test case is required for readiness validation.');
+    if (!Array.isArray(testCases) || !testCases.length) {
+      throw new Error('At least one test case is required for this readiness batch.');
     }
 
-    const normalized = sourceCases.map((tc, index) =>
+    const normalized = testCases.map((tc, index) =>
       normalizeTestCase(tc, `TC-H${String(index + 1).padStart(3, '0')}`)
     );
+    const assessed = assessTestCases(normalized, context(session));
 
-    const batchSize = requestedBatchSize(req);
-    const batchCount = Math.ceil(normalized.length / batchSize);
-    const assessedAll = [];
+    session.testCases = mergeAssessedCases(session.testCases || [], assessed);
+    session.automationReadiness = readinessSummary(session.testCases);
 
-    for (let index = 0; index < batchCount; index += 1) {
-      const start = index * batchSize;
-      const batch = normalized.slice(start, start + batchSize);
-      const assessed = assessTestCases(batch, context(session));
-      assessedAll.push(...assessed);
+    const normalizedBatchIndex = normalizePositiveInt(batchIndex, 1);
+    const normalizedBatchCount = Math.max(normalizedBatchIndex, normalizePositiveInt(batchCount, 1));
+    const expectedTotal = normalizePositiveInt(totalCases, session.testCases.length || assessed.length);
+    const isFinalBatch = normalizedBatchIndex >= normalizedBatchCount;
+    const allHaveReadiness = session.testCases.length >= expectedTotal &&
+      session.testCases.slice(0, expectedTotal).every((tc) => Boolean(tc?.automationReadiness));
 
-      session.testCases = mergeAssessedCases(session.testCases || [], assessed);
-      session.automationReadiness = readinessSummary(session.testCases);
-
-      console.log(
-        `[readiness-batch] session=${sessionId} batch=${index + 1}/${batchCount} size=${batch.length} ` +
-        `ready=${session.automationReadiness.ready}/${session.automationReadiness.total}`
-      );
-
-      if (index + 1 < batchCount) await yieldToEventLoop();
-    }
-
-    session.readinessValidated = session.testCases.length > 0 &&
-      session.testCases.every((tc) => Boolean(tc?.automationReadiness));
+    session.readinessValidated = isFinalBatch && allHaveReadiness;
 
     console.log(
-      `[readiness] validated ${assessedAll.length} case(s) in ${batchCount} batch(es) of up to ${batchSize}; ` +
-      `complete=${session.readinessValidated ? 'yes' : 'no'} ` +
-      `ready=${session.automationReadiness.ready}/${session.automationReadiness.total}`
+      `[readiness-batch] session=${sessionId} batch=${normalizedBatchIndex}/${normalizedBatchCount} ` +
+      `size=${assessed.length} ready=${session.automationReadiness.ready}/${session.automationReadiness.total} ` +
+      `complete=${session.readinessValidated ? 'yes' : 'no'}`
     );
 
     return res.json({
       ok: true,
-      testCases: assessedAll,
+      testCases: assessed,
       automationReadiness: session.automationReadiness,
       readinessPending: !session.readinessValidated,
       batching: {
-        batchSize,
-        batchCount,
-        total: assessedAll.length,
+        batchIndex: normalizedBatchIndex,
+        batchCount: normalizedBatchCount,
+        batchSize: assessed.length,
+        totalCases: expectedTotal,
+        complete: session.readinessValidated,
       },
     });
   } catch (err) {
