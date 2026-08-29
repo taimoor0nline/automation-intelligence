@@ -9,6 +9,7 @@ const { normalizeProfile } = require("../services/aiModelProfiles");
 const qwen = require("../services/qwenClient");
 const { readinessSummary } = require("../services/testCaseFeasibility");
 const { MAX_GENERATED_CASES, pruneGeneratedTestCases } = require("../services/testCaseScopeFilter");
+const { TEST_CATEGORIES, normalizeTestCategory, inferTestCategory } = require("../services/testCategories");
 
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 const TEST_ID_REGEX = /^TC(?:\d{3}|-H\d{3})$/;
@@ -46,7 +47,32 @@ function pendingReadinessSummary(testCases = []) {
 }
 
 function formatTestCaseList(testCases) {
-  return testCases.map((tc) => `• ${tc.id} [${tc.type}/${tc.priority}] [CHECKING] — ${tc.title}`).join("\n");
+  return testCases.map((tc) => `• ${tc.id} [${tc.type}/${tc.testCategory || "FUNCTIONAL"}/${tc.priority}] [CHECKING] — ${tc.title}`).join("\n");
+}
+
+function normalizeSelectedCategories(input) {
+  const requested = Array.isArray(input) ? input : [];
+  const normalized = requested.map((value) => normalizeTestCategory(value, null)).filter(Boolean);
+  const unique = [...new Set(normalized)].filter((value) => TEST_CATEGORIES.includes(value));
+  return unique.length ? unique : [...TEST_CATEGORIES];
+}
+
+function categoryGenerationInstruction(categories) {
+  const labels = categories.join(", ");
+  return `\n\nTEST CATEGORY SCOPE SELECTED BY THE HUMAN REVIEWER:\n${labels}\nGenerate scenarios only for these selected testing categories. Treat category as the PURPOSE of the test, separately from scenario type (positive/negative/boundary/functional). Make each scenario's title, preconditions and expected behaviour clearly reflect its intended testing category without inventing requirements that are absent from the business story or discovery evidence. When multiple categories are selected, distribute the suite across them where the supplied evidence genuinely supports doing so. SECURITY means evidence-supported security/access-control/input-safety checks only; do not invent vulnerabilities. PERFORMANCE means evidence-supported response/page timing checks only. ACCESSIBILITY means evidence-supported accessibility checks. API applies only when the supplied story/discovery supports an API-related scenario. LOAD and STRESS are planning/reporting categories in this browser flow; do not simulate concurrency or claim true load/stress execution through Cypress browser actions.`;
+}
+
+function applySelectedCategories(testCases, selectedCategories, story) {
+  const allowed = new Set(selectedCategories);
+  return (testCases || []).map((testCase, index) => {
+    let category = inferTestCategory({ story, testCase });
+    if (!allowed.has(category)) {
+      category = selectedCategories.length === 1
+        ? selectedCategories[0]
+        : selectedCategories[index % selectedCategories.length];
+    }
+    return { ...testCase, testCategory: normalizeTestCategory(category) };
+  });
 }
 
 function discoveryCacheKey(urls) { return [...urls].sort().join("\n"); }
@@ -74,6 +100,7 @@ router.post("/api/chat", async (req, res) => {
     targetUrl: explicitTargetUrl,
     additionalPaths = [],
     credentials = null,
+    selectedTestCategories = TEST_CATEGORIES,
     aiModelTier = process.env.AI_MODEL_DEFAULT || "strong",
     bypassDiscoveryCache = false,
   } = req.body || {};
@@ -91,11 +118,13 @@ router.post("/api/chat", async (req, res) => {
       const targetUrl = normalizeTargetUrl(rawUrl);
       const story = String(message || "").trim();
       if (!story) throw new Error("Please enter a business user story.");
+      const categories = normalizeSelectedCategories(selectedTestCategories);
 
       session.story = story;
       session.targetUrl = targetUrl;
       session.environment = FIXED_ENVIRONMENT;
       session.additionalPaths = Array.isArray(additionalPaths) ? additionalPaths : [];
+      session.selectedTestCategories = categories;
       session.aiModelTier = normalizeProfile(aiModelTier);
       session.credentials = credentials && typeof credentials === "object"
         ? { username: String(credentials.username || ""), password: String(credentials.password || "") }
@@ -111,7 +140,8 @@ router.post("/api/chat", async (req, res) => {
       stage = "AI test generation";
       const modelDiscoveries = compactDiscoveriesForModel(session.pageDiscoveries);
       const aiStartedAt = Date.now();
-      const generated = await qwen.generateTestCases({ story, pageDiscoveries: modelDiscoveries, environment: FIXED_ENVIRONMENT, modelTier: session.aiModelTier });
+      const generationStory = `${story}${categoryGenerationInstruction(categories)}`;
+      const generated = await qwen.generateTestCases({ story: generationStory, pageDiscoveries: modelDiscoveries, environment: FIXED_ENVIRONMENT, modelTier: session.aiModelTier });
       const aiGenerationMs = Date.now() - aiStartedAt;
 
       stage = "scope test cases";
@@ -125,22 +155,24 @@ router.post("/api/chat", async (req, res) => {
       }
 
       stage = "prepare human review";
-      session.testCases = scopedCases.map((tc) => ({ ...tc, source: "ai", automationReadiness: null }));
+      session.testCases = applySelectedCategories(scopedCases, categories, story).map((tc) => ({ ...tc, source: "ai", automationReadiness: null }));
       session.automationReadiness = pendingReadinessSummary(session.testCases);
       session.readinessValidated = false;
       session.state = "AWAITING_APPROVAL";
 
       const totalMs = Date.now() - requestStartedAt;
       const cacheLabel = discoveryResult.cacheHit ? " cache-hit" : discoveryResult.bypassed ? " cache-bypassed" : " fresh";
-      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length} cases=${session.testCases.length}`);
+      console.log(`[test-generation] profile=${session.aiModelTier} discovery=${discoveryMs}ms${cacheLabel} ai=${aiGenerationMs}ms total=${totalMs}ms pages=${session.pageDiscoveries.length} cases=${session.testCases.length} categories=${categories.join(",")}`);
 
       return res.json({
-        reply: `AI generated ${session.testCases.length} story-driven test case(s), up to a maximum of ${MAX_GENERATED_CASES}, from ${session.pageDiscoveries.length} discovered page(s). They are available for human review now; automation readiness is being checked separately.\n\n${formatTestCaseList(session.testCases)}`,
+        reply: `AI generated ${session.testCases.length} story-driven test case(s), up to the configured maximum of ${MAX_GENERATED_CASES}, from ${session.pageDiscoveries.length} discovered page(s). Selected categories: ${categories.join(", ")}. They are available for human review now; automation readiness is being checked separately.\n\n${formatTestCaseList(session.testCases)}`,
         feature: generated.feature || null,
         testCases: session.testCases,
         pageDiscoveries: session.pageDiscoveries,
         automationReadiness: session.automationReadiness,
         readinessPending: true,
+        selectedTestCategories: categories,
+        maxGeneratedCases: MAX_GENERATED_CASES,
         aiModelTier: session.aiModelTier,
         generationTiming: { discoveryMs, discoveryCacheHit: discoveryResult.cacheHit, discoveryCacheBypassed: discoveryResult.bypassed, aiGenerationMs, totalMs },
       });
