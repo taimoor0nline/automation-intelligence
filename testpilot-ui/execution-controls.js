@@ -137,6 +137,9 @@
   async function cancelRun() {
     const session = sid();
     if (!session || cancellationRequested) return;
+    const confirmed = window.confirm('Cancel the currently running automation? Any unfinished test cases will stop, while the reviewed test suite will remain available for re-run.');
+    if (!confirmed) return;
+
     const button = document.getElementById('cancelExecutionBtn');
     cancellationRequested = true;
     if (button) { button.disabled = true; button.textContent = 'Cancelling…'; }
