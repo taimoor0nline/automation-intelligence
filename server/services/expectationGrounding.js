@@ -1,5 +1,6 @@
 const INDEX_CACHE = new WeakMap();
-const { phrasesForSelector, hasSelectorIntent } = require('./expectationIntentRegistry');
+const { phrasesForSelector, hasSelectorIntent, detectedIntents } = require('./expectationIntentRegistry');
+const { capabilitiesForElement } = require('./webCapabilityMatrix');
 
 const STOP_WORDS = new Set([
   'the','a','an','is','are','be','becomes','become','with','without','and','or','to','of','in','on','for','after','before','successfully','successful','user','element','field','form','page','text','message','displayed','visible','shown','appears','appear','accept','accepts','input','valid','validation','errors','error','feedback','submission','submit','button','value','data','all','reference','generated',
@@ -46,11 +47,14 @@ function buildIndex(pageDiscoveries = []) {
   const entries = [];
   const paths = new Set();
   const seenSelectors = new Set();
+  const capabilityCounts = new Map();
   const register = (item, path) => {
     const selector = selectorFor(item);
     if (!selector || seenSelectors.has(selector)) return;
     seenSelectors.add(selector);
-    entries.push({ selector, item, path, words: new Set(semanticWords(itemText(item, selector))) });
+    const capabilities = new Set(Array.isArray(item?.capabilities) ? item.capabilities : capabilitiesForElement(item));
+    for (const capability of capabilities) capabilityCounts.set(capability, (capabilityCounts.get(capability) || 0) + 1);
+    entries.push({ selector, item, path, capabilities, words: new Set(semanticWords(itemText(item, selector))) });
   };
   for (const page of pageDiscoveries || []) {
     const path = pathForPage(page);
@@ -61,7 +65,7 @@ function buildIndex(pageDiscoveries = []) {
     }
     for (const message of page?.messages || []) register(message, path);
   }
-  const index = { entries, paths };
+  const index = { entries, paths, capabilityCounts };
   if (pageDiscoveries && typeof pageDiscoveries === 'object') INDEX_CACHE.set(pageDiscoveries, index);
   return index;
 }
@@ -94,6 +98,32 @@ function resolvePathExpectation(text, index) {
   return { text: `Path equals "${best.path}"`, source: 'discovery-path', path: best.path, confidence: best.score };
 }
 
+function requiredCapabilitiesForExpectation(text) {
+  const source = String(text || '');
+  const lower = source.toLowerCase();
+  const required = new Set(detectedIntents(source).map((rule) => rule.key));
+  if (/\b(text|message|label|caption|heading|content)\b|thank|error|required/i.test(source) && /contains|equals|exact|display|show|appear|text|message/i.test(source)) required.add('TEXT');
+  if (/\bvalue\b|field.*(?:empty|non-empty|contains|equals)/i.test(source)) required.add('VALUE');
+  if (/selected\s+(?:value|option)/i.test(source)) required.add('SELECTED_VALUE');
+  if (/selected\s+(?:option\s+)?text/i.test(source)) required.add('SELECTED_TEXT');
+  if (/\boptions?\b.*\b(count|exactly|at least|at most|\d+)/i.test(source)) required.add('OPTION_COUNT');
+  if (/placeholder/i.test(lower)) required.add('PLACEHOLDER');
+  if (/read.?only/i.test(lower)) required.add(/not read.?only|editable/i.test(lower) ? 'EDITABLE' : 'READONLY');
+  if (/\bmin(?:imum)?\b/i.test(lower)) required.add('MIN');
+  if (/\bmax(?:imum)?\b/i.test(lower)) required.add('MAX');
+  if (/minlength|min length/i.test(lower)) required.add('MIN_LENGTH');
+  if (/maxlength|max length/i.test(lower)) required.add('MAX_LENGTH');
+  if (/pattern/i.test(lower)) required.add('PATTERN');
+  if (/image.*loaded|loaded image/i.test(lower)) required.add('IMAGE_LOADED');
+  if (/alt(?:ernative)? text/i.test(lower)) required.add('IMAGE_ALT');
+  return [...required];
+}
+
+function supportsRequiredCapabilities(entry, required) {
+  if (!required.length) return true;
+  return required.every((capability) => entry.capabilities.has(capability));
+}
+
 function candidateScore(expectationWords, entry) {
   let score = 0;
   for (const word of expectationWords) if (entry.words.has(word)) score += 1;
@@ -104,16 +134,19 @@ function resolveSelectorExpectation(text, index) {
   if (!hasSelectorIntent(text)) return null;
   const words = semanticWords(text);
   if (!words.length) return null;
+  const requiredCapabilities = requiredCapabilitiesForExpectation(text);
   let best = null;
   let secondScore = 0;
   for (const entry of index.entries) {
+    if (!supportsRequiredCapabilities(entry, requiredCapabilities)) continue;
     const score = candidateScore(words, entry);
     if (!best || score > best.score) {
       secondScore = best?.score || 0;
       best = { entry, score };
     } else if (score > secondScore) secondScore = score;
   }
-  // Strong, unambiguous local evidence only. This keeps the resolver scalable without guessing.
+  // Strong, unambiguous local evidence only. Capability filtering removes impossible
+  // targets before semantic scoring, while this threshold prevents guessing among valid ones.
   if (!best || best.score < 2 || best.score === secondScore) return null;
 
   const selector = best.entry.selector;
@@ -122,11 +155,18 @@ function resolveSelectorExpectation(text, index) {
   const parts = phrasesForSelector(text, selector);
   if (!parts.length) parts.push(`Element ${selector} exists`);
 
-  if (quotedMessage && /text|message|panel|reference|label|thank|error|required|success/i.test(text)) {
+  if (quotedMessage && best.entry.capabilities.has('TEXT') && /text|message|panel|reference|label|thank|error|required|success/i.test(text)) {
     parts.push(`Text contains "${quotedMessage}" in ${selector}`);
   }
 
-  return { text: parts.join(' and '), source: 'discovery-selector', selector, confidence: best.score };
+  return {
+    text: parts.join(' and '),
+    source: 'discovery-capability-matrix',
+    selector,
+    confidence: best.score,
+    requiredCapabilities,
+    matchedCapabilities: [...best.entry.capabilities],
+  };
 }
 
 function normalizeTestIdPhrase(text) {
@@ -143,13 +183,28 @@ function resolveExpectation(value, index) {
   if (path) return { original, resolved: true, ...path };
   const selector = resolveSelectorExpectation(normalized, index);
   if (selector) return { original, resolved: true, ...selector };
-  return { original, text: normalized, resolved: false, source: 'narrative', confidence: 0 };
+  return { original, text: normalized, resolved: false, source: 'narrative', confidence: 0, requiredCapabilities: requiredCapabilitiesForExpectation(normalized) };
 }
 
 function resolveExpectedResults(expectedResults = [], pageDiscoveries = []) {
   const index = buildIndex(pageDiscoveries);
   const records = (expectedResults || []).map((value) => resolveExpectation(value, index));
-  return { results: records.map((record) => record.text), records, indexStats: { selectors: index.entries.length, paths: index.paths.size } };
+  return {
+    results: records.map((record) => record.text),
+    records,
+    indexStats: {
+      selectors: index.entries.length,
+      paths: index.paths.size,
+      capabilities: Object.fromEntries([...index.capabilityCounts.entries()].sort(([a],[b]) => a.localeCompare(b))),
+    },
+  };
 }
 
-module.exports = { buildIndex, resolveExpectedResults, resolveExpectation, normalizeTestIdPhrase };
+module.exports = {
+  buildIndex,
+  resolveExpectedResults,
+  resolveExpectation,
+  normalizeTestIdPhrase,
+  requiredCapabilitiesForExpectation,
+  supportsRequiredCapabilities,
+};
