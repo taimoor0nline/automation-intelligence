@@ -21,12 +21,12 @@
     if (document.querySelector(`script[${marker}]`)) return;
     const script = document.createElement('script');
     script.src = src;
-    script.async = false;
+    script.async = true;
     script.setAttribute(marker, 'true');
     document.body.appendChild(script);
   }
 
-  function start() {
+  function prepareBaseUi() {
     setFastProfile();
     const obsoleteBatchField = document.getElementById('readinessBatchSize')?.closest('.field');
     if (obsoleteBatchField) obsoleteBatchField.remove();
@@ -36,9 +36,9 @@
       generateBtn.dataset.fastProfileBound = '1';
       generateBtn.addEventListener('click', () => setFastProfile(), true);
     }
+  }
 
-    // Navigation is intentionally first and has no dependency on health, database, auth, AI, or readiness.
-    loadScript('/fast-mode-navigation.js', 'data-fast-mode-navigation');
+  function loadPrimaryEnhancements() {
     loadScript('/testnexus-branding.js', 'data-testnexus-branding');
     loadScript('/generation-types.js', 'data-generation-types');
     loadScript('/selection-master-fix.js', 'data-selection-master-fix');
@@ -48,6 +48,9 @@
     loadScript('/review-filters.js', 'data-review-filters');
     loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
+  }
+
+  function loadSecondaryEnhancements() {
     loadScript('/test-case-compare.js', 'data-test-case-compare');
     loadScript('/execution-report-actions.js', 'data-execution-report-actions');
     loadScript('/execution-controls.js', 'data-execution-controls');
@@ -55,6 +58,27 @@
     loadScript('/streaming-failure-analysis.js', 'data-streaming-failure-analysis');
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  function scheduleEnhancements() {
+    const afterLoad = () => {
+      const primary = () => loadPrimaryEnhancements();
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(primary, { timeout: 700 });
+      else setTimeout(primary, 80);
+
+      setTimeout(() => {
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(loadSecondaryEnhancements, { timeout: 1500 });
+        else loadSecondaryEnhancements();
+      }, 700);
+    };
+
+    if (document.readyState === 'complete') afterLoad();
+    else window.addEventListener('load', afterLoad, { once: true });
+  }
+
+  function start() {
+    prepareBaseUi();
+    scheduleEnhancements();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
 })();
