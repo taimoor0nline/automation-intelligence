@@ -37,8 +37,10 @@ function normalizeActionAlias(step) {
 function assertionFromVerificationStep(step) {
   const action = humanizeActionName(step?.action);
   const target = String(step?.target || "").trim();
-  const value = step?.value === null || step?.value === undefined ? "" : String(step.value);
+  const value = step?.value === null || step?.value === undefined ? "" : String(step.value).trim();
   if (!/^verify\b|^assert\b|^expect\b/.test(action)) return "";
+
+  const intent = `${action} ${value}`.replace(/\s+/g, " ").trim().toLowerCase();
 
   if (/\burl\b|\bpath\b|navigation|redirect/.test(action)) {
     const destination = value || target;
@@ -49,15 +51,22 @@ function assertionFromVerificationStep(step) {
   }
 
   if (target && (target.startsWith("[") || target.startsWith("#") || target.startsWith("."))) {
-    if (/not visible|hidden/.test(action)) return `Element ${target} is hidden`;
-    if (/not exist|absent/.test(action)) return `Element ${target} does not exist`;
+    if (/does not exist|doesn't exist|not exist|\babsent\b|not present|removed/.test(intent)) return `Element ${target} does not exist`;
+    if (/not visible|\bhidden\b|\binvisible\b/.test(intent)) return `Element ${target} is hidden`;
+    if (/not checked|\bunchecked\b/.test(intent)) return `Element ${target} is unchecked`;
+    if (/\bchecked\b/.test(intent)) return `Element ${target} is checked`;
+    if (/\bdisabled\b|not enabled/.test(intent)) return `Element ${target} is disabled`;
+    if (/\benabled\b/.test(intent)) return `Element ${target} is enabled`;
+    if (/\boptional\b|not required/.test(intent)) return `Element ${target} is optional`;
+    if (/\brequired\b/.test(intent)) return `Element ${target} is required`;
+    if (/\binvalid\b/.test(intent)) return `Element ${target} is invalid`;
+    if (/\bvalid\b/.test(intent) && !/\binvalid\b/.test(intent)) return `Element ${target} is valid`;
     if (/text/.test(action) && value) {
-      if (/contains|include/.test(action)) return `Text contains "${value}" in ${target}`;
+      if (/contains|include/.test(intent)) return `Text contains "${value}" in ${target}`;
       return `Text equals "${value}" in ${target}`;
     }
-    if (/checked/.test(action)) return `Element ${target} is checked`;
-    if (/enabled/.test(action)) return `Element ${target} is enabled`;
-    if (/disabled/.test(action)) return `Element ${target} is disabled`;
+    if (/\bvisible\b|\bshown\b|\bdisplayed\b|\bappears?\b/.test(intent)) return `Element ${target} is visible`;
+    // Generic verification of a selector with no explicit state remains an existence/visibility check.
     return `Element ${target} is visible`;
   }
   return "";
