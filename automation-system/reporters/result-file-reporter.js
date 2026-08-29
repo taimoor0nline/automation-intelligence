@@ -16,6 +16,7 @@ module.exports = function ResultFileReporter(runner) {
   const testStartedHr = new WeakMap();
   const outcomes = new WeakMap();
   const recorded = new WeakSet();
+  const progressFile = process.env.AUTOMATION_PROGRESS_FILE || "";
 
   runner.on("test", (test) => {
     testStartedAt.set(test, Date.now());
@@ -45,6 +46,32 @@ module.exports = function ResultFileReporter(runner) {
     outcomes.set(test, { state, err });
   }
 
+  function progressPayload(complete = false) {
+    return {
+      source: "mocha-live-progress",
+      complete,
+      totalCompleted: tests.length,
+      passed: tests.filter((t) => t.state === "passed").length,
+      failed: tests.filter((t) => t.state === "failed").length,
+      pending: tests.filter((t) => t.state === "pending").length,
+      durationMs: Date.now() - startedAt,
+      tests: [...tests],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function writeProgress(complete = false) {
+    if (!progressFile) return;
+    try {
+      fs.mkdirSync(path.dirname(progressFile), { recursive: true });
+      const tempFile = `${progressFile}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(progressPayload(complete), null, 2), "utf8");
+      fs.renameSync(tempFile, progressFile);
+    } catch (err) {
+      console.warn(`[automation-reporter] Could not write live progress: ${err.message}`);
+    }
+  }
+
   function pushAtTestEnd(test) {
     if (!test || recorded.has(test)) return;
     const outcome = outcomes.get(test);
@@ -58,6 +85,8 @@ module.exports = function ResultFileReporter(runner) {
       durationMs: durationFor(test),
       err: safeError(outcome.err),
     });
+    writeProgress(false);
+    console.log(`[automation-reporter] Incremental result ${tests.length}: ${outcome.state} · ${String(title || "")}`);
   }
 
   runner.on("pass", (test) => remember(test, "passed"));
@@ -66,6 +95,8 @@ module.exports = function ResultFileReporter(runner) {
   runner.on("test end", (test) => pushAtTestEnd(test));
 
   runner.once("end", () => {
+    writeProgress(true);
+
     const authoritativeFile = process.env.AUTOMATION_RESULT_FILE;
     if (!authoritativeFile) return;
 
