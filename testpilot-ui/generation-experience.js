@@ -38,10 +38,12 @@
     }
 
     loadScript('/generation-types.js', 'data-generation-types');
+    loadScript('/selection-master-fix.js', 'data-selection-master-fix');
     loadScript('/progressive-generation.js', 'data-progressive-generation');
     loadScript('/review-filters.js', 'data-review-filters');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/test-case-compare.js', 'data-test-case-compare');
+    loadScript('/execution-report-actions.js', 'data-execution-report-actions');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
