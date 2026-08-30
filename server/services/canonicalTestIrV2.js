@@ -8,18 +8,44 @@ function normalizeCredential(value) {
   return ['username','password'].includes(credential) ? credential : '';
 }
 
-function preprocessIr(ir) {
+function loginEvidenceRef(registry = {}) {
+  const elements = Array.isArray(registry.elements) ? registry.elements : [];
+  const score = (element) => {
+    const source = [element.elementRef, element.testId, element.id, element.name, element.label, element.text, element.ariaLabel]
+      .filter(Boolean).join(' ').toLowerCase();
+    if (/login[- ]?button|sign\s*in|log\s*in/.test(source)) return 4;
+    if (/username|user[- ]?name/.test(source)) return 3;
+    if (/password/.test(source)) return 2;
+    return 0;
+  };
+  return [...elements]
+    .map((element) => ({ element, score: score(element) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.element?.elementRef || null;
+}
+
+function preprocessIr(ir, context = {}) {
   if (!ir || typeof ir !== 'object') return ir;
+  const loginRef = loginEvidenceRef(context.registry);
   return {
     ...ir,
     actions: (Array.isArray(ir.actions) ? ir.actions : []).map((action) => {
-      if (String(action?.operation || '').trim().toUpperCase() !== RUNTIME_CREDENTIAL_OPERATION) return action;
-      const credential = normalizeCredential(action.credential);
-      return {
-        operation: 'TYPE',
-        elementRef: action.elementRef,
-        value: `${SENTINEL_PREFIX}${credential}`,
-      };
+      const operation = String(action?.operation || '').trim().toUpperCase();
+      if (operation === RUNTIME_CREDENTIAL_OPERATION) {
+        const credential = normalizeCredential(action.credential);
+        return {
+          operation: 'TYPE',
+          elementRef: action.elementRef,
+          value: `${SENTINEL_PREFIX}${credential}`,
+        };
+      }
+      // LOGIN_VALID remains a single execution helper, but carry one discovered
+      // login-control ref through validation so planned-intent drift checks have
+      // deterministic evidence that the helper belongs to the login surface.
+      if (operation === 'LOGIN_VALID' && loginRef && !action.elementRef) {
+        return { ...action, elementRef: loginRef };
+      }
+      return action;
     }),
   };
 }
@@ -42,7 +68,7 @@ function validateCanonicalIr(ir, context = {}) {
     };
   }
 
-  const processed = preprocessIr(ir);
+  const processed = preprocessIr(ir, context);
   const validated = base.validateCanonicalIr(processed, context);
   if (!validated.ok) return validated;
 
@@ -87,4 +113,5 @@ module.exports = {
   validateCanonicalIr,
   canonicalActionCatalog,
   RUNTIME_CREDENTIAL_OPERATION,
+  loginEvidenceRef,
 };
