@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { modelForProfile } = require('./aiModelProfiles');
 const { refreshCapabilityConfiguration, visualBaselineMode } = require('./capabilityConfiguration');
+const { resolveRuntimeWorkflowContext } = require('./workflowRuntimeContext');
 
 function numberEnv(value, fallback) {
   const n = Number(value);
@@ -153,12 +154,15 @@ Important rules:
 - maxTestCases is a HARD UPPER LIMIT, never a target. Never pad the suite just to reach it.
 - Decide how many tests are actually justified by the business story and discovered UI evidence. Return between 1 and maxTestCases.
 - The business story defines scope. Discovery provides evidence and must not broaden the requirement.
+- workflowRequirements, when supplied, are explicit user-authored business workflow requirements. Treat them as authoritative workflow context within the story scope; do not invent extra approval stages, role transitions or state changes.
+- actorCatalog contains only configured runtime test roles and never contains credentials. Allocate a cross-role workflow test only when workflowRequirements/story require it and the required roles are present in actorCatalog.
+- Preserve user-stated role order in planned rationales, for example Requester -> Manager -> Approver. If a required role is not available in actorCatalog, put that limitation in knownGaps instead of planning an unrunnable role handoff.
 - NEVER repurpose an unrelated discovered control to imitate a feature from the story. A search box is not a feedback field, a generic button is not a login button, etc.
 - Use only categories in allowedCategories and scenario types in allowedScenarioTypes.
 - Positive, negative and boundary are scenario types. FUNCTIONAL is a test category, not a scenario type.
 - Each planned test must cover a materially distinct behavior, rule, risk, state or boundary.
 - For large suites, keep every unit rationale concise. It is valid to propose 100-200 units when the evidenced application surface genuinely justifies that many distinct tests.
-- Do not invent validation rules, boundaries, messages, controls, selectors or business rules that are absent from the story/discovery.
+- Do not invent validation rules, boundaries, messages, controls, selectors or business rules that are absent from the story/discovery/workflow requirements.
 - runtimeCapabilities is authoritative for advanced automation availability. Use an advanced capability only when the story actually requires it AND runtimeCapabilities marks it available.
 - If the story requires an advanced capability that is unavailable, put that limitation in knownGaps instead of allocating an unrunnable test solely for it.
 - CAPTCHA/biometric support means an explicitly configured vendor-supported non-production test adapter only. Never propose defeating a production security challenge.
@@ -209,9 +213,13 @@ async function proposeGenerationPlan({
   if (!categories.length) throw new Error('At least one test category is required for AI coverage planning.');
   if (!scenarioTypes.length) throw new Error('At least one scenario type is required for AI coverage planning.');
 
+  const runtimeWorkflow = resolveRuntimeWorkflowContext();
   const capabilities = runtimeCapabilities();
   const result = await callModel(PLAN_PROMPT, {
     story,
+    workflowRequirements: runtimeWorkflow.workflowRequirements || null,
+    actorCatalog: runtimeWorkflow.availableActors,
+    workflowActorSequence: runtimeWorkflow.workflowContext.actorSequence,
     pageDiscoveries,
     runtimeCapabilities: capabilities,
     allowedCategories: categories,
@@ -259,6 +267,9 @@ async function proposeGenerationPlan({
     coveredAreas: cleanTextArray(result?.coveredAreas, 100),
     knownGaps: cleanTextArray(result?.knownGaps, 100),
     runtimeCapabilities: capabilities,
+    workflowRequirements: runtimeWorkflow.workflowRequirements || null,
+    actorCatalog: runtimeWorkflow.actorCatalog,
+    availableActorRefs: runtimeWorkflow.actorCredentialRefs,
     units,
   };
 }
