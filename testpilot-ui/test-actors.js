@@ -32,7 +32,7 @@
       <div class="workflow-requirement-field">
         <label for="workflowRequirements">Workflow requirements</label>
         <textarea id="workflowRequirements" maxlength="5000" placeholder="Example: Requester submits a request. Manager reviews it. Approver approves it. Requester then verifies the final approved status."></textarea>
-        <small>Use this for role handoffs, approval order, state transitions, prerequisites, or other workflow rules that are important to the test design.</small>
+        <small>Use this for role handoffs, approval order, state transitions, prerequisites, or other workflow rules. This text is AI context, so do not enter passwords, tokens, connection strings, or other secrets here.</small>
       </div>
       <div id="testActorRows"></div>
       <div class="test-actor-actions"><span id="testActorCount" class="test-actor-count">No role actors configured.</span><button id="addTestActorBtn" class="btn ghost" type="button">+ Add role</button></div>
