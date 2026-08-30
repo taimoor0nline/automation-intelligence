@@ -1,6 +1,6 @@
 const legacy = require('./automationDslV13');
 const { buildCanonicalElementRegistry } = require('./canonicalElementRegistry');
-const { validateCanonicalIr } = require('./canonicalTestIr');
+const { validateCanonicalIr } = require('./canonicalTestIrV2');
 
 function compileTestCase(testCase, context = {}) {
   if (testCase?.canonicalIr) {
