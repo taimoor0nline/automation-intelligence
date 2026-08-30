@@ -1,5 +1,8 @@
 const { compileTestCase, externalConfigured } = require("./automationDsl");
 const { normalizeTestCaseForAutomation } = require("./automationCaseNormalizer");
+const { normalizeActorProfiles, publicActorCatalog } = require("./testActorProfiles");
+const requestContext = require("./requestContext");
+const { getSession } = require("../data/sessionStore");
 
 const READY = "READY";
 const NOT_AUTOMATABLE = "NOT_AUTOMATABLE";
@@ -101,7 +104,46 @@ function normalizationEvidence(testCase) {
   return (testCase?._deterministicNormalizations || []).map((item) => `Deterministic normalization: ${item}`);
 }
 
-function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = false } = {}) {
+function credentialRefsFromMap(value = {}) {
+  return Object.entries(value && typeof value === "object" ? value : {})
+    .filter(([, credentials]) => credentials?.username && credentials?.password)
+    .map(([actorRef]) => String(actorRef));
+}
+
+function resolveActorContext(context = {}) {
+  let actorCatalog = publicActorCatalog(context.actorCatalog || []);
+  let actorCredentialRefs = [...new Set((Array.isArray(context.actorCredentialRefs) ? context.actorCredentialRefs : []).map(String).filter(Boolean))];
+  const current = requestContext.current();
+  const session = current.sessionId ? getSession(current.sessionId) : null;
+
+  if (!actorCatalog.length && session?.testActors?.length) actorCatalog = publicActorCatalog(session.testActors);
+  if (!actorCredentialRefs.length && session?.actorCredentials) actorCredentialRefs = credentialRefsFromMap(session.actorCredentials);
+
+  if ((!actorCatalog.length || !actorCredentialRefs.length) && Array.isArray(current.testActors) && current.testActors.length) {
+    const normalized = normalizeActorProfiles(current.testActors);
+    if (!actorCatalog.length) actorCatalog = normalized.catalog;
+    if (!actorCredentialRefs.length) actorCredentialRefs = credentialRefsFromMap(normalized.credentials);
+    if (session) {
+      session.testActors = normalized.catalog;
+      session.actorCredentials = normalized.credentials;
+    }
+  }
+
+  return { actorCatalog, actorCredentialRefs };
+}
+
+function requiredActorRefs(testCase) {
+  return [...new Set((testCase?.canonicalIr?.actions || [])
+    .filter((action) => String(action?.operation || "").toUpperCase() === "LOGIN_AS_ACTOR")
+    .map((action) => String(action?.actorRef || "").trim())
+    .filter(Boolean))];
+}
+
+function classifyTestCase(testCase, context = {}) {
+  const pageDiscoveries = context.pageDiscoveries || [];
+  const hasCredentials = Boolean(context.hasCredentials);
+  const actorContext = resolveActorContext(context);
+
   if (!testCase || typeof testCase !== "object") return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MALFORMED_TEST_CASE", reason: "The test case is missing or malformed.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!String(testCase.title || "").trim()) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_TITLE", reason: "A test-case title is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!Array.isArray(testCase.steps) || !testCase.steps.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_STEPS", reason: "At least one executable test step is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
@@ -142,11 +184,19 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
   if (selectorProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_SELECTOR", reason: `The test references a selector that was not verified during page discovery: ${selectorProblems[0]}`, reasons: selectorProblems.map((selector) => `Undiscovered selector: ${selector}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...normalizationNotes, ...[...discovery.selectors].slice(0, 50)] });
   if (pathProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_PATH", reason: `The test references a navigation path that was not verified during page discovery: ${pathProblems[0]}`, reasons: pathProblems.map((path) => `Undiscovered navigation path: ${path}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...normalizationNotes, ...[...discovery.paths].slice(0, 30)] });
 
-  const compiled = compileTestCase(normalized, { pageDiscoveries, hasCredentials });
+  const compiled = compileTestCase(normalized, {
+    pageDiscoveries,
+    hasCredentials,
+    actorCatalog: actorContext.actorCatalog,
+    actorCredentialRefs: actorContext.actorCredentialRefs,
+  });
   if (!compiled.ok) {
-    const userInput = compiled.reasonCode === "MISSING_CREDENTIALS";
+    const userInput = ["MISSING_CREDENTIALS", "MISSING_ACTOR_CREDENTIALS"].includes(compiled.reasonCode);
     const assertionGap = compiled.reasonCode === "ASSERTION_CAPABILITY_MISSING";
     const configurationGap = ["EXTERNAL_ADAPTER_NOT_CONFIGURED", "DATABASE_ASSERTION_NOT_CONFIGURED"].includes(compiled.reasonCode);
+    const actorInputs = compiled.reasonCode === "MISSING_ACTOR_CREDENTIALS"
+      ? requiredActorRefs(normalized).map((actorRef) => `credentials:${actorRef}`)
+      : [];
     return result({
       status: assertionGap || configurationGap ? REQUIRES_FRAMEWORK_CAPABILITY : INSUFFICIENT_EVIDENCE,
       automatable: false,
@@ -156,7 +206,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
         : compiled.reason || "The test case could not be compiled into the supported automation contract.",
       reasons: compiled.errors || [],
       resolutionType: userInput ? RESOLUTION_USER_INPUT_REQUIRED : assertionGap || configurationGap ? RESOLUTION_FRAMEWORK_CHANGE_REQUIRED : RESOLUTION_AI_REPAIRABLE,
-      requiredInputs: userInput ? ["username", "password"] : [],
+      requiredInputs: compiled.reasonCode === "MISSING_CREDENTIALS" ? ["username", "password"] : actorInputs,
       evidence: [...normalizationNotes, ...(compiled.supportedAssertions || compiled.supportedOperations || [])],
       assertionSuggestions: compiled.assertionSuggestions || [],
       uncompiledExpectations: compiled.uncompiledExpectations || [],
@@ -216,7 +266,8 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       advanced.length ? `Advanced capabilities: ${advanced.join(", ")}` : null,
       `${discovery.selectors.size} discovered selector(s) available`,
       `${discovery.paths.size} discovered path(s) available`,
-      hasCredentials ? "Runtime credentials available when required" : "No runtime credential dependency detected",
+      actorContext.actorCatalog.length ? `${actorContext.actorCredentialRefs.length}/${actorContext.actorCatalog.length} configured role actor credential set(s) available` : null,
+      hasCredentials ? "Runtime credentials available when required" : "No default runtime credential dependency detected",
     ].filter(Boolean),
   });
 }
@@ -264,4 +315,5 @@ module.exports = {
   assessTestCases,
   readinessSummary,
   buildDiscoveryEvidence,
+  resolveActorContext,
 };
