@@ -41,10 +41,27 @@ function securityOf(testCase) {
   };
 }
 
+function publicActorDirectory(value = []) {
+  return (Array.isArray(value) ? value : []).slice(0, 500).map((actor) => ({
+    actorRef: String(actor?.actorRef || '').trim().slice(0, 80),
+    role: String(actor?.role || '').trim().slice(0, 80),
+    displayName: String(actor?.displayName || actor?.role || '').trim().slice(0, 100),
+    description: String(actor?.description || '').trim().slice(0, 300) || null,
+    enabled: actor?.enabled !== false,
+    source: String(actor?.source || '').trim().slice(0, 40) || null,
+    sourceRow: Number.isFinite(Number(actor?.sourceRow)) ? Number(actor.sourceRow) : null,
+  })).filter((actor) => actor.actorRef && actor.role);
+}
+
 function buildSafeSessionPayload(session = {}) {
   const targetType = String(session.targetType || 'WEB').toUpperCase() === 'REST' ? 'REST' : 'WEB';
   const apiTargetId = targetType === 'REST' ? (session.apiTargetId || null) : null;
   const apiOperationIds = targetType === 'REST' && Array.isArray(session.apiOperationIds) ? session.apiOperationIds : [];
+  const directory = publicActorDirectory(session.testActorDirectory || []);
+  const directoryRefs = new Set(directory.map((actor) => actor.actorRef));
+  const activeRefs = [...new Set((Array.isArray(session.testActorActiveRefs) ? session.testActorActiveRefs : [])
+    .map(String)
+    .filter((ref) => directoryRefs.has(ref)))].slice(0, 12);
   return {
     state: session.state,
     targetType,
@@ -54,9 +71,11 @@ function buildSafeSessionPayload(session = {}) {
     environment: session.environment,
     additionalPaths: session.additionalPaths,
     aiModelTier: session.aiModelTier,
-    // Persist only public role metadata. Runtime usernames/passwords stay exclusively
-    // in session.actorCredentials and are intentionally excluded from PostgreSQL.
+    // Persist public actor metadata only. Runtime usernames/passwords stay exclusively
+    // in actorCredentials/testActorDirectoryCredentials and are never serialized.
     testActors: publicActorCatalog(session.testActors || []),
+    testActorDirectory: directory,
+    testActorActiveRefs: activeRefs,
     apiTargetId,
     apiOperationIds,
     apiOperations: targetType === 'REST' ? (session.apiOperations || []) : [],
