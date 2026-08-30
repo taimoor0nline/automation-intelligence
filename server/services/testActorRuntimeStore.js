@@ -72,6 +72,20 @@ function setFromSession(sessionId, session = {}) {
   });
 }
 
+function copy(sourceSessionId, targetSessionId) {
+  const state = get(sourceSessionId);
+  const target = String(targetSessionId || '').trim();
+  if (!state || !target) return false;
+  set(target, {
+    directory: state.directory,
+    directoryCredentials: state.directoryCredentials,
+    activeRefs: state.activeRefs,
+    activeCatalog: state.activeCatalog,
+    activeCredentials: state.activeCredentials,
+  });
+  return true;
+}
+
 function applyToSession(sessionId, session) {
   const state = get(sessionId);
   if (!state || !session) return false;
@@ -97,4 +111,4 @@ function clear(sessionId) {
   states.delete(String(sessionId || '').trim());
 }
 
-module.exports = { set, get, setFromSession, applyToSession, activeProfiles, clear };
+module.exports = { set, get, setFromSession, copy, applyToSession, activeProfiles, clear };
