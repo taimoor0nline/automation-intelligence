@@ -54,10 +54,11 @@
     loadScript('/review-filters.js', 'data-review-filters');
     loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
-    // add-test-mode.js is loaded synchronously by the server shell. Load this helper
-    // after window load so manual authoring can replace narrative steps with the
-    // supported Cypress syntax adapter without racing the editor bootstrap.
+    // add-test-mode.js is loaded synchronously by the server shell. These helpers
+    // are loaded after window load and turn new manual browser tests into a supported
+    // Cypress-syntax authoring flow instead of free-form narrative automation steps.
     loadScript('/manual-cypress-authoring.js', 'data-manual-cypress-authoring');
+    loadScript('/manual-cypress-authoring-ux.js', 'data-manual-cypress-authoring-ux');
   }
 
   function loadSecondaryEnhancements() {
