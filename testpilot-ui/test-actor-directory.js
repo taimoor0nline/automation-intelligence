@@ -186,29 +186,32 @@
     const previousFetch = window.fetch.bind(window);
     window.fetch = async function (input, init = {}) {
       const url = typeof input === 'string' ? input : input?.url || '';
-      if (url === '/api/generation/start' && init?.body && typeof init.body === 'string') {
-        try {
-          const payload = JSON.parse(init.body);
-          const directorySessionId = window.__testNexusActorDirectorySessionId || '';
-          if (directorySessionId) {
-            payload.actorDirectorySessionId = directorySessionId;
-            // Imported directory state is server-owned. Do not replace it with blank
-            // manual rows when generation starts.
-            delete payload.testActors;
-          } else if (typeof window.getTestNexusTestActors === 'function') {
-            const actors = window.getTestNexusTestActors();
-            if (actors.length) payload.testActors = actors;
-          }
-          const response = await previousFetch(input, { ...init, body: JSON.stringify(payload) });
-          if (response.ok && directorySessionId && payload.sessionId) {
-            window.__testNexusActorDirectorySessionId = payload.sessionId;
-          }
-          return response;
-        } catch (err) {
-          if (/Role actor .* incomplete/i.test(String(err?.message || ''))) throw err;
-        }
+      if (url !== '/api/generation/start' || !init?.body || typeof init.body !== 'string') {
+        return previousFetch(input, init);
       }
-      return previousFetch(input, init);
+
+      let payload;
+      try { payload = JSON.parse(init.body); }
+      catch { return previousFetch(input, init); }
+
+      const directorySessionId = window.__testNexusActorDirectorySessionId || '';
+      if (directorySessionId) {
+        payload.actorDirectorySessionId = directorySessionId;
+        // Imported directory state is server-owned. Do not replace it with blank
+        // manual rows when generation starts.
+        delete payload.testActors;
+      } else if (typeof window.getTestNexusTestActors === 'function') {
+        // Deliberately allow this validation error to reach the caller instead of
+        // issuing a second generation request.
+        const actors = window.getTestNexusTestActors();
+        if (actors.length) payload.testActors = actors;
+      }
+
+      const response = await previousFetch(input, { ...init, body: JSON.stringify(payload) });
+      if (response.ok && directorySessionId && payload.sessionId) {
+        window.__testNexusActorDirectorySessionId = payload.sessionId;
+      }
+      return response;
     };
   }
 
