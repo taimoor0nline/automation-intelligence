@@ -96,5 +96,20 @@
     updateCount();
   };
 
+  const previousFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : input?.url;
+    if (url === '/api/generation/start' && String(init?.method || 'GET').toUpperCase() === 'POST' && typeof init?.body === 'string') {
+      try {
+        const payload = JSON.parse(init.body);
+        payload.testActors = window.getTestNexusTestActors();
+        return previousFetch(input, { ...init, body: JSON.stringify(payload) });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    return previousFetch(input, init);
+  };
+
   updateCount();
 })();
