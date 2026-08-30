@@ -8,6 +8,15 @@ const storage = new AsyncLocalStorage();
 
 function middleware(req, _res, next) {
   const sessionId = String(req.body?.sessionId || req.params?.sessionId || req.query?.sessionId || '').trim() || null;
+  const actorDirectorySessionId = String(req.body?.actorDirectorySessionId || req.headers?.['x-test-actor-directory-session'] || '').trim() || null;
+
+  // The browser may prepare/import actors before the generation UI chooses its final
+  // run session id. Copy that short-lived runtime state into the actual generation
+  // session before any route reset occurs.
+  if (sessionId && actorDirectorySessionId && actorDirectorySessionId !== sessionId) {
+    actorRuntimeStore.copy(actorDirectorySessionId, sessionId);
+  }
+
   const session = sessionId ? getSession(sessionId) : null;
   if (sessionId && session) actorRuntimeStore.applyToSession(sessionId, session);
 
@@ -43,6 +52,7 @@ function middleware(req, _res, next) {
 
   storage.run({
     sessionId,
+    actorDirectorySessionId,
     user: req.user || null,
     projectId: session?.projectId || null,
     repositoryId: session?.repositoryId || null,
