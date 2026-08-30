@@ -49,16 +49,23 @@ function capabilitiesFor(item = {}) {
   const tag = clean(item.tag || item.tagName, 30).toLowerCase();
   const type = clean(item.type, 40).toLowerCase();
   const capabilities = new Set(['ASSERT_EXISTS', 'ASSERT_VISIBLE']);
-  const textLike = !['input', 'textarea', 'select'].includes(tag) || ['button', 'submit'].includes(type);
-  if (textLike || item.text || item.label || item.ariaLabel) capabilities.add('TEXT');
-  if (tag === 'input' || tag === 'textarea' || tag === 'select') capabilities.add('VALUE');
+  const isFormControl = ['input', 'textarea', 'select'].includes(tag);
+  const textLike = !isFormControl || ['button', 'submit'].includes(type);
+
+  // Labels/placeholders describe a control but are not the control's DOM text.
+  // Only elements that can actually carry rendered text receive TEXT capability.
+  if (textLike || item.text) capabilities.add('TEXT');
+
+  if (isFormControl) {
+    capabilities.add('VALUE');
+    capabilities.add('VALIDITY');
+  }
   if (tag === 'input' || tag === 'textarea') capabilities.add('TYPE');
   if (tag === 'select') capabilities.add('SELECT');
   if (type === 'checkbox' || type === 'radio') capabilities.add('CHECK');
   if (tag === 'button' || type === 'button' || type === 'submit' || type === 'checkbox' || type === 'radio' || item.href) capabilities.add('CLICK');
   if (type === 'file') capabilities.add('SELECT_FILE');
   if (item.required !== undefined) capabilities.add('REQUIRED_STATE');
-  if (item.min !== undefined || item.max !== undefined || item.minlength !== undefined || item.maxlength !== undefined || item.pattern) capabilities.add('VALIDITY');
   return [...capabilities].sort();
 }
 
@@ -206,4 +213,5 @@ module.exports = {
   registryForModel,
   selectorFor,
   pagePath,
+  capabilitiesFor,
 };
