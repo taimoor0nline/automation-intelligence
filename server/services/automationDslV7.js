@@ -67,9 +67,31 @@ function textIdentityConflicts(compiled, context = {}) {
   return conflicts;
 }
 
+function quotedValues(value) {
+  const out = [];
+  const regex = /["'`]([^"'`]*)["'`]/g;
+  let match;
+  while ((match = regex.exec(String(value || ''))) !== null) out.push(match[1]);
+  return out;
+}
+
+function explicitlyRequestsIdentityText(testCase, conflict) {
+  const selector = String(conflict?.selector || '').trim();
+  const expectedToken = identityToken(conflict?.expected);
+  if (!selector || !expectedToken) return false;
+
+  return (testCase?.expectedResults || []).some((item) => {
+    const source = String(item || '');
+    if (!source.includes(selector)) return false;
+    if (!/\btext\b/i.test(source)) return false;
+    return quotedValues(source).some((value) => identityToken(value) === expectedToken);
+  });
+}
+
 function compileTestCase(testCase, context = {}) {
   const compiled = v6.compileTestCase(testCase, context);
-  const conflicts = textIdentityConflicts(compiled, context);
+  const conflicts = textIdentityConflicts(compiled, context)
+    .filter((conflict) => explicitlyRequestsIdentityText(testCase, conflict));
   if (!conflicts.length) return compiled;
 
   const first = conflicts[0];
@@ -105,4 +127,5 @@ module.exports = {
   compileTestCase,
   textIdentityConflicts,
   isIdentityOnlyExpectedText,
+  explicitlyRequestsIdentityText,
 };
