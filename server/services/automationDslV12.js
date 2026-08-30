@@ -2,11 +2,12 @@ const v11 = require('./automationDslV11');
 const { normalizeTestCaseForAutomation } = require('./automationCaseNormalizer');
 
 function compileTestCase(testCase, context = {}) {
+  const prior = Array.isArray(testCase?._deterministicNormalizations) ? testCase._deterministicNormalizations : [];
   const normalized = normalizeTestCaseForAutomation(testCase, context);
+  const normalizations = [...new Set([...prior, ...(normalized?._deterministicNormalizations || [])])];
   const compiled = v11.compileTestCase(normalized, context);
-  if (!compiled || !normalized?._deterministicNormalizations?.length) return compiled;
+  if (!compiled || !normalizations.length) return compiled;
 
-  const normalizations = normalized._deterministicNormalizations;
   if (compiled.ok && compiled.plan) {
     return {
       ...compiled,
