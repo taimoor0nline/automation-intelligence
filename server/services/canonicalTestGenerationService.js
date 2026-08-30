@@ -134,19 +134,32 @@ function normalizePriority(value) {
   return ['low','medium','high'].includes(priority) ? priority : 'medium';
 }
 
+function configuredActorRefsFromMap(value = {}) {
+  return Object.entries(value && typeof value === 'object' ? value : {})
+    .filter(([, credentials]) => credentials?.username && credentials?.password)
+    .map(([actorRef]) => String(actorRef));
+}
+
 function resolveActorRuntime(actorCatalog = [], actorCredentialRefs = []) {
   let safeActors = publicActorCatalog(actorCatalog);
   let configuredActorRefs = [...new Set((Array.isArray(actorCredentialRefs) ? actorCredentialRefs : []).map(String).filter(Boolean))];
   const current = requestContext.current();
+  const session = current.sessionId ? getSession(current.sessionId) : null;
+
+  // Prefer already-normalized in-memory session state. This survives the long-running
+  // SSE/batched generation path without requiring raw credentials in AI payloads.
+  if (!safeActors.length && session?.testActors?.length) safeActors = publicActorCatalog(session.testActors);
+  if (!configuredActorRefs.length && session?.actorCredentials) configuredActorRefs = configuredActorRefsFromMap(session.actorCredentials);
+
+  // Generation requests can also carry a fresh role catalog. Normalize it once,
+  // store safe metadata + runtime-only credentials in session, and expose only the
+  // safe catalog/credential presence to the model/validator.
   if ((!safeActors.length || !configuredActorRefs.length) && Array.isArray(current.testActors) && current.testActors.length) {
     const normalized = normalizeActorProfiles(current.testActors);
-    safeActors = normalized.catalog;
-    configuredActorRefs = Object.entries(normalized.credentials)
-      .filter(([, credentials]) => credentials?.username && credentials?.password)
-      .map(([actorRef]) => actorRef);
-    if (current.sessionId) {
-      const session = getSession(current.sessionId);
-      session.testActors = safeActors;
+    if (!safeActors.length) safeActors = normalized.catalog;
+    if (!configuredActorRefs.length) configuredActorRefs = configuredActorRefsFromMap(normalized.credentials);
+    if (session) {
+      session.testActors = normalized.catalog;
       session.actorCredentials = normalized.credentials;
     }
   }
@@ -291,4 +304,5 @@ async function generateCanonicalBatch({
 module.exports = {
   CANONICAL_PROMPT,
   generateCanonicalBatch,
+  resolveActorRuntime,
 };
