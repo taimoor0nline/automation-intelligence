@@ -8,6 +8,10 @@ function normalizeCredential(value) {
   return ['username','password'].includes(credential) ? credential : '';
 }
 
+function elementMap(registry = {}) {
+  return new Map((registry.elements || []).map((element) => [String(element.elementRef || ''), element]));
+}
+
 function loginEvidenceRef(registry = {}) {
   const elements = Array.isArray(registry.elements) ? registry.elements : [];
   const score = (element) => {
@@ -22,6 +26,88 @@ function loginEvidenceRef(registry = {}) {
     .map((element) => ({ element, score: score(element) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)[0]?.element?.elementRef || null;
+}
+
+function hasCapability(element, capability) {
+  return Boolean(element && Array.isArray(element.capabilities) && element.capabilities.includes(capability));
+}
+
+function validateElementCapabilities(ir, registry = {}) {
+  const errors = [];
+  const byRef = elementMap(registry);
+  const actionRequirements = {
+    TYPE: 'TYPE',
+    TYPE_RUNTIME_CREDENTIAL: 'TYPE',
+    CLEAR: 'VALUE',
+    SELECT: 'SELECT',
+    CHECK: 'CHECK',
+    UNCHECK: 'CHECK',
+    CLICK: 'CLICK',
+    DBLCLICK: 'CLICK',
+    RIGHTCLICK: 'CLICK',
+    SELECT_FILE: 'SELECT_FILE',
+  };
+  for (const action of ir?.actions || []) {
+    const operation = String(action?.operation || '').trim().toUpperCase();
+    const required = actionRequirements[operation];
+    if (!required || !action.elementRef) continue;
+    const element = byRef.get(String(action.elementRef));
+    if (element && !hasCapability(element, required)) {
+      errors.push(`${operation} is incompatible with ${action.elementRef}; discovery does not provide capability ${required}.`);
+    }
+  }
+
+  const assertionRequirements = {
+    ASSERT_TEXT_EQUALS: 'TEXT',
+    ASSERT_TEXT_CONTAINS: 'TEXT',
+    ASSERT_TEXT_NOT_CONTAINS: 'TEXT',
+    ASSERT_TEXT_EMPTY: 'TEXT',
+    ASSERT_TEXT_NOT_EMPTY: 'TEXT',
+    ASSERT_HTML_EQUALS: 'TEXT',
+    ASSERT_HTML_CONTAINS: 'TEXT',
+    ASSERT_VALUE_EQUALS: 'VALUE',
+    ASSERT_VALUE_CONTAINS: 'VALUE',
+    ASSERT_VALUE_EMPTY: 'VALUE',
+    ASSERT_VALUE_NOT_EMPTY: 'VALUE',
+    ASSERT_VALUE_LENGTH_EQUALS: 'VALUE',
+    ASSERT_VALUE_LENGTH_AT_MOST: 'VALUE',
+    ASSERT_VALUE_LENGTH_AT_LEAST: 'VALUE',
+    ASSERT_CHECKED: 'CHECK',
+    ASSERT_UNCHECKED: 'CHECK',
+    ASSERT_SELECTED_VALUE_EQUALS: 'SELECT',
+    ASSERT_SELECTED_TEXT_EQUALS: 'SELECT',
+    ASSERT_OPTION_COUNT_EQUALS: 'SELECT',
+    ASSERT_VALID: 'VALIDITY',
+    ASSERT_INVALID: 'VALIDITY',
+  };
+  for (const assertion of ir?.assertions || []) {
+    const operation = String(assertion?.operation || '').trim().toUpperCase();
+    const required = assertionRequirements[operation];
+    if (!required || !assertion.elementRef) continue;
+    const element = byRef.get(String(assertion.elementRef));
+    if (element && !hasCapability(element, required)) {
+      errors.push(`${operation} is incompatible with ${assertion.elementRef}; discovery does not provide capability ${required}.`);
+    }
+  }
+  return errors;
+}
+
+function validateNavigationEvidence(ir, registry = {}) {
+  const paths = (registry.pages || []).map((page) => String(page.path || '')).filter(Boolean);
+  const urls = (registry.pages || []).map((page) => String(page.url || '')).filter(Boolean);
+  const errors = [];
+  for (const assertion of ir?.assertions || []) {
+    const operation = String(assertion?.operation || '').trim().toUpperCase();
+    if (operation === 'ASSERT_PATH_INCLUDES') {
+      const fragment = String(assertion.fragment ?? assertion.value ?? '').trim();
+      if (!fragment || !paths.some((path) => path.includes(fragment))) errors.push(`ASSERT_PATH_INCLUDES fragment is not evidenced by discovered paths: ${fragment || '(missing)'}.`);
+    }
+    if (['ASSERT_URL_INCLUDES','ASSERT_URL_NOT_INCLUDES'].includes(operation)) {
+      const fragment = String(assertion.fragment ?? assertion.value ?? '').trim();
+      if (!fragment || ![...paths, ...urls].some((value) => value.includes(fragment))) errors.push(`${operation} fragment is not evidenced by discovered URLs/paths: ${fragment || '(missing)'}.`);
+    }
+  }
+  return errors;
 }
 
 function preprocessIr(ir, context = {}) {
@@ -53,7 +139,10 @@ function preprocessIr(ir, context = {}) {
 function validateCanonicalIr(ir, context = {}) {
   const originalActions = Array.isArray(ir?.actions) ? ir.actions : [];
   const runtimeActions = originalActions.filter((action) => String(action?.operation || '').trim().toUpperCase() === RUNTIME_CREDENTIAL_OPERATION);
-  const errors = [];
+  const errors = [
+    ...validateElementCapabilities(ir, context.registry || {}),
+    ...validateNavigationEvidence(ir, context.registry || {}),
+  ];
   for (const action of runtimeActions) {
     const credential = normalizeCredential(action.credential);
     if (!credential) errors.push(`${RUNTIME_CREDENTIAL_OPERATION} requires credential username|password.`);
@@ -114,4 +203,6 @@ module.exports = {
   canonicalActionCatalog,
   RUNTIME_CREDENTIAL_OPERATION,
   loginEvidenceRef,
+  validateElementCapabilities,
+  validateNavigationEvidence,
 };
