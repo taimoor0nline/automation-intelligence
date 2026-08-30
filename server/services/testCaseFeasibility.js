@@ -1,4 +1,5 @@
 const { compileTestCase, externalConfigured } = require("./automationDsl");
+const { normalizeTestCaseForAutomation } = require("./automationCaseNormalizer");
 
 const READY = "READY";
 const NOT_AUTOMATABLE = "NOT_AUTOMATABLE";
@@ -96,13 +97,19 @@ function requiresRuntimeCredentials(testCase) {
     (testCase.steps || []).some((step) => /configured test (?:username|password)|valid credentials|runtime credentials/i.test(String(step?.action || "")));
 }
 
+function normalizationEvidence(testCase) {
+  return (testCase?._deterministicNormalizations || []).map((item) => `Deterministic normalization: ${item}`);
+}
+
 function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = false } = {}) {
   if (!testCase || typeof testCase !== "object") return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MALFORMED_TEST_CASE", reason: "The test case is missing or malformed.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!String(testCase.title || "").trim()) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_TITLE", reason: "A test-case title is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!Array.isArray(testCase.steps) || !testCase.steps.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_STEPS", reason: "At least one executable test step is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
   if (!Array.isArray(testCase.expectedResults) || !testCase.expectedResults.length) return result({ status: INVALID_TEST_CASE, automatable: false, reasonCode: "MISSING_EXPECTED_RESULTS", reason: "At least one expected result is required.", resolutionType: RESOLUTION_AI_REPAIRABLE });
 
-  const fullText = JSON.stringify(testCase);
+  const normalized = normalizeTestCaseForAutomation(testCase, { pageDiscoveries, hasCredentials });
+  const normalizationNotes = normalizationEvidence(normalized);
+  const fullText = JSON.stringify(normalized);
   for (const rule of CAPABILITY_RULES) {
     if (!rule.pattern.test(fullText)) continue;
     if (externalConfigured(rule.capability)) continue;
@@ -113,17 +120,18 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       reason: `${rule.reason} Configure AUTOMATION_EXTERNAL_ADAPTER_URL and enable ${rule.capability}.`,
       resolutionType: RESOLUTION_FRAMEWORK_CHANGE_REQUIRED,
       requiredInputs: ["AUTOMATION_EXTERNAL_ADAPTER_URL", rule.capability],
+      evidence: normalizationNotes,
     });
   }
 
-  if (requiresRuntimeCredentials(testCase) && !hasCredentials) {
-    return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "MISSING_CREDENTIALS", reason: "Valid runtime credentials are required for this test case but have not been supplied.", resolutionType: RESOLUTION_USER_INPUT_REQUIRED, requiredInputs: ["username", "password"] });
+  if (requiresRuntimeCredentials(normalized) && !hasCredentials) {
+    return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "MISSING_CREDENTIALS", reason: "Valid runtime credentials are required for this test case but have not been supplied.", resolutionType: RESOLUTION_USER_INPUT_REQUIRED, requiredInputs: ["username", "password"], evidence: normalizationNotes });
   }
 
   const discovery = buildDiscoveryEvidence(pageDiscoveries);
   const selectorProblems = [];
   const pathProblems = [];
-  for (const step of testCase.steps) {
+  for (const step of normalized.steps || []) {
     const target = String(step?.target || "").trim();
     const action = String(step?.action || "").toLowerCase();
     const value = String(step?.value ?? "").trim();
@@ -131,10 +139,10 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
     if (/navigate|open|visit|continue to/.test(action) && value.startsWith("/") && !discovery.paths.has(value)) pathProblems.push(value);
   }
 
-  if (selectorProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_SELECTOR", reason: `The test references a selector that was not verified during page discovery: ${selectorProblems[0]}`, reasons: selectorProblems.map((selector) => `Undiscovered selector: ${selector}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...discovery.selectors].slice(0, 50) });
-  if (pathProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_PATH", reason: `The test references a navigation path that was not verified during page discovery: ${pathProblems[0]}`, reasons: pathProblems.map((path) => `Undiscovered navigation path: ${path}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...discovery.paths].slice(0, 30) });
+  if (selectorProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_SELECTOR", reason: `The test references a selector that was not verified during page discovery: ${selectorProblems[0]}`, reasons: selectorProblems.map((selector) => `Undiscovered selector: ${selector}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...normalizationNotes, ...[...discovery.selectors].slice(0, 50)] });
+  if (pathProblems.length) return result({ status: INSUFFICIENT_EVIDENCE, automatable: false, reasonCode: "UNDISCOVERED_PATH", reason: `The test references a navigation path that was not verified during page discovery: ${pathProblems[0]}`, reasons: pathProblems.map((path) => `Undiscovered navigation path: ${path}`), resolutionType: RESOLUTION_AI_REPAIRABLE, evidence: [...normalizationNotes, ...[...discovery.paths].slice(0, 30)] });
 
-  const compiled = compileTestCase(testCase, { pageDiscoveries, hasCredentials });
+  const compiled = compileTestCase(normalized, { pageDiscoveries, hasCredentials });
   if (!compiled.ok) {
     const userInput = compiled.reasonCode === "MISSING_CREDENTIALS";
     const assertionGap = compiled.reasonCode === "ASSERTION_CAPABILITY_MISSING";
@@ -149,7 +157,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       reasons: compiled.errors || [],
       resolutionType: userInput ? RESOLUTION_USER_INPUT_REQUIRED : assertionGap || configurationGap ? RESOLUTION_FRAMEWORK_CHANGE_REQUIRED : RESOLUTION_AI_REPAIRABLE,
       requiredInputs: userInput ? ["username", "password"] : [],
-      evidence: compiled.supportedAssertions || compiled.supportedOperations || [],
+      evidence: [...normalizationNotes, ...(compiled.supportedAssertions || compiled.supportedOperations || [])],
       assertionSuggestions: compiled.assertionSuggestions || [],
       uncompiledExpectations: compiled.uncompiledExpectations || [],
       expectationCoverage: compiled.expectationCoverage || null,
@@ -169,6 +177,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
       reasons: (coverage.details || []).filter((item) => !item.compiled).map((item) => `Unresolved expected result: ${item.expectation}`),
       resolutionType: RESOLUTION_AI_REPAIRABLE,
       evidence: [
+        ...normalizationNotes,
         `${compiled.plan.actions.length} deterministic action(s) compiled`,
         `${compiled.plan.assertions.length} deterministic assertion(s) compiled`,
         `${coverage.compiled}/${coverage.total} expected result(s) compiled`,
@@ -200,6 +209,7 @@ function classifyTestCase(testCase, { pageDiscoveries = [], hasCredentials = fal
     uncompiledExpectations: narratives,
     expectationCoverage: coverage,
     evidence: [
+      ...normalizationNotes,
       `${compiled.plan.actions.length} deterministic action(s) compiled`,
       `${compiled.plan.assertions.length} deterministic assertion(s) compiled`,
       coverage ? `${coverage.compiled}/${coverage.total} human expectation(s) compiled (${coverage.percent}%)` : null,
