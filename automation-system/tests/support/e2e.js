@@ -39,29 +39,59 @@ function safeEvidenceName(title) {
   return `${id}-${suffix || "completion"}`;
 }
 
-Cypress.Commands.add("loginWithRuntimeCredentials", () => {
-  const username = Cypress.env("TEST_USERNAME");
-  const password = Cypress.env("TEST_PASSWORD");
-  const loginPath = Cypress.env("LOGIN_PATH") || "/";
-  const successPath = Cypress.env("LOGIN_SUCCESS_PATH") || "";
-  const usernameSelector = Cypress.env("LOGIN_USERNAME_SELECTOR");
-  const passwordSelector = Cypress.env("LOGIN_PASSWORD_SELECTOR");
-  const submitSelector = Cypress.env("LOGIN_SUBMIT_SELECTOR");
+function loginRuntime() {
+  return {
+    loginPath: Cypress.env("LOGIN_PATH") || "/",
+    successPath: Cypress.env("LOGIN_SUCCESS_PATH") || "",
+    usernameSelector: Cypress.env("LOGIN_USERNAME_SELECTOR"),
+    passwordSelector: Cypress.env("LOGIN_PASSWORD_SELECTOR"),
+    submitSelector: Cypress.env("LOGIN_SUBMIT_SELECTOR"),
+  };
+}
 
+function performGroundedLogin(username, password) {
+  const runtime = loginRuntime();
   if (!username || !password) throw new Error("Runtime login credentials are not configured for this test run.");
-  if (!usernameSelector || !passwordSelector || !submitSelector) throw new Error("Runtime login controls were not grounded from page discovery.");
+  if (!runtime.usernameSelector || !runtime.passwordSelector || !runtime.submitSelector) throw new Error("Runtime login controls were not grounded from page discovery.");
 
-  cy.visit(loginPath);
-  cy.get(usernameSelector).clear({ log: false }).type(String(username), { log: false });
-  cy.get(passwordSelector).clear({ log: false }).type(String(password), { log: false });
-  cy.get(submitSelector).click();
-
-  // Do not let the next-page actions run until the application proves that
-  // authentication completed. The expected path is derived from discovery and
-  // the approved automation plan, not hard-coded for a specific application.
-  if (successPath && successPath !== loginPath) {
-    cy.location("pathname", { timeout: 15000 }).should("eq", successPath);
+  cy.visit(runtime.loginPath);
+  cy.get(runtime.usernameSelector).clear({ log: false }).type(String(username), { log: false });
+  cy.get(runtime.passwordSelector).clear({ log: false }).type(String(password), { log: false });
+  cy.get(runtime.submitSelector).click();
+  if (runtime.successPath && runtime.successPath !== runtime.loginPath) {
+    cy.location("pathname", { timeout: 15000 }).should("eq", runtime.successPath);
   }
+}
+
+function configuredActors() {
+  const raw = Cypress.env("TEST_ACTORS_JSON");
+  if (!raw) return {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    throw new Error("Runtime test actor configuration is malformed.");
+  }
+}
+
+Cypress.Commands.add("loginWithRuntimeCredentials", () => {
+  performGroundedLogin(Cypress.env("TEST_USERNAME"), Cypress.env("TEST_PASSWORD"));
+});
+
+Cypress.Commands.add("loginAsTestActor", (actorRef) => {
+  const ref = String(actorRef || "").trim();
+  const actor = configuredActors()[ref] || null;
+  if (!ref || !actor?.username || !actor?.password) throw new Error(`Runtime credentials are not configured for test actor ${ref || "(missing)"}.`);
+
+  // A role handoff must not inherit another user's authenticated browser state.
+  // Clear cookies/local/session storage before entering the common grounded login flow.
+  cy.clearCookies({ log: false });
+  cy.clearLocalStorage({ log: false });
+  cy.window({ log: false }).then((win) => {
+    try { win.sessionStorage.clear(); } catch {}
+  });
+  performGroundedLogin(actor.username, actor.password);
 });
 
 ["click", "type", "select", "check", "uncheck", "clear"].forEach((commandName) => {
