@@ -74,7 +74,12 @@ function markHydrated(id) { hydrated.add(id); }
 function resetSession(id) {
   sessions.delete(id);
   hydrated.delete(id);
-  return getSession(id);
+  const session = getSession(id);
+  // Generation intentionally resets ordinary run state. Imported actor credentials are
+  // held in a separate short-lived runtime store so that reset does not erase the actor
+  // directory the user just prepared. The lazy require avoids a module-cycle at startup.
+  try { require('../services/testActorRuntimeStore').applyToSession(id, session); } catch {}
+  return session;
 }
 
 module.exports = { getSession, resetSession, hydrateSession, isHydrated, markHydrated };
