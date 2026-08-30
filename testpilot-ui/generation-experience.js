@@ -35,6 +35,7 @@
     // optional runtime-only role identities before progressive generation starts.
     loadScript('/test-actors.js', 'data-test-actors');
     loadScript('/test-actor-directory.js', 'data-test-actor-directory');
+    loadScript('/test-actor-login-visibility.js', 'data-test-actor-login-visibility');
 
     // Keep the review pane compact immediately. This lightweight helper removes the
     // legacy review banner, shows an animated AI-working state and numbers test cards.
