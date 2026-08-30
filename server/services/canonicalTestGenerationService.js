@@ -1,9 +1,7 @@
 const { modelForProfile } = require('./aiModelProfiles');
 const { runtimeCapabilities } = require('./progressiveTestGenerator');
 const { registryForModel } = require('./canonicalElementRegistry');
-const { normalizeActorProfiles, publicActorCatalog } = require('./testActorProfiles');
-const requestContext = require('./requestContext');
-const { getSession } = require('../data/sessionStore');
+const { resolveRuntimeWorkflowContext } = require('./workflowRuntimeContext');
 const { IR_VERSION, canonicalActionCatalog, canonicalAssertionCatalog, validateCanonicalIr } = require('./canonicalTestIrV3');
 const { generateCypressPreviewFromPlan } = require('./deterministicAutomationGeneratorV6');
 
@@ -67,6 +65,8 @@ const CANONICAL_PROMPT = `You are TestNexus's canonical test-case generator. The
 NON-NEGOTIABLE CONTRACT:
 - Return exactly one case for every planned unit, using its exact plannedId. Do not omit, merge, replace, reorder semantically, or substitute another validation/field/boundary.
 - The planned objective is authoritative. A planned email-format test may not become a subject-length test. A planned login-empty-field test may not become a feedback validation test.
+- workflowRequirements, when present, are explicit user-authored workflow rules. Preserve the stated business sequence and role handoffs relevant to the planned objective. Do not invent another stage, approver, role or transition.
+- workflowActorSequence is a safe role-reference sequence inferred from those requirements. When a planned objective is a cross-role workflow, LOGIN_AS_ACTOR actions must follow the relevant stated sequence.
 - Use only elementRef values supplied in canonicalElementRegistry. NEVER output CSS selectors, XPath, ids, test ids, invented controls, or raw DOM targets.
 - Use only canonical action/assertion operations supplied in the catalogs.
 - English prose is display metadata only. actions/assertions are the execution truth.
@@ -134,36 +134,15 @@ function normalizePriority(value) {
   return ['low','medium','high'].includes(priority) ? priority : 'medium';
 }
 
-function configuredActorRefsFromMap(value = {}) {
-  return Object.entries(value && typeof value === 'object' ? value : {})
-    .filter(([, credentials]) => credentials?.username && credentials?.password)
-    .map(([actorRef]) => String(actorRef));
-}
-
-function resolveActorRuntime(actorCatalog = [], actorCredentialRefs = []) {
-  let safeActors = publicActorCatalog(actorCatalog);
-  let configuredActorRefs = [...new Set((Array.isArray(actorCredentialRefs) ? actorCredentialRefs : []).map(String).filter(Boolean))];
-  const current = requestContext.current();
-  const session = current.sessionId ? getSession(current.sessionId) : null;
-
-  // Prefer already-normalized in-memory session state. This survives the long-running
-  // SSE/batched generation path without requiring raw credentials in AI payloads.
-  if (!safeActors.length && session?.testActors?.length) safeActors = publicActorCatalog(session.testActors);
-  if (!configuredActorRefs.length && session?.actorCredentials) configuredActorRefs = configuredActorRefsFromMap(session.actorCredentials);
-
-  // Generation requests can also carry a fresh role catalog. Normalize it once,
-  // store safe metadata + runtime-only credentials in session, and expose only the
-  // safe catalog/credential presence to the model/validator.
-  if ((!safeActors.length || !configuredActorRefs.length) && Array.isArray(current.testActors) && current.testActors.length) {
-    const normalized = normalizeActorProfiles(current.testActors);
-    if (!safeActors.length) safeActors = normalized.catalog;
-    if (!configuredActorRefs.length) configuredActorRefs = configuredActorRefsFromMap(normalized.credentials);
-    if (session) {
-      session.testActors = normalized.catalog;
-      session.actorCredentials = normalized.credentials;
-    }
-  }
-  return { safeActors, configuredActorRefs };
+function resolveActorRuntime(actorCatalog = [], actorCredentialRefs = [], workflowRequirements = null) {
+  const runtime = resolveRuntimeWorkflowContext({ actorCatalog, actorCredentialRefs, workflowRequirements });
+  return {
+    safeActors: runtime.actorCatalog,
+    availableActors: runtime.availableActors,
+    configuredActorRefs: runtime.actorCredentialRefs,
+    workflowRequirements: runtime.workflowRequirements,
+    workflowContext: runtime.workflowContext,
+  };
 }
 
 async function generateCanonicalBatch({
@@ -176,20 +155,23 @@ async function generateCanonicalBatch({
   hasCredentials = false,
   actorCatalog = [],
   actorCredentialRefs = [],
+  workflowRequirements = null,
   securitySubcategories = [],
   securitySeverities = [],
 }) {
   if (!registry?.elements?.length) throw new Error('Canonical element registry is required before AI test generation.');
   if (!Array.isArray(plannedUnits) || !plannedUnits.length) throw new Error('At least one canonical planned unit is required.');
 
-  const actorRuntime = resolveActorRuntime(actorCatalog, actorCredentialRefs);
+  const actorRuntime = resolveActorRuntime(actorCatalog, actorCredentialRefs, workflowRequirements);
   const safeActors = actorRuntime.safeActors;
   const configuredActorRefs = actorRuntime.configuredActorRefs;
-  const availableActors = safeActors.filter((actor) => configuredActorRefs.includes(actor.actorRef));
+  const availableActors = actorRuntime.availableActors;
   const capabilities = runtimeCapabilities();
   const result = await callModel(CANONICAL_PROMPT, {
     irVersion: IR_VERSION,
     story,
+    workflowRequirements: actorRuntime.workflowRequirements || null,
+    workflowActorSequence: actorRuntime.workflowContext.actorSequence,
     environment,
     hasRuntimeCredentials: Boolean(hasCredentials),
     actorCatalog: availableActors,
@@ -289,6 +271,7 @@ async function generateCanonicalBatch({
         registryHash: registry.registryHash,
         actorRefs: validation.plan?.actorRefs || [],
       },
+      workflowRequirements: actorRuntime.workflowRequirements || null,
       cypressPreview,
       _canonicalAutomationPlan: validation.plan,
     });
@@ -298,6 +281,8 @@ async function generateCanonicalBatch({
     feature: String(result?.feature || '').trim() || null,
     testCases,
     runtimeCapabilities: capabilities,
+    workflowRequirements: actorRuntime.workflowRequirements || null,
+    actorCatalog: safeActors,
   };
 }
 
