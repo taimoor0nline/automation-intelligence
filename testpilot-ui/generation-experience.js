@@ -31,6 +31,10 @@
     const obsoleteBatchField = document.getElementById('readinessBatchSize')?.closest('.field');
     if (obsoleteBatchField) obsoleteBatchField.remove();
 
+    // Actor configuration is loaded early so generation requests can include the
+    // optional runtime-only role identities before progressive generation starts.
+    loadScript('/test-actors.js', 'data-test-actors');
+
     // Keep the review pane compact immediately. This lightweight helper removes the
     // legacy review banner, shows an animated AI-working state and numbers test cards.
     document.querySelectorAll('.human-note').forEach((node) => node.remove());
@@ -54,6 +58,7 @@
     loadScript('/review-filters.js', 'data-review-filters');
     loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
+    loadScript('/automation-details-cypress-preview.js', 'data-automation-details-cypress-preview');
     // add-test-mode.js is loaded synchronously by the server shell. These helpers
     // are loaded after window load and turn new manual browser tests into a supported
     // Cypress-syntax authoring flow instead of free-form narrative automation steps.
