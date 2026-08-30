@@ -198,6 +198,10 @@ async function cancelActiveExecution(runId, reason = "Automation execution cance
   return { cancelled: true, runId: control.runId, state: "CANCELLING" };
 }
 
+function configuredActorCredentialCount(executionContext = {}) {
+  return Object.values(executionContext.actorCredentials || {}).filter((item) => item?.username && item?.password).length;
+}
+
 function validateRuntimeContext(executionContext = {}) {
   if (String(executionContext.targetType || 'WEB').toUpperCase() === 'REST') {
     const auth = executionContext.apiAuth || { type: 'NONE' };
@@ -216,9 +220,11 @@ function validateRuntimeContext(executionContext = {}) {
     executionContext.loginSelectors?.password &&
     executionContext.loginSelectors?.submit
   );
+  const actorCount = configuredActorCredentialCount(executionContext);
 
   console.log(
     `[runtime-preflight] credentials=${credentialsPresent ? "present" : "missing"} ` +
+    `actors=${actorCount} ` +
     `login-controls=${selectorsPresent ? "grounded" : "missing"} ` +
     `login-path=${executionContext.loginPath || "/"}`
   );
@@ -226,7 +232,7 @@ function validateRuntimeContext(executionContext = {}) {
   if (executionContext.hasCredentials && !credentialsPresent) {
     throw new Error("Runtime credentials were expected by readiness validation but are missing before automation execution.");
   }
-  if (executionContext.hasCredentials && !selectorsPresent) {
+  if ((executionContext.hasCredentials || actorCount > 0) && !selectorsPresent) {
     throw new Error("Runtime login controls were expected but are missing before automation execution.");
   }
 }
@@ -264,6 +270,7 @@ async function runAutomationCli({ prepared, executionContext, browser, headed, d
     AUTOMATION_TEST_COMPLETION_PAUSE_MS: String(completionPauseMs),
     TEST_USERNAME: executionContext.credentials?.username || "",
     TEST_PASSWORD: executionContext.credentials?.password || "",
+    TEST_ACTORS_JSON: JSON.stringify(executionContext.actorCredentials || {}),
     LOGIN_PATH: executionContext.loginPath || "/",
     LOGIN_USERNAME_SELECTOR: executionContext.loginSelectors?.username || "",
     LOGIN_PASSWORD_SELECTOR: executionContext.loginSelectors?.password || "",
