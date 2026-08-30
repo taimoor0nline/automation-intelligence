@@ -4,6 +4,27 @@ const db = require('../db');
 const { getSession } = require('../data/sessionStore');
 const { requireAuth, requireRole } = require('../services/authService');
 const persistence = require('../services/persistenceService');
+const { normalizeActorProfiles, publicActorCatalog, actorCredentialStatus } = require('../services/testActorProfiles');
+const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
+
+function configuredActorRefs(session) {
+  return Object.entries(session.actorCredentials || {})
+    .filter(([, credentials]) => credentials?.username && credentials?.password)
+    .map(([actorRef]) => actorRef);
+}
+
+function actorInputForUpdate(session, body = {}) {
+  if (Array.isArray(body.testActors)) return body.testActors;
+  const credentials = body.actorCredentials && typeof body.actorCredentials === 'object' && !Array.isArray(body.actorCredentials)
+    ? body.actorCredentials
+    : null;
+  if (!credentials) return [];
+  return publicActorCatalog(session.testActors || []).map((actor) => ({
+    ...actor,
+    username: credentials?.[actor.actorRef]?.username || '',
+    password: credentials?.[actor.actorRef]?.password || '',
+  }));
+}
 
 router.get('/api/sessions/:sessionId/context', requireAuth, (req, res) => {
   const session = getSession(req.params.sessionId);
@@ -32,6 +53,66 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     res.json({ ok: true, projectId, repositoryId: repositoryId || null });
   } catch (err) {
     res.status(500).json({ reply: err.message });
+  }
+});
+
+router.get('/api/sessions/:sessionId/test-actors', requireAuth, (req, res) => {
+  const session = getSession(req.params.sessionId);
+  return res.json({
+    ok: true,
+    actors: actorCredentialStatus(session.testActors || [], session.actorCredentials || {}),
+    credentialsPersisted: false,
+    credentialPolicy: 'Runtime actor credentials are never persisted. Re-enter credentials after server/session rehydration before executing role-based cases.',
+    automationReadiness: session.automationReadiness || null,
+  });
+});
+
+router.post('/api/sessions/:sessionId/test-actors', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
+  const sessionId = req.params.sessionId;
+  const session = getSession(sessionId);
+  try {
+    const input = actorInputForUpdate(session, req.body || {});
+    if (!input.length) {
+      return res.status(400).json({
+        reply: 'Provide testActors, or provide actorCredentials for the already persisted actor catalog.',
+        actors: actorCredentialStatus(session.testActors || [], session.actorCredentials || {}),
+      });
+    }
+
+    const normalized = normalizeActorProfiles(input);
+    if (!normalized.catalog.length) return res.status(400).json({ reply: 'At least one valid role actor is required.' });
+
+    session.testActors = normalized.catalog;
+    session.actorCredentials = normalized.credentials;
+    const actorCredentialRefs = configuredActorRefs(session);
+
+    if (Array.isArray(session.testCases) && session.testCases.length) {
+      session.testCases = assessTestCases(session.testCases, {
+        pageDiscoveries: session.pageDiscoveries || [],
+        hasCredentials: Boolean(session.credentials?.username && session.credentials?.password),
+        actorCatalog: session.testActors,
+        actorCredentialRefs,
+      });
+      session.automationReadiness = readinessSummary(session.testCases);
+      session.readinessValidated = session.testCases.every((tc) => Boolean(tc?.automationReadiness));
+    }
+
+    await persistence.persistSession(sessionId, session, {
+      projectId: session.projectId,
+      repositoryId: session.repositoryId,
+      userId: req.user.sub || session.createdBy || null,
+    });
+    await persistence.persistTestCases(sessionId, session.testCases || []);
+
+    return res.json({
+      ok: true,
+      actors: actorCredentialStatus(session.testActors, session.actorCredentials),
+      credentialsPersisted: false,
+      automationReadiness: session.automationReadiness || null,
+      readinessValidated: Boolean(session.readinessValidated),
+    });
+  } catch (err) {
+    return res.status(422).json({ reply: err.message });
   }
 });
 
