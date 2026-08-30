@@ -11,6 +11,8 @@ function createSession() {
     additionalPaths: [],
     aiModelTier: "strong",
     credentials: null,
+    testActors: [],
+    actorCredentials: {},
     apiAuth: null,
     apiTargetId: null,
     apiOperationIds: [],
@@ -47,8 +49,9 @@ function hydrateSession(id, persisted) {
   }
   const existing = getSession(id);
   Object.assign(existing, createSession(), persisted);
-  // Browser credentials, REST authentication secrets and local artifact paths are intentionally never restored from PostgreSQL.
+  // Browser credentials, role/actor credentials, REST authentication secrets and local artifact paths are intentionally never restored from PostgreSQL.
   existing.credentials = null;
+  existing.actorCredentials = {};
   existing.apiAuth = null;
   existing.artifacts = null;
   existing.reportHtml = null;
