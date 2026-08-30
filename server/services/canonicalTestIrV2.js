@@ -1,4 +1,5 @@
 const base = require('./canonicalTestIr');
+const { runtimeCapabilities } = require('./progressiveTestGenerator');
 
 const RUNTIME_CREDENTIAL_OPERATION = 'TYPE_RUNTIME_CREDENTIAL';
 const SENTINEL_PREFIX = '__TESTNEXUS_RUNTIME_CREDENTIAL__:';
@@ -119,6 +120,46 @@ function validateNavigationEvidence(ir, registry = {}) {
   return errors;
 }
 
+function externalAvailable(capabilities, capability) {
+  return Boolean(capabilities?.external?.[String(capability || '').toUpperCase()]?.available);
+}
+
+function validateRuntimeCapabilities(ir) {
+  const capabilities = runtimeCapabilities();
+  const errors = [];
+  for (const action of ir?.actions || []) {
+    const operation = String(action?.operation || '').trim().toUpperCase();
+    if (operation === 'SELECT_FILE') {
+      const fixtures = capabilities?.direct?.FILE_UPLOAD?.fixtures || [];
+      const fileName = String(action.fileName || action.value || '').trim();
+      if (!capabilities?.direct?.FILE_UPLOAD?.available) errors.push('SELECT_FILE requires a configured upload fixture directory with at least one safe fixture.');
+      else if (!fileName || !fixtures.includes(fileName)) errors.push(`SELECT_FILE fixture is not available: ${fileName || '(missing)'}.`);
+    }
+    if (operation === 'DRAG_DROP' && !capabilities?.direct?.DRAG_AND_DROP?.available) errors.push('DRAG_DROP capability is unavailable.');
+    if (operation === 'SET_PERMISSION_STATE' && !capabilities?.direct?.BROWSER_PERMISSION?.available) errors.push('SET_PERMISSION_STATE capability is unavailable.');
+    if (operation === 'EXTERNAL_ADAPTER_ACTION' && !externalAvailable(capabilities, action.capability)) errors.push(`External adapter capability is unavailable: ${String(action.capability || '(missing)').toUpperCase()}.`);
+  }
+
+  for (const assertion of ir?.assertions || []) {
+    const operation = String(assertion?.operation || '').trim().toUpperCase();
+    if (operation === 'ASSERT_VISUAL_MATCH' && !capabilities?.direct?.VISUAL_REGRESSION?.available) errors.push('ASSERT_VISUAL_MATCH requires an approved visual baseline or create-missing baseline mode.');
+    if (operation === 'ASSERT_WEB_VITAL_AT_MOST' && !capabilities?.direct?.WEB_VITALS?.available) errors.push('ASSERT_WEB_VITAL_AT_MOST capability is unavailable.');
+    if (operation === 'ASSERT_EXTERNAL_MESSAGE_RECEIVED' && !externalAvailable(capabilities, 'EMAIL_SMS_OTP')) errors.push('ASSERT_EXTERNAL_MESSAGE_RECEIVED requires the EMAIL_SMS_OTP external adapter capability.');
+    if (['ASSERT_DATABASE_VALUE_EQUALS','ASSERT_DATABASE_ROW_COUNT_EQUALS'].includes(operation)) {
+      const database = capabilities?.database?.DATABASE_ASSERTIONS || {};
+      const queryName = String(assertion.queryName || '').trim();
+      if (!database.available) errors.push(`${operation} requires configured application database assertions.`);
+      else if (!queryName || !(database.namedQueries || []).includes(queryName)) errors.push(`${operation} references an unavailable named query: ${queryName || '(missing)'}.`);
+    }
+    if (operation === 'ASSERT_STREAM_MESSAGE_CONTAINS' && !capabilities?.direct?.WEBSOCKET_SSE?.available) errors.push('ASSERT_STREAM_MESSAGE_CONTAINS capability is unavailable.');
+    if (['ASSERT_CLIPBOARD_EQUALS','ASSERT_CLIPBOARD_CONTAINS'].includes(operation) && !capabilities?.direct?.CLIPBOARD?.available) errors.push(`${operation} capability is unavailable.`);
+    if (operation === 'ASSERT_DOWNLOADED_DOCUMENT_CONTAINS' && !capabilities?.direct?.BINARY_DOCUMENT_CONTENT?.available) errors.push('ASSERT_DOWNLOADED_DOCUMENT_CONTAINS capability is unavailable.');
+    if (operation === 'ASSERT_BROWSER_PERMISSION_EQUALS' && !capabilities?.direct?.BROWSER_PERMISSION?.available) errors.push('ASSERT_BROWSER_PERMISSION_EQUALS capability is unavailable.');
+    if (operation === 'ASSERT_EXTERNAL_ADAPTER' && !externalAvailable(capabilities, assertion.capability)) errors.push(`External adapter assertion capability is unavailable: ${String(assertion.capability || '(missing)').toUpperCase()}.`);
+  }
+  return errors;
+}
+
 function preprocessIr(ir, context = {}) {
   if (!ir || typeof ir !== 'object') return ir;
   const loginRef = loginEvidenceRef(context.registry);
@@ -151,6 +192,7 @@ function validateCanonicalIr(ir, context = {}) {
   const errors = [
     ...validateElementCapabilities(ir, context.registry || {}),
     ...validateNavigationEvidence(ir, context.registry || {}),
+    ...validateRuntimeCapabilities(ir),
   ];
   for (const action of runtimeActions) {
     const credential = normalizeCredential(action.credential);
@@ -214,4 +256,5 @@ module.exports = {
   loginEvidenceRef,
   validateElementCapabilities,
   validateNavigationEvidence,
+  validateRuntimeCapabilities,
 };
