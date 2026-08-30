@@ -59,13 +59,24 @@ function reassess(session) {
 }
 
 async function persistActorState(sessionId, session, userId = null) {
+  // Runtime actor state is authoritative for the current process. Optional PostgreSQL
+  // persistence must not turn an otherwise valid import into a failure when the DB is
+  // unavailable and DATABASE_REQUIRED=false.
   actorRuntimeStore.setFromSession(sessionId, session);
-  await persistence.persistSession(sessionId, session, {
-    projectId: session.projectId,
-    repositoryId: session.repositoryId,
-    userId: userId || session.createdBy || null,
-  });
-  await persistence.persistTestCases(sessionId, session.testCases || []);
+  if (!persistence.enabled()) return false;
+  try {
+    await persistence.persistSession(sessionId, session, {
+      projectId: session.projectId,
+      repositoryId: session.repositoryId,
+      userId: userId || session.createdBy || null,
+    });
+    await persistence.persistTestCases(sessionId, session.testCases || []);
+    return true;
+  } catch (err) {
+    if (db.isRequired()) throw err;
+    console.warn(`[test-actor-directory] Optional PostgreSQL persistence skipped for session=${sessionId}: ${err.message}`);
+    return false;
+  }
 }
 
 function actorInputForUpdate(session, body = {}) {
@@ -164,12 +175,13 @@ router.post('/api/sessions/:sessionId/test-actors', allowQaManager, async (req, 
     }
 
     reassess(session);
-    await persistActorState(sessionId, session, req.user?.sub || null);
+    const persisted = await persistActorState(sessionId, session, req.user?.sub || null);
 
     return res.json({
       ok: true,
       actors: actorCredentialStatus(session.testActors, session.actorCredentials),
       credentialsPersisted: false,
+      platformStatePersisted: persisted,
       automationReadiness: session.automationReadiness || null,
       readinessValidated: Boolean(session.readinessValidated),
     });
@@ -210,15 +222,24 @@ router.post('/api/sessions/:sessionId/test-actor-directory/import/apply', allowQ
         preview: publicPreview(parsed),
       });
     }
+    const requestedActiveRefs = Array.isArray(req.body?.activeActorRefs)
+      ? [...new Set(req.body.activeActorRefs.map(String).filter(Boolean))]
+      : [];
+    if (requestedActiveRefs.length > MAX_ACTORS) {
+      return res.status(422).json({
+        reply: `A maximum of ${MAX_ACTORS} active actors can be exposed to one scenario. The full directory may still contain up to 500 accounts.`,
+        preview: publicPreview(parsed),
+      });
+    }
 
-    const state = buildDirectoryState(parsed, req.body?.activeActorRefs);
+    const state = buildDirectoryState(parsed, requestedActiveRefs.length ? requestedActiveRefs : null);
     session.testActorDirectory = state.publicDirectory;
     session.testActorDirectoryCredentials = state.credentialMap;
     session.testActorActiveRefs = state.activeRefs;
     session.testActors = state.activeCatalog;
     session.actorCredentials = state.activeCredentials;
     reassess(session);
-    await persistActorState(sessionId, session, req.user?.sub || null);
+    const persisted = await persistActorState(sessionId, session, req.user?.sub || null);
 
     return res.json({
       ok: true,
@@ -228,6 +249,7 @@ router.post('/api/sessions/:sessionId/test-actor-directory/import/apply', allowQ
       activeActorRefs: session.testActorActiveRefs,
       actors: actorCredentialStatus(session.testActors, session.actorCredentials),
       credentialsPersisted: false,
+      platformStatePersisted: persisted,
       automationReadiness: session.automationReadiness || null,
       readinessValidated: Boolean(session.readinessValidated),
     });
@@ -242,12 +264,13 @@ router.post('/api/sessions/:sessionId/test-actor-directory/activate', allowQaMan
   try {
     activateDirectoryActors(session, req.body?.actorRefs || []);
     reassess(session);
-    await persistActorState(sessionId, session, req.user?.sub || null);
+    const persisted = await persistActorState(sessionId, session, req.user?.sub || null);
     return res.json({
       ok: true,
       directory: directoryStatus(session),
       activeActorRefs: session.testActorActiveRefs,
       actors: actorCredentialStatus(session.testActors, session.actorCredentials),
+      platformStatePersisted: persisted,
       automationReadiness: session.automationReadiness || null,
       readinessValidated: Boolean(session.readinessValidated),
     });
