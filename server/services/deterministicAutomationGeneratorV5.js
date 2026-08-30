@@ -12,6 +12,18 @@ function emitAction(action) {
   return v4.emitAction(action);
 }
 
+function generateCypressPreviewFromPlan(plan, { id = 'TC', title = 'Canonical test' } = {}) {
+  if (!plan) throw new Error('A compiled automation plan is required for Cypress preview.');
+  const lines = [`it(${js(`${id} - ${title}`)}, () => {`];
+  const setup = v4.observerSetup(plan);
+  if (setup.length) lines.push(...setup.map((line) => String(line).replace(/^\s{4}/, '  ')), '');
+  for (const action of plan.actions || []) lines.push(String(emitAction(action)).replace(/^\s{4}/, '  '));
+  if ((plan.actions || []).length && (plan.assertions || []).length) lines.push('');
+  for (const assertion of plan.assertions || []) lines.push(String(v4.emitAssertion(assertion)).replace(/^\s{4}/, '  '));
+  lines.push('});');
+  return lines.join('\n');
+}
+
 function generateDeterministicAutomation(approvedTestCases = []) {
   if (!approvedTestCases.length) throw new Error('No approved test cases were supplied for deterministic generation.');
   const lines = ["describe('AI TestPilot Approved Test Suite', () => {"];
@@ -39,5 +51,6 @@ function generateDeterministicAutomation(approvedTestCases = []) {
 module.exports = {
   ...v4,
   emitAction,
+  generateCypressPreviewFromPlan,
   generateDeterministicAutomation,
 };
