@@ -1,4 +1,5 @@
 const persistence = require('../services/persistenceService');
+const canonicalArtifacts = require('../services/canonicalArtifactStore');
 const { getSession, hydrateSession, isHydrated, markHydrated } = require('../data/sessionStore');
 
 function resolveSessionId(req) {
@@ -28,8 +29,16 @@ async function sessionPersistence(req, res, next) {
   try {
     if (!isHydrated(sessionId)) {
       const stored = await persistence.loadSession(sessionId);
-      if (stored) hydrateSession(sessionId, stored);
-      else markHydrated(sessionId);
+      const session = stored ? hydrateSession(sessionId, stored) : getSession(sessionId);
+      if (!stored) markHydrated(sessionId);
+      try {
+        const artifacts = await canonicalArtifacts.load(sessionId);
+        canonicalArtifacts.applyLoadedArtifacts(session, artifacts);
+      } catch (err) {
+        // Older DBs can continue to run before migration 011 is applied; canonical
+        // artifacts are still available in memory for the active process.
+        console.error('[session-persistence] canonical artifact rehydrate skipped', err.message);
+      }
     }
   } catch (err) {
     console.error('[session-persistence] rehydrate failed', err);
@@ -45,6 +54,10 @@ async function sessionPersistence(req, res, next) {
       userId: session.createdBy || requestUserId,
     })
       .then(() => persistence.persistTestCases(sessionId, session.testCases || []))
+      .then(async () => {
+        try { await canonicalArtifacts.persistAll(sessionId, session); }
+        catch (err) { console.error('[session-persistence] canonical artifact save skipped', err.message); }
+      })
       .then(() => saveNormalizedRun(sessionId, session, requestUserId))
       .catch((err) => console.error('[session-persistence] save failed', err));
   });
