@@ -18,7 +18,8 @@
     "test:readiness-v13": "node scripts/readiness-v13-regression-smoke.js",
     "test:advanced-capabilities": "node scripts/advanced-capabilities-smoke.js",
     "test:story-discovery": "node scripts/story-discovery-compatibility-smoke.js",
-    "test:capabilities": "node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js"
+    "test:multi-role": "node scripts/multi-role-actor-regression-smoke.js",
+    "test:capabilities": "node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js && node scripts/multi-role-actor-regression-smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
