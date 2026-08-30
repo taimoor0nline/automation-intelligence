@@ -1,7 +1,7 @@
-const v5 = require("./deterministicAutomationGeneratorV5");
+const v6 = require("./deterministicAutomationGeneratorV6");
 
 function generateDeterministicAutomation(approvedTestCases = []) {
-  const generated = v5.generateDeterministicAutomation(approvedTestCases);
+  const generated = v6.generateDeterministicAutomation(approvedTestCases);
   return {
     ...generated,
     script: String(generated.script || "").replace(
@@ -11,4 +11,4 @@ function generateDeterministicAutomation(approvedTestCases = []) {
   };
 }
 
-module.exports = { ...v5, generateDeterministicAutomation };
+module.exports = { ...v6, generateDeterministicAutomation };
