@@ -1,6 +1,6 @@
 const legacy = require('./automationDslV13');
 const { buildCanonicalElementRegistry } = require('./canonicalElementRegistry');
-const { validateCanonicalIr } = require('./canonicalTestIrV2');
+const { validateCanonicalIr } = require('./canonicalTestIrV3');
 
 function compileTestCase(testCase, context = {}) {
   if (testCase?.canonicalIr) {
@@ -9,6 +9,8 @@ function compileTestCase(testCase, context = {}) {
       registry,
       story: '',
       hasCredentials: Boolean(context.hasCredentials),
+      actorCatalog: context.actorCatalog || [],
+      actorCredentialRefs: context.actorCredentialRefs || [],
     });
     if (!canonical.ok) {
       return {
