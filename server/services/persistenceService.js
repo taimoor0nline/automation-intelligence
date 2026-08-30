@@ -1,5 +1,6 @@
 const db = require('../db');
 const { normalizeTestCategory } = require('./testCategories');
+const { publicActorCatalog } = require('./testActorProfiles');
 const {
   normalizeSecuritySubcategory,
   normalizeSecuritySeverity,
@@ -55,6 +56,9 @@ async function persistSession(sessionId, session, context = {}) {
     environment: session.environment,
     additionalPaths: session.additionalPaths,
     aiModelTier: session.aiModelTier,
+    // Persist only public actor metadata. Runtime usernames/passwords live in
+    // session.actorCredentials and are intentionally excluded from PostgreSQL.
+    testActors: publicActorCatalog(session.testActors || []),
     apiTargetId,
     apiOperationIds,
     apiOperations: targetType === 'REST' ? (session.apiOperations || []) : [],
