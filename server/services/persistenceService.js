@@ -1,6 +1,7 @@
 const db = require('../db');
 const { normalizeTestCategory } = require('./testCategories');
 const { publicActorCatalog } = require('./testActorProfiles');
+const { normalizeWorkflowRequirements } = require('./workflowRequirements');
 const {
   normalizeSecuritySubcategory,
   normalizeSecuritySeverity,
@@ -40,24 +41,21 @@ function securityOf(testCase) {
   };
 }
 
-async function persistSession(sessionId, session, context = {}) {
-  if (!enabled()) return null;
-  const projectId = context.projectId || session.projectId || null;
-  const userId = context.userId || session.createdBy || null;
-  const repositoryId = context.repositoryId || session.repositoryId || null;
+function buildSafeSessionPayload(session = {}) {
   const targetType = String(session.targetType || 'WEB').toUpperCase() === 'REST' ? 'REST' : 'WEB';
   const apiTargetId = targetType === 'REST' ? (session.apiTargetId || null) : null;
   const apiOperationIds = targetType === 'REST' && Array.isArray(session.apiOperationIds) ? session.apiOperationIds : [];
-  const safeSession = {
+  return {
     state: session.state,
     targetType,
     story: session.story,
+    workflowRequirements: normalizeWorkflowRequirements(session.workflowRequirements),
     targetUrl: session.targetUrl,
     environment: session.environment,
     additionalPaths: session.additionalPaths,
     aiModelTier: session.aiModelTier,
-    // Persist only public actor metadata. Runtime usernames/passwords live in
-    // session.actorCredentials and are intentionally excluded from PostgreSQL.
+    // Persist only public role metadata. Runtime usernames/passwords stay exclusively
+    // in session.actorCredentials and are intentionally excluded from PostgreSQL.
     testActors: publicActorCatalog(session.testActors || []),
     apiTargetId,
     apiOperationIds,
@@ -75,6 +73,17 @@ async function persistSession(sessionId, session, context = {}) {
       deterministicFindings: session.lastResults.deterministicFindings || [],
     } : null,
   };
+}
+
+async function persistSession(sessionId, session, context = {}) {
+  if (!enabled()) return null;
+  const projectId = context.projectId || session.projectId || null;
+  const userId = context.userId || session.createdBy || null;
+  const repositoryId = context.repositoryId || session.repositoryId || null;
+  const safeSession = buildSafeSessionPayload(session);
+  const targetType = safeSession.targetType;
+  const apiTargetId = safeSession.apiTargetId;
+  const apiOperationIds = safeSession.apiOperationIds;
   await db.query(
     `insert into test_sessions(id,project_id,created_by,state,story,target_url,environment,ai_model_tier,repository_id,target_type,api_target_id,api_operation_ids,session_json)
      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)
@@ -231,4 +240,13 @@ async function loadSession(sessionId) {
   };
 }
 
-module.exports = { enabled, persistSession, persistTestCases, persistRun, persistAnalyses, latestRunId, loadSession };
+module.exports = {
+  enabled,
+  buildSafeSessionPayload,
+  persistSession,
+  persistTestCases,
+  persistRun,
+  persistAnalyses,
+  latestRunId,
+  loadSession,
+};
