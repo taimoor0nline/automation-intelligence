@@ -79,6 +79,13 @@ Cypress.Commands.add("loginWithRuntimeCredentials", () => {
   performGroundedLogin(Cypress.env("TEST_USERNAME"), Cypress.env("TEST_PASSWORD"));
 });
 
+Cypress.Commands.add("typeRuntimeCredential", (selector, credential) => {
+  const kind = String(credential || "").trim().toLowerCase();
+  const value = kind === "username" ? Cypress.env("TEST_USERNAME") : kind === "password" ? Cypress.env("TEST_PASSWORD") : null;
+  if (!selector || !value) throw new Error(`Runtime ${kind || "credential"} is not configured for this test run.`);
+  cy.get(String(selector)).clear({ log: false }).type(String(value), { log: false });
+});
+
 Cypress.Commands.add("loginAsTestActor", (actorRef) => {
   const ref = String(actorRef || "").trim();
   const actor = configuredActors()[ref] || null;
