@@ -4,6 +4,7 @@ const db = require('../db');
 const { getSession } = require('../data/sessionStore');
 const { requireAuth, requireRole } = require('../services/authService');
 const persistence = require('../services/persistenceService');
+const actorRuntimeStore = require('../services/testActorRuntimeStore');
 const { MAX_ACTORS, normalizeActorProfiles, publicActorCatalog, actorCredentialStatus } = require('../services/testActorProfiles');
 const { parseImport, publicPreview, buildDirectoryState } = require('../services/testActorImportService');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
@@ -58,6 +59,7 @@ function reassess(session) {
 }
 
 async function persistActorState(sessionId, session, userId = null) {
+  actorRuntimeStore.setFromSession(sessionId, session);
   await persistence.persistSession(sessionId, session, {
     projectId: session.projectId,
     repositoryId: session.repositoryId,
