@@ -276,3 +276,29 @@ npm run test:canonical-architecture
 ```
 
 It is also included in `npm run test:capabilities`.
+
+## 13. Role-based actors and Actor Directory
+
+Role-based workflows use a separate identity layer rather than embedding usernames/passwords in Canonical IR.
+
+```text
+Test Actor Directory (up to 500 accounts)
+        |
+        v
+Active scenario actors (up to 12)
+        |
+        v
+AI receives actorRef + role + displayName only
+        |
+        v
+LOGIN_AS_ACTOR(actorRef)
+        |
+        v
+Trusted Cypress runtime resolves credentials
+```
+
+The same role may have multiple accounts (`actor_manager`, `actor_manager_02`, etc.). This allows enterprise maker/checker/reviewer/approver workflows without sending a large credential directory to the model.
+
+CSV and XLSX import, active-account selection, DB/no-DB behavior and credential policy are documented in `docs/TEST_ACTOR_DIRECTORY_IMPORT.md`.
+
+Public actor directory metadata and active refs may be persisted in `test_sessions.session_json`. Usernames/passwords are runtime-only, are cleared on PostgreSQL rehydration, and must be re-entered or re-imported before a role-based case can become Automation Ready. Missing actor credentials are classified as `MISSING_ACTOR_CREDENTIALS` / user input required rather than as an AI-repair problem.
