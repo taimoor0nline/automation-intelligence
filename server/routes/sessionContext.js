@@ -35,6 +35,10 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
   }
 });
 
+// Progressive generation is part of the platform route stack. Mount it here so
+// /api/generation/start and its SSE endpoint are always registered by server/index.js.
+router.use(require('./progressiveGeneration'));
+
 // Historical reporting is mounted here because this router is already part of
 // the authenticated platform route stack. The reporting module performs its own
 // role-aware SQL scoping for MANAGER, QA and DEV viewers.
