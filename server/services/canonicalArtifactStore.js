@@ -50,4 +50,42 @@ async function persistCases(sessionId, testCases = []) {
   return true;
 }
 
-module.exports = { enabled, persistRegistry, persistPlan, persistCaseIr, persistCases };
+async function persistAll(sessionId, session) {
+  if (!enabled()) return false;
+  await persistRegistry(sessionId, session?.canonicalElementRegistry);
+  await persistPlan(sessionId, session?.canonicalGenerationPlan);
+  await persistCases(sessionId, session?.testCases || []);
+  return true;
+}
+
+async function load(sessionId) {
+  if (!enabled()) return null;
+  const [registry, plan, cases] = await Promise.all([
+    db.query('select registry_json from canonical_element_registries where session_id=$1', [sessionId]),
+    db.query('select plan_json from canonical_generation_plans where session_id=$1', [sessionId]),
+    db.query('select external_case_id,ir_json,validation_json from canonical_test_ir where session_id=$1', [sessionId]),
+  ]);
+  return {
+    registry: registry.rows[0]?.registry_json || null,
+    plan: plan.rows[0]?.plan_json || null,
+    cases: new Map((cases.rows || []).map((row) => [String(row.external_case_id || '').toUpperCase(), {
+      canonicalIr: row.ir_json || null,
+      canonicalValidation: row.validation_json || null,
+    }])),
+  };
+}
+
+function applyLoadedArtifacts(session, artifacts) {
+  if (!session || !artifacts) return session;
+  if (artifacts.registry) session.canonicalElementRegistry = artifacts.registry;
+  if (artifacts.plan) session.canonicalGenerationPlan = artifacts.plan;
+  if (artifacts.cases?.size && Array.isArray(session.testCases)) {
+    session.testCases = session.testCases.map((testCase) => {
+      const stored = artifacts.cases.get(String(testCase?.id || '').toUpperCase());
+      return stored ? { ...testCase, ...stored } : testCase;
+    });
+  }
+  return session;
+}
+
+module.exports = { enabled, persistRegistry, persistPlan, persistCaseIr, persistCases, persistAll, load, applyLoadedArtifacts };
