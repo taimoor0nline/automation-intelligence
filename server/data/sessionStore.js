@@ -6,6 +6,7 @@ function createSession() {
     state: "IDLE",
     targetType: "WEB",
     story: null,
+    workflowRequirements: "",
     targetUrl: null,
     environment: null,
     additionalPaths: [],
