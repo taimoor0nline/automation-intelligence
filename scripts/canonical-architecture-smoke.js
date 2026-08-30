@@ -42,6 +42,10 @@ for (const ref of ['el_username','el_password','el_email','el_age','el_subject',
 }
 assert.equal(refs.get('el_age').selector, '[data-testid="age"]');
 assert.equal(refs.get('el_email').errorRef, 'err_email-error');
+assert.ok(refs.get('el_email').capabilities.includes('TYPE'));
+assert.ok(refs.get('el_email').capabilities.includes('VALIDITY'));
+assert.ok(!refs.get('el_email').capabilities.includes('TEXT'), 'input label must not be treated as input DOM text');
+assert.ok(refs.get('msg_success-panel').capabilities.includes('TEXT'));
 
 const ageUnit = {
   plannedId: 'P001',
@@ -85,9 +89,18 @@ const drift = validateCanonicalIr({
 assert.equal(drift.ok, false);
 assert.match(drift.errors.join(' '), /planned objective/i);
 
-const rawSelector = validateCanonicalIr({
+const wrongCapability = validateCanonicalIr({
   version: 1,
   plannedId: 'P003',
+  actions: [{ operation: 'TYPE', elementRef: 'msg_success-panel', value: 'not legal' }],
+  assertions: [{ operation: 'ASSERT_VISIBLE', elementRef: 'msg_success-panel' }],
+}, { registry, hasCredentials: false });
+assert.equal(wrongCapability.ok, false);
+assert.match(wrongCapability.errors.join(' '), /does not provide capability TYPE/i);
+
+const rawSelector = validateCanonicalIr({
+  version: 1,
+  plannedId: 'P004',
   actions: [{ operation: 'TYPE', selector: '#age', elementRef: 'el_age', value: '17' }],
   assertions: [{ operation: 'ASSERT_VALUE_EQUALS', elementRef: 'el_age', value: '17' }],
 }, { registry, hasCredentials: false });
@@ -96,7 +109,7 @@ assert.match(rawSelector.errors.join(' '), /elementRef, not selector/i);
 
 const emptyType = validateCanonicalIr({
   version: 1,
-  plannedId: 'P004',
+  plannedId: 'P005',
   actions: [{ operation: 'TYPE', elementRef: 'el_email', value: '' }],
   assertions: [{ operation: 'ASSERT_VALUE_EMPTY', elementRef: 'el_email' }],
 }, { registry, hasCredentials: false });
@@ -105,7 +118,7 @@ assert.match(emptyType.errors.join(' '), /use CLEAR/i);
 
 const identityText = validateCanonicalIr({
   version: 1,
-  plannedId: 'P005',
+  plannedId: 'P006',
   actions: [{ operation: 'NAVIGATE', path: '/feedback' }],
   assertions: [{ operation: 'ASSERT_TEXT_CONTAINS', elementRef: 'msg_success-panel', text: 'success-panel' }],
 }, { registry, hasCredentials: false });
@@ -114,7 +127,7 @@ assert.match(identityText.errors.join(' '), /element identity/i);
 
 const actualText = validateCanonicalIr({
   version: 1,
-  plannedId: 'P006',
+  plannedId: 'P007',
   actions: [{ operation: 'NAVIGATE', path: '/feedback' }],
   assertions: [{ operation: 'ASSERT_TEXT_CONTAINS', elementRef: 'msg_success-panel', text: 'Thank you for your feedback.' }],
 }, { registry, hasCredentials: false });
@@ -122,7 +135,7 @@ assert.equal(actualText.ok, true, actualText.errors?.join('\n'));
 
 const runtimeCredentialIr = {
   version: 1,
-  plannedId: 'P007',
+  plannedId: 'P008',
   actions: [
     { operation: 'TYPE_RUNTIME_CREDENTIAL', elementRef: 'el_username', credential: 'username' },
     { operation: 'CLEAR', elementRef: 'el_password' },
@@ -136,6 +149,22 @@ assert.equal(noCredentials.reasonCode, 'MISSING_CREDENTIALS');
 const withCredentials = validateCanonicalIr(runtimeCredentialIr, { registry, hasCredentials: true });
 assert.equal(withCredentials.ok, true, withCredentials.errors?.join('\n'));
 assert.equal(withCredentials.plan.actions[0].operation, 'TYPE_RUNTIME_CREDENTIAL');
+
+const loginUnit = {
+  plannedId: 'P009',
+  category: 'FUNCTIONAL',
+  scenarioType: 'positive',
+  objective: 'Verify valid login succeeds',
+};
+const validLogin = validateCanonicalIr({
+  version: 1,
+  plannedId: 'P009',
+  objective: loginUnit.objective,
+  actions: [{ operation: 'LOGIN_VALID' }],
+  assertions: [{ operation: 'ASSERT_PATH_EQUALS', path: '/feedback' }],
+}, { registry, plannedUnit: loginUnit, hasCredentials: true });
+assert.equal(validLogin.ok, true, validLogin.errors?.join('\n'));
+assert.equal(validLogin.plan.actions[0].operation, 'LOGIN_VALID');
 
 const canonicalTestCase = {
   id: 'TC001',
@@ -161,4 +190,5 @@ console.log(JSON.stringify({
   elements: registry.elements.length,
   ageReadiness: readiness.status,
   canonicalAssertions: readiness.automationPlan.assertions.length,
+  validLogin: validLogin.ok,
 }, null, 2));
