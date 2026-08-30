@@ -50,6 +50,8 @@ function capabilitiesFor(item = {}) {
   const type = clean(item.type, 40).toLowerCase();
   const capabilities = new Set(['ASSERT_EXISTS', 'ASSERT_VISIBLE']);
   const isFormControl = ['input', 'textarea', 'select'].includes(tag);
+  const nonTypeableInputTypes = new Set(['checkbox','radio','file','button','submit','reset','image','hidden']);
+  const isTypeable = tag === 'textarea' || (tag === 'input' && !nonTypeableInputTypes.has(type));
   const textLike = !isFormControl || ['button', 'submit'].includes(type);
 
   // Labels/placeholders describe a control but are not the control's DOM text.
@@ -60,7 +62,7 @@ function capabilitiesFor(item = {}) {
     capabilities.add('VALUE');
     capabilities.add('VALIDITY');
   }
-  if (tag === 'input' || tag === 'textarea') capabilities.add('TYPE');
+  if (isTypeable) capabilities.add('TYPE');
   if (tag === 'select') capabilities.add('SELECT');
   if (type === 'checkbox' || type === 'radio') capabilities.add('CHECK');
   if (tag === 'button' || type === 'button' || type === 'submit' || type === 'checkbox' || type === 'radio' || item.href) capabilities.add('CLICK');
