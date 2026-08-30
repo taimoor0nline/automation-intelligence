@@ -103,6 +103,7 @@ module.exports = defineConfig({
     env: {
       TEST_USERNAME: process.env.TEST_USERNAME || "",
       TEST_PASSWORD: process.env.TEST_PASSWORD || "",
+      TEST_ACTORS_JSON: process.env.TEST_ACTORS_JSON || "{}",
       LOGIN_PATH: process.env.LOGIN_PATH || "/",
       LOGIN_USERNAME_SELECTOR: process.env.LOGIN_USERNAME_SELECTOR || "",
       LOGIN_PASSWORD_SELECTOR: process.env.LOGIN_PASSWORD_SELECTOR || "",
