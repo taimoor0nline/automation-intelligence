@@ -1,7 +1,9 @@
 const { modelForProfile } = require('./aiModelProfiles');
 const { runtimeCapabilities } = require('./progressiveTestGenerator');
 const { registryForModel } = require('./canonicalElementRegistry');
-const { publicActorCatalog } = require('./testActorProfiles');
+const { normalizeActorProfiles, publicActorCatalog } = require('./testActorProfiles');
+const requestContext = require('./requestContext');
+const { getSession } = require('../data/sessionStore');
 const { IR_VERSION, canonicalActionCatalog, canonicalAssertionCatalog, validateCanonicalIr } = require('./canonicalTestIrV3');
 const { generateCypressPreviewFromPlan } = require('./deterministicAutomationGeneratorV6');
 
@@ -132,6 +134,25 @@ function normalizePriority(value) {
   return ['low','medium','high'].includes(priority) ? priority : 'medium';
 }
 
+function resolveActorRuntime(actorCatalog = [], actorCredentialRefs = []) {
+  let safeActors = publicActorCatalog(actorCatalog);
+  let configuredActorRefs = [...new Set((Array.isArray(actorCredentialRefs) ? actorCredentialRefs : []).map(String).filter(Boolean))];
+  const current = requestContext.current();
+  if ((!safeActors.length || !configuredActorRefs.length) && Array.isArray(current.testActors) && current.testActors.length) {
+    const normalized = normalizeActorProfiles(current.testActors);
+    safeActors = normalized.catalog;
+    configuredActorRefs = Object.entries(normalized.credentials)
+      .filter(([, credentials]) => credentials?.username && credentials?.password)
+      .map(([actorRef]) => actorRef);
+    if (current.sessionId) {
+      const session = getSession(current.sessionId);
+      session.testActors = safeActors;
+      session.actorCredentials = normalized.credentials;
+    }
+  }
+  return { safeActors, configuredActorRefs };
+}
+
 async function generateCanonicalBatch({
   story,
   registry,
@@ -148,8 +169,9 @@ async function generateCanonicalBatch({
   if (!registry?.elements?.length) throw new Error('Canonical element registry is required before AI test generation.');
   if (!Array.isArray(plannedUnits) || !plannedUnits.length) throw new Error('At least one canonical planned unit is required.');
 
-  const safeActors = publicActorCatalog(actorCatalog);
-  const configuredActorRefs = [...new Set((Array.isArray(actorCredentialRefs) ? actorCredentialRefs : []).map(String).filter(Boolean))];
+  const actorRuntime = resolveActorRuntime(actorCatalog, actorCredentialRefs);
+  const safeActors = actorRuntime.safeActors;
+  const configuredActorRefs = actorRuntime.configuredActorRefs;
   const availableActors = safeActors.filter((actor) => configuredActorRefs.includes(actor.actorRef));
   const capabilities = runtimeCapabilities();
   const result = await callModel(CANONICAL_PROMPT, {
