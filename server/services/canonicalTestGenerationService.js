@@ -1,7 +1,7 @@
 const { modelForProfile } = require('./aiModelProfiles');
 const { runtimeCapabilities } = require('./progressiveTestGenerator');
 const { registryForModel } = require('./canonicalElementRegistry');
-const { IR_VERSION, canonicalActionCatalog, canonicalAssertionCatalog, validateCanonicalIr } = require('./canonicalTestIr');
+const { IR_VERSION, canonicalActionCatalog, canonicalAssertionCatalog, validateCanonicalIr } = require('./canonicalTestIrV2');
 
 function numberEnv(value, fallback) {
   const n = Number(value);
@@ -67,8 +67,10 @@ NON-NEGOTIABLE CONTRACT:
 - Use only canonical action/assertion operations supplied in the catalogs.
 - English prose is display metadata only. actions/assertions are the execution truth.
 - If a field must be empty, use CLEAR rather than TYPE with an empty value.
+- When a login-negative case needs the configured valid username or password while testing the other credential, use TYPE_RUNTIME_CREDENTIAL with credential username|password. Never invent credential literals.
+- LOGIN_VALID is for a complete valid-login precondition/workflow, not for a negative login case that must leave or alter one credential.
 - SELECT uses the discovered option value from the element registry.
-- Exact text assertions are allowed only when the literal is evidenced by the registry or the business story. Otherwise use structural/non-empty assertions instead of inventing a message.
+- Exact text assertions are allowed only when the literal is independently evidenced by canonicalElementRegistry. If exact text is not discovered, use visibility, validity, non-empty text, or another deterministic structural assertion instead of inventing a message.
 - Navigation uses discovered paths only.
 - Do not output raw SQL, credentials, API keys, tokens or connection strings. Database assertions use configured named queries only.
 - Advanced operations may be used only when runtimeCapabilities says the capability is available/configured.
@@ -78,6 +80,7 @@ ACTION FIELD CONTRACT:
 - LOGIN_VALID: {operation}
 - NAVIGATE: {operation,path}
 - TYPE: {operation,elementRef,value}
+- TYPE_RUNTIME_CREDENTIAL: {operation,elementRef,credential:"username"|"password"}
 - CLEAR/CLICK/DBLCLICK/RIGHTCLICK/HOVER/FOCUS/BLUR/CHECK/UNCHECK/SUBMIT/SCROLL_INTO_VIEW: {operation,elementRef}
 - SELECT: {operation,elementRef,value}
 - PRESS_KEY: {operation,elementRef,key}
@@ -142,6 +145,7 @@ async function generateCanonicalBatch({
     irVersion: IR_VERSION,
     story,
     environment,
+    hasRuntimeCredentials: Boolean(hasCredentials),
     plannedUnits: plannedUnits.map((unit) => ({
       plannedId: unit.plannedId,
       category: unit.category,
@@ -197,7 +201,9 @@ async function generateCanonicalBatch({
     const validation = validateCanonicalIr(canonicalIr, {
       registry,
       plannedUnit: unit,
-      story,
+      // Exact visible-text assertions must be discovery-grounded. The business story
+      // can define behavior, but cannot manufacture DOM text that discovery did not observe.
+      story: '',
       hasCredentials,
     });
     if (!validation.ok) {
