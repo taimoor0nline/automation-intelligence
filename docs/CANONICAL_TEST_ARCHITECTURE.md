@@ -122,9 +122,50 @@ Canonical IR is rejected before Automation Readiness when it violates the contra
 - planned-unit semantic drift;
 - missing runtime credentials when a runtime-credential action is required.
 
-A valid canonical IR produces the deterministic `automationPlan` directly with 100% canonical assertion coverage. The legacy English DSL remains available for existing/manual test cases.
+A valid canonical IR produces the deterministic `automationPlan` directly with 100% canonical assertion coverage. Historical reviewed cases without `canonicalIr` can still use the compatibility compiler during migration.
 
-## 6. SSE and batching
+## 6. Manual test authoring uses Cypress syntax
+
+New manually-authored Web UI tests do not use narrative automation steps. The tester writes a supported Cypress subset in the editor.
+
+Example Steps:
+
+```js
+cy.visit('/feedback')
+cy.get('[data-testid="age"]').clear().type('17')
+cy.get('[data-testid="submit-feedback"]').click()
+```
+
+Example Expected Results:
+
+```js
+cy.get('[data-testid="age-error"]').should('be.visible')
+cy.get('[data-testid="age-error"]').should('contain.text', 'Age must be at least 18')
+cy.location('pathname').should('eq', '/feedback')
+```
+
+The manual authoring adapter parses only the documented Cypress subset. It does not execute arbitrary pasted JavaScript. Parsed commands are converted into structured actions/assertions, grounded against discovery, compiled into the deterministic automation plan, and subjected to the normal Automation Readiness gate.
+
+The complete user-facing guide is `docs/MANUAL_CYPRESS_TEST_AUTHORING.md`.
+
+This keeps the two authoring paths explicit:
+
+```text
+AI authoring
+  -> Canonical Element Registry
+  -> Canonical Test IR
+  -> deterministic plan
+
+Manual authoring
+  -> supported Cypress syntax
+  -> Cypress syntax adapter
+  -> grounded structured contract
+  -> deterministic plan
+```
+
+Both paths converge before browser execution.
+
+## 7. SSE and batching
 
 Canonical IR does not replace progressive generation. The scalable behavior remains:
 
@@ -148,7 +189,7 @@ Canonical architecture adds:
 
 With `AI_GENERATION_BATCH_SIZE=1`, a generated case immediately enters readiness while other AI workers continue generation. For 100-200-case suites, a batch size around 5 reduces provider calls while preserving progressive SSE updates between batches.
 
-## 7. Database-disabled mode
+## 8. Database-disabled mode
 
 ```env
 DATABASE_ENABLED=false
@@ -165,7 +206,7 @@ This is a first-class operating mode. The DB module is hard-gated: PostgreSQL is
 
 This mode is appropriate for demos, ephemeral workers and deployments that do not require cross-process persistence.
 
-## 8. PostgreSQL mode
+## 9. PostgreSQL mode
 
 ```env
 DATABASE_ENABLED=true
@@ -188,7 +229,7 @@ Canonical artifacts are persisted in addition to normal `test_sessions` / `test_
 
 When `DATABASE_REQUIRED=false`, a canonical persistence error emits a warning and the active in-memory test flow can continue. When `DATABASE_REQUIRED=true`, persistence failures are treated as required infrastructure failures.
 
-## 9. Rollout compatibility
+## 10. Rollout compatibility
 
 Canonical generation is enabled by default:
 
@@ -202,9 +243,9 @@ For emergency rollout fallback only:
 AUTOMATION_CANONICAL_IR_ENABLED=false
 ```
 
-This returns the generation endpoint to the previous scalable English-DSL route. Existing/manual reviewed cases without `canonicalIr` also continue through the legacy V13 compiler, so the migration does not require historical cases to be rewritten immediately.
+This returns the AI generation endpoint to the previous scalable English-DSL route. Historical reviewed cases without `canonicalIr` continue through the legacy V13 compatibility compiler. New manual browser tests should use the Cypress authoring helper rather than adding more narrative grammar to that compatibility layer.
 
-## 10. Recommended scale profiles
+## 11. Recommended scale profiles
 
 Demo / visibly progressive:
 
@@ -226,7 +267,7 @@ READINESS_CONCURRENCY=6
 
 Both profiles use the same canonical contract, SSE endpoint, readiness validator and execution engine.
 
-## 11. Regression command
+## 12. Regression command
 
 The network-free architecture smoke test covers element refs, planner semantic drift, raw-selector rejection, empty TYPE rejection, text-identity separation, discovery-grounded text, runtime credential handling and canonical readiness:
 
