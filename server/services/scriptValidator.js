@@ -99,9 +99,6 @@ function decodeLiteral(literal) {
 }
 
 function extractLiteralArgs(script, command) {
-  // Match complete JavaScript string literals, including escaped quotes such as
-  // "[data-testid=\"email\"]" emitted by JSON.stringify(). The older regex
-  // stopped at the escaped quote and incorrectly reported "[data-testid=\\".
   const patterns = {
     "cy.get": /\bcy\.get\(\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)\s*\)/g,
     "cy.visit": /\bcy\.visit\(\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)\s*\)/g,
@@ -128,11 +125,35 @@ function extractTestTitles(script) {
   return titles;
 }
 
+function extractSingleLiteralHelperCalls(script, helperName) {
+  const pattern = new RegExp(`\\bcy\\.${helperName}\\(\\s*(\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|\`(?:\\\\.|[^\`\\\\])*\`)\\s*\\)`, 'g');
+  const values = [];
+  let match;
+  while ((match = pattern.exec(script))) {
+    const decoded = decodeLiteral(match[1]);
+    if (typeof decoded === 'string') values.push(decoded);
+  }
+  return values;
+}
+
+function extractRuntimeCredentialCalls(script) {
+  const pattern = /\bcy\.typeRuntimeCredential\(\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)\s*,\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)\s*\)/g;
+  const values = [];
+  let match;
+  while ((match = pattern.exec(script))) {
+    const selector = decodeLiteral(match[1]);
+    const credential = decodeLiteral(match[2]);
+    if (typeof selector === 'string' && typeof credential === 'string') values.push({ selector, credential });
+  }
+  return values;
+}
+
 function validateGroundedScript(script, {
   approvedTestCases = [],
   pageDiscoveries = [],
   hasCredentials = false,
   loginSelectors = null,
+  actorCredentialRefs = [],
   frameworkOwnedSelectors = [],
 } = {}) {
   const base = validateScript(script);
@@ -143,32 +164,47 @@ function validateGroundedScript(script, {
   }
 
   if (/\b(?:cy|Cypress)\.env\s*\(/.test(script)) {
-    errors.push("Generated specs may not access runtime environment credentials directly; use cy.loginWithRuntimeCredentials().");
+    errors.push("Generated specs may not access runtime environment credentials directly; use framework-owned TestNexus credential helpers.");
   }
-  if (/\bTEST_(?:USERNAME|PASSWORD)\b|this\.TEST_(?:USERNAME|PASSWORD)/.test(script)) {
-    errors.push("Generated specs may not reference TEST_USERNAME/TEST_PASSWORD identifiers directly.");
+  if (/\bTEST_(?:USERNAME|PASSWORD|ACTORS_JSON)\b|this\.TEST_(?:USERNAME|PASSWORD|ACTORS_JSON)/.test(script)) {
+    errors.push("Generated specs may not reference runtime credential environment identifiers directly.");
   }
 
-  const helperCalls = script.match(/\bcy\.loginWithRuntimeCredentials\s*\([^)]*\)/g) || [];
-  for (const call of helperCalls) {
+  const loginCalls = script.match(/\bcy\.loginWithRuntimeCredentials\s*\([^)]*\)/g) || [];
+  for (const call of loginCalls) {
     if (!/^cy\.loginWithRuntimeCredentials\s*\(\s*\)$/.test(call)) {
       errors.push("loginWithRuntimeCredentials must be called without arguments; selectors and credentials are automation-system-owned.");
     }
   }
-  if (helperCalls.length && !hasCredentials) {
-    errors.push("Generated spec requested runtime credential login but no credentials were supplied.");
+  if (loginCalls.length && !hasCredentials) errors.push("Generated spec requested runtime credential login but no default credentials were supplied.");
+
+  const runtimeCredentialCalls = extractRuntimeCredentialCalls(script);
+  if (runtimeCredentialCalls.length && !hasCredentials) errors.push("Generated spec requested a runtime username/password field value but no default credentials were supplied.");
+  for (const call of runtimeCredentialCalls) {
+    if (!['username','password'].includes(String(call.credential).toLowerCase())) errors.push(`Unsupported runtime credential helper type: ${call.credential}.`);
+  }
+
+  const actorCalls = extractSingleLiteralHelperCalls(script, 'loginAsTestActor');
+  const configuredActors = new Set((actorCredentialRefs || []).map(String));
+  for (const actorRef of actorCalls) {
+    if (!configuredActors.has(actorRef)) errors.push(`Generated spec requested test actor without configured runtime credentials: ${actorRef}.`);
   }
 
   const grounding = discoveredGrounding(pageDiscoveries);
   const allowedFrameworkSelectors = new Set((frameworkOwnedSelectors || []).map((value) => String(value || "").trim()).filter(Boolean));
-  if (helperCalls.length) {
+  const usesLoginControls = loginCalls.length || actorCalls.length || runtimeCredentialCalls.length;
+  if (usesLoginControls) {
     const selectors = [loginSelectors?.username, loginSelectors?.password, loginSelectors?.submit].map((value) => String(value || "").trim());
     if (selectors.some((value) => !value)) {
-      errors.push("Runtime login helper is unavailable because username, password and submit selectors were not grounded by the automation system.");
+      errors.push("Runtime login helpers are unavailable because username, password and submit selectors were not grounded by the automation system.");
     }
     for (const selector of selectors.filter(Boolean)) {
       if (!grounding.selectors.has(selector)) errors.push(`Framework login selector is not grounded in page discovery: ${selector}`);
     }
+  }
+
+  for (const call of runtimeCredentialCalls) {
+    if (!grounding.selectors.has(call.selector)) errors.push(`Runtime credential target is not grounded in page discovery: ${call.selector}`);
   }
 
   const approvedIds = approvedTestCases.map((tc) => String(tc?.id || "").toUpperCase()).filter(Boolean);
