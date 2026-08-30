@@ -75,9 +75,15 @@ function resolveLoginRuntime(pageDiscoveries = []) {
   };
 }
 
+function configuredActorRefs(session) {
+  return Object.entries(session.actorCredentials || {})
+    .filter(([, credentials]) => credentials?.username && credentials?.password)
+    .map(([actorRef]) => actorRef);
+}
+
 function isPreExecutionAutomationFailure(test) {
   const message = String(test?.err?.message || "");
-  return /runtime login credentials are not configured|runtime login controls were not grounded|allowCypressEnv|returned a promise from a command|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution|could not verify that this server is running|browser.*(?:failed|closed|crashed)|support file.*(?:error|failed)/i.test(message);
+  return /runtime login credentials are not configured|runtime credentials are not configured for test actor|runtime login controls were not grounded|allowCypressEnv|returned a promise from a command|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution|could not verify that this server is running|browser.*(?:failed|closed|crashed)|support file.*(?:error|failed)/i.test(message);
 }
 
 function automationFailureAnalysis(tc, test) {
@@ -186,9 +192,14 @@ function constrainLoginAnalysis(analysis, tc, test) {
   };
 }
 
+function cloneCanonical(value) {
+  return value && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : null;
+}
+
 function normalizeReviewedTestCases(input, fallbackCases) {
   if (!Array.isArray(input)) return fallbackCases;
-  if (input.length > 50) throw new Error("A maximum of 50 reviewed test cases is allowed in the demo.");
+  const maxReviewed = Math.max(1, Math.min(Number(process.env.MAX_REVIEWED_TEST_CASES || 500) || 500, 1000));
+  if (input.length > maxReviewed) throw new Error(`A maximum of ${maxReviewed} reviewed test cases is allowed.`);
 
   const seen = new Set();
   const normalized = [];
@@ -203,31 +214,41 @@ function normalizeReviewedTestCases(input, fallbackCases) {
     const typeCandidate = cleanString(raw.type, 30).toLowerCase();
     const priorityCandidate = cleanString(raw.priority, 30).toLowerCase();
     const steps = Array.isArray(raw.steps)
-      ? raw.steps.slice(0, 30).map((step) => ({
+      ? raw.steps.slice(0, 100).map((step) => ({
           action: cleanString(step?.action ?? step, 500),
           target: typeof step === "object" ? cleanString(step?.target, 300) : "",
-          value: typeof step === "object" && step?.value !== null && step?.value !== undefined ? cleanString(step.value, 300) : null,
+          value: typeof step === "object" && step?.value !== null && step?.value !== undefined ? cleanString(step.value, 500) : null,
         })).filter((step) => step.action || step.target)
       : [];
     const expectedResults = Array.isArray(raw.expectedResults)
-      ? raw.expectedResults.slice(0, 20).map((value) => cleanString(value, 600)).filter(Boolean)
+      ? raw.expectedResults.slice(0, 100).map((value) => cleanString(value, 1000)).filter(Boolean)
       : [];
     const preconditions = Array.isArray(raw.preconditions)
-      ? raw.preconditions.slice(0, 20).map((value) => cleanString(value, 500)).filter(Boolean)
+      ? raw.preconditions.slice(0, 50).map((value) => cleanString(value, 500)).filter(Boolean)
       : [];
+    const canonicalIr = cloneCanonical(raw.canonicalIr);
 
     normalized.push({
       id,
       title,
       type: ALLOWED_TYPES.has(typeCandidate) ? typeCandidate : "functional",
+      customScenarioType: cleanString(raw.customScenarioType, 80) || null,
+      testCategory: cleanString(raw.testCategory || raw.category, 80).toUpperCase() || "FUNCTIONAL",
+      customCategory: cleanString(raw.customCategory, 80) || null,
+      securitySubcategory: cleanString(raw.securitySubcategory, 80).toUpperCase() || null,
+      severity: cleanString(raw.severity || raw.securitySeverity, 30).toUpperCase() || null,
       priority: ALLOWED_PRIORITIES.has(priorityCandidate) ? priorityCandidate : "medium",
       preconditions,
       testData: raw.testData && typeof raw.testData === "object" && !Array.isArray(raw.testData) ? raw.testData : {},
       steps,
       expectedResults,
-      source: raw.source === "human" || id.startsWith("TC-H") ? (raw.source || "human") : "ai-reviewed",
+      source: raw.source === "human" || id.startsWith("TC-H") ? (raw.source || "human") : (canonicalIr ? "ai-canonical-reviewed" : "ai-reviewed"),
       createdBy: raw.createdBy || null,
       repairHistory: Array.isArray(raw.repairHistory) ? raw.repairHistory.slice(-10) : [],
+      canonicalIr,
+      canonicalValidation: cloneCanonical(raw.canonicalValidation),
+      cypressPreview: canonicalIr ? cleanString(raw.cypressPreview, 100000) : null,
+      manualCypressSource: raw.manualCypressSource && typeof raw.manualCypressSource === "object" ? cloneCanonical(raw.manualCypressSource) : null,
     });
     seen.add(id);
   });
@@ -391,9 +412,15 @@ router.post("/api/chat", async (req, res, next) => {
     }
 
     const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
+    const actorRefs = configuredActorRefs(session);
     session.testCases = assessTestCases(
       normalizeReviewedTestCases(reviewedTestCases, session.testCases),
-      { pageDiscoveries: session.pageDiscoveries, hasCredentials }
+      {
+        pageDiscoveries: session.pageDiscoveries,
+        hasCredentials,
+        actorCatalog: session.testActors || [],
+        actorCredentialRefs: actorRefs,
+      }
     );
     session.automationReadiness = readinessSummary(session.testCases);
 
@@ -421,6 +448,8 @@ router.post("/api/chat", async (req, res, next) => {
       baseUrl: `${base.protocol}//${base.host}`,
       hasCredentials,
       credentials: session.credentials,
+      actorCredentials: session.actorCredentials || {},
+      testActors: session.testActors || [],
       loginPath: loginRuntime.path,
       loginSelectors: loginRuntime.selectors,
     };
@@ -428,6 +457,7 @@ router.post("/api/chat", async (req, res, next) => {
 
     console.log(`[readiness] ${approvedTestCases.length}/${approvedTestCases.length} approved case(s) compiled and are Automation Ready.`);
     console.log(`[runtime-preflight] Grounded login path: ${executionContext.loginPath}`);
+    console.log(`[runtime-preflight] Configured role actors: ${actorRefs.length}`);
     console.log(`[automation-contract] Building deterministic runtime from ${approvedTestCases.length} compiled test plan(s).`);
 
     const generated = generateDeterministicAutomation(approvedTestCases);
@@ -436,6 +466,7 @@ router.post("/api/chat", async (req, res, next) => {
       pageDiscoveries: session.pageDiscoveries,
       hasCredentials: executionContext.hasCredentials,
       loginSelectors: executionContext.loginSelectors,
+      actorCredentialRefs: actorRefs,
       frameworkOwnedSelectors: ["body"],
     });
     if (!validation.valid) {
@@ -562,7 +593,7 @@ router.post("/api/chat", async (req, res, next) => {
       analysisPending: summary.failed > 0,
       analysisUrl: summary.failed > 0 ? "/api/test-results/analyze" : null,
       automationReadiness: session.automationReadiness,
-      runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath, generationMode: "deterministic-dsl" },
+      runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath, actorCount: actorRefs.length, generationMode: "deterministic-dsl-v6-canonical-actors" },
       aiModelTier: modelTier,
       reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
       generatedFile: generated.fileName,
