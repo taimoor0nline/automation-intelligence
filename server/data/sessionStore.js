@@ -12,8 +12,14 @@ function createSession() {
     additionalPaths: [],
     aiModelTier: "strong",
     credentials: null,
+    // Active actors are the small scenario-specific subset exposed to Canonical IR.
     testActors: [],
     actorCredentials: {},
+    // The actor directory can contain many imported accounts. Only public metadata
+    // and active refs may be persisted; directory credentials are runtime-only.
+    testActorDirectory: [],
+    testActorActiveRefs: [],
+    testActorDirectoryCredentials: {},
     apiAuth: null,
     apiTargetId: null,
     apiOperationIds: [],
@@ -50,9 +56,11 @@ function hydrateSession(id, persisted) {
   }
   const existing = getSession(id);
   Object.assign(existing, createSession(), persisted);
-  // Browser credentials, role/actor credentials, REST authentication secrets and local artifact paths are intentionally never restored from PostgreSQL.
+  // Browser credentials, actor/directory credentials, REST authentication secrets and
+  // local artifact paths are intentionally never restored from PostgreSQL.
   existing.credentials = null;
   existing.actorCredentials = {};
+  existing.testActorDirectoryCredentials = {};
   existing.apiAuth = null;
   existing.artifacts = null;
   existing.reportHtml = null;
