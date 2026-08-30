@@ -1,6 +1,23 @@
 # TestNexus Test Actor Directory — CSV / Excel Import
 
-TestNexus supports importing multiple test accounts and business roles from **CSV** or **Excel `.xlsx`** files for role-based browser automation.
+TestNexus supports single-user and multi-role authenticated browser testing through one **Test users & workflow** model. There is no separate user-facing Username/Password credential area anymore.
+
+For a simple authenticated application, configure one **Default User**. For a workflow application, configure multiple role users such as Requester, Manager, Checker or Approver. Larger account sets can be imported from **CSV** or **Excel `.xlsx`**.
+
+```text
+Application login
+   ↓
+No login required
+   └─ Test users & workflow hidden
+
+Login required
+   ↓
+Test users & workflow
+   ├─ Default User (single-user application)
+   └─ Multiple role users (workflow application)
+          ↓
+     Optional CSV / XLSX directory
+```
 
 The actor directory is separate from the small set of actors used by one scenario:
 
@@ -18,6 +35,27 @@ Canonical IR uses LOGIN_AS_ACTOR
 Cypress runtime resolves the credentials privately
 ```
 
+## Single-user applications
+
+A normal authenticated application does not need a separate credential form. Keep one row in **Test users & workflow**:
+
+```text
+Role          Username      Password
+Default User  test.user     ********
+```
+
+TestNexus assigns the stable reference:
+
+```text
+Default User → actor_default
+```
+
+The Default User is also synchronized into hidden compatibility credential fields for older internal execution paths. Those compatibility fields are not a second user-facing source of truth.
+
+## No-login applications
+
+When **Application login = No login required**, TestNexus hides **Test users & workflow** and suppresses all actor, workflow and default credential data from generation/execution requests. Existing actor entries remain in browser memory so they can reappear if the user changes the application back to an authenticated mode.
+
 ## Supported file formats
 
 - `.csv`
@@ -32,7 +70,7 @@ The importer is implemented with TestNexus's own deterministic CSV/XLSX reader a
 | Column | Required | Purpose |
 |---|---:|---|
 | `actorRef` | No | Stable actor reference. If blank, TestNexus generates one from the role. |
-| `role` | Yes | Business role such as Requester, Manager, Checker, Approver or Compliance. |
+| `role` | Yes | Business role such as Default User, Requester, Manager, Checker, Approver or Compliance. |
 | `displayName` | No | Friendly account label shown in the directory. Defaults to the role. |
 | `username` | Yes | Runtime login username. Never persisted in the public actor catalog. |
 | `password` | Yes | Runtime login password. Never persisted in PostgreSQL/Canonical IR. |
@@ -65,7 +103,7 @@ A manually supplied duplicate `actorRef` is rejected rather than silently remapp
 
 ## Import workflow
 
-Open **Test actors / roles** in the Web UI and choose **Import CSV / Excel**.
+Open **Test users & workflow** in the Web UI and choose **Import CSV / Excel**.
 
 TestNexus performs a preview before applying the file. The preview shows:
 
@@ -187,17 +225,18 @@ POST /api/sessions/:sessionId/test-actors
 
 Actor-management writes are restricted to QA/MANAGER when platform authentication is enabled. The same APIs remain available in the supported `AUTH_REQUIRED=false` standalone/demo mode.
 
-## Regression test
+## Regression tests
 
 Run:
 
 ```bash
 npm run test:actor-import
+npm run test:unified-users
 ```
 
-The regression creates and parses both CSV and a real in-memory XLSX ZIP workbook, verifies multiple accounts per role, checks active selection and generation-session copy behavior, and asserts that usernames/passwords never enter the safe persistence/preview payloads.
+The actor-import regression covers CSV/XLSX parsing, multiple accounts per role, active selection and secret-safe persistence. The unified-user regression protects the single credential source-of-truth, hidden compatibility fields and no-login credential suppression.
 
-The actor-import regression is also included in:
+Both are included in:
 
 ```bash
 npm run test:capabilities
