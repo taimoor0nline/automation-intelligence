@@ -75,6 +75,13 @@ function quotedValues(value) {
   return out;
 }
 
+function stripSelectorLiterals(value) {
+  return String(value || '').replace(
+    /\[data-testid=(?:"[^"]+"|'[^']+')\]|\[name=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\.[A-Za-z][A-Za-z0-9_-]*/g,
+    ' '
+  );
+}
+
 function explicitlyRequestsIdentityText(testCase, conflict) {
   const selector = String(conflict?.selector || '').trim();
   const expectedToken = identityToken(conflict?.expected);
@@ -84,7 +91,13 @@ function explicitlyRequestsIdentityText(testCase, conflict) {
     const source = String(item || '');
     if (!source.includes(selector)) return false;
     if (!/\btext\b/i.test(source)) return false;
-    return quotedValues(source).some((value) => identityToken(value) === expectedToken);
+
+    // Selector syntax itself contains quoted identity tokens, e.g.
+    // [data-testid="success-panel"]. Those quotes are NOT expected display text.
+    // Remove selector literals before examining quoted business text.
+    const semanticTextOnly = stripSelectorLiterals(source);
+    return quotedValues(semanticTextOnly)
+      .some((value) => identityToken(value) === expectedToken);
   });
 }
 
@@ -128,4 +141,5 @@ module.exports = {
   textIdentityConflicts,
   isIdentityOnlyExpectedText,
   explicitlyRequestsIdentityText,
+  stripSelectorLiterals,
 };
