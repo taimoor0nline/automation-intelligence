@@ -6,11 +6,17 @@ const storage = new AsyncLocalStorage();
 function middleware(req, _res, next) {
   const sessionId = String(req.body?.sessionId || req.params?.sessionId || req.query?.sessionId || '').trim() || null;
   const session = sessionId ? getSession(sessionId) : null;
+  const testActors = Array.isArray(req.body?.testActors)
+    ? req.body.testActors.slice(0, 12).map((actor) => actor && typeof actor === 'object' ? { ...actor } : actor)
+    : null;
   storage.run({
     sessionId,
     user: req.user || null,
     projectId: session?.projectId || null,
     repositoryId: session?.repositoryId || null,
+    // Runtime-only authoring input. It can include role credentials and therefore
+    // must never be logged or persisted as request context metadata.
+    testActors,
   }, next);
 }
 
