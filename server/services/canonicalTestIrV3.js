@@ -52,10 +52,9 @@ function validateCanonicalIr(ir, context = {}) {
   if (actorErrors.length) {
     return {
       ok: false,
-      // Keep the platform-wide credential reason code so readiness correctly
-      // requests user input instead of proposing an AI repair. The detailed
-      // reason still identifies the missing actorRef.
-      reasonCode: actorErrors.some((item) => /credentials/i.test(item)) ? 'MISSING_CREDENTIALS' : 'CANONICAL_IR_INVALID',
+      // Missing role credentials are user input, not an AI repair and not the same
+      // as the default TEST_USERNAME/TEST_PASSWORD credential pair.
+      reasonCode: actorErrors.some((item) => /credentials/i.test(item)) ? 'MISSING_ACTOR_CREDENTIALS' : 'CANONICAL_IR_INVALID',
       reason: actorErrors[0],
       errors: actorErrors,
     };
