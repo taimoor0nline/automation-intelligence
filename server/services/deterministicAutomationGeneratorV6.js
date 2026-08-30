@@ -4,6 +4,12 @@ const v4 = require('./deterministicAutomationGeneratorV4');
 function js(value) { return JSON.stringify(value); }
 
 function emitAction(action) {
+  if (action?.operation === 'TYPE_RUNTIME_CREDENTIAL') {
+    const credential = String(action.credential || '').trim().toLowerCase();
+    if (!['username','password'].includes(credential)) throw new Error(`Unsupported runtime credential: ${credential || 'missing'}`);
+    if (!action.selector) throw new Error(`TYPE_RUNTIME_CREDENTIAL requires a grounded selector for ${credential}.`);
+    return `    cy.typeRuntimeCredential(${js(action.selector)}, ${js(credential)});`;
+  }
   if (action?.operation === 'LOGIN_AS_ACTOR') {
     const actorRef = String(action.actorRef || '').trim();
     if (!actorRef) throw new Error('LOGIN_AS_ACTOR requires actorRef.');
