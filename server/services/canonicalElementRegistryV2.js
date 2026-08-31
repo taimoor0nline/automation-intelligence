@@ -102,8 +102,8 @@ function sameErrorIdentity(control, error) {
 
 function linkValidationErrors(elements) {
   const errorEntries = elements.filter((entry) => {
-    const identity = [entry.kind, entry.elementRef, entry.testId, entry.id, entry.name, entry.className].filter(Boolean).join(' ').toLowerCase();
-    return entry.kind === 'validation-error' || /error|validation/.test(identity);
+    const signature = [entry.kind, entry.elementRef, entry.testId, entry.id, entry.name].filter(Boolean).join(' ').toLowerCase();
+    return entry.kind === 'validation-error' || /error|validation/.test(signature);
   });
 
   for (const control of elements) {
@@ -112,9 +112,6 @@ function linkValidationErrors(elements) {
     if (match) control.errorRef = match.elementRef;
   }
 
-  // Checkbox/radio groups often expose one group-level error after the fieldset,
-  // rather than an error node adjacent to every individual option. Once any member
-  // is linked, propagate that validation error across the whole named group.
   const grouped = new Map();
   for (const control of elements) {
     if (!['checkbox','radio'].includes(control.type) || !control.name) continue;
@@ -123,8 +120,9 @@ function linkValidationErrors(elements) {
     grouped.get(key).push(control);
   }
   for (const group of grouped.values()) {
-    const linked = group.find((item) => item.errorRef)?.errorRef || null;
-    if (linked) group.forEach((item) => { item.errorRef ||= linked; });
+    const direct = group.find((item) => item.errorRef)?.errorRef || null;
+    const inferred = direct || errorEntries.find((error) => error.pageRef === group[0]?.pageRef && sameErrorIdentity(group[0], error))?.elementRef || null;
+    if (inferred) group.forEach((item) => { item.errorRef ||= inferred; });
   }
 }
 
@@ -201,7 +199,7 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
     for (const item of rawPage.elements || []) {
       const elementRef = register(item, page, 'element', 'el');
       if (item?.errorElement) {
-        const errorRef = register(item.errorElement, page, 'validation-error', 'err');
+        const errorRef = register({ ...item.errorElement, formId: item.formId || item.errorElement.formId, groupName: item.groupName || item.errorElement.groupName }, page, 'validation-error', 'err');
         const owner = elements.find((entry) => entry.elementRef === elementRef);
         if (owner && errorRef) owner.errorRef = errorRef;
       }
@@ -212,7 +210,7 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
   linkValidationErrors(elements);
 
   const registryCore = {
-    version: 2,
+    version: 1,
     pages,
     elements,
   };
@@ -230,7 +228,7 @@ function registryIndex(registry = {}) {
 
 function registryForModel(registry = {}) {
   return {
-    version: registry.version || 2,
+    version: registry.version || 1,
     registryHash: registry.registryHash || null,
     pages: (registry.pages || []).map((page) => ({ pageRef: page.pageRef, path: page.path, title: page.title })),
     elements: (registry.elements || []).map((entry) => ({
