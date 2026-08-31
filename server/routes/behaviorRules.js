@@ -3,9 +3,11 @@ const router = express.Router();
 const { getSession } = require('../data/sessionStore');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
 const persistence = require('../services/persistenceService');
+const behaviorRuleStore = require('../services/behaviorRuleStore');
+const { buildCanonicalElementRegistry } = require('../services/canonicalElementRegistry');
 const {
   RULE_TYPES, RULE_SOURCES, SCOPE_TYPES, TRIGGERS,
-  upsertRules, linkRulesToCase,
+  upsertRules, linkRulesToCase, discoveryRulesFromRegistry, mergeDiscoveredRules,
 } = require('../services/behaviorRuleRegistry');
 
 const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || 'false').toLowerCase() === 'true';
@@ -17,8 +19,22 @@ function qaManagerOnly(req,res,next){
   next();
 }
 function safeRules(session){ return Array.isArray(session.behaviorRules) ? session.behaviorRules : []; }
+function ensureRegistry(session){
+  if(session.canonicalElementRegistry?.elements?.length) return session.canonicalElementRegistry;
+  session.canonicalElementRegistry=buildCanonicalElementRegistry(session.pageDiscoveries||[]);
+  return session.canonicalElementRegistry;
+}
+function syncDiscovery(session){
+  const registry=ensureRegistry(session);
+  const discovered=discoveryRulesFromRegistry(registry);
+  const merged=mergeDiscoveredRules(safeRules(session),discovered);
+  session.behaviorRules=merged.rules;
+  const prior=(session.behaviorRuleConflicts||[]).filter(c=>c.status==='RESOLVED');
+  session.behaviorRuleConflicts=[...prior,...merged.conflicts];
+  return {discovered:discovered.length,conflicts:merged.conflicts.length};
+}
 function relinkAndAssess(session){
-  const registry=session.canonicalElementRegistry || {elements:[],pages:[]};
+  const registry=ensureRegistry(session);
   session.testCases=(session.testCases||[]).map((tc)=>linkRulesToCase(tc,safeRules(session),registry));
   session.testCases=assessTestCases(session.testCases,{
     pageDiscoveries:session.pageDiscoveries||[],
@@ -33,14 +49,21 @@ function relinkAndAssess(session){
 async function persist(sessionId,session,req){
   if(!persistence.enabled()) return;
   await persistence.persistSession(sessionId,session,{projectId:session.projectId,repositoryId:session.repositoryId,userId:req.user?.sub||session.createdBy||null});
-  await persistence.persistBehaviorRules?.(sessionId,session.behaviorRules||[],session.behaviorRuleConflicts||[]);
   await persistence.persistTestCases(sessionId,session.testCases||[]);
+  try{await behaviorRuleStore.persist(sessionId,session.behaviorRules||[],session.behaviorRuleConflicts||[],session.testCases||[]);}catch(err){console.error('[behavior-rules] DB persistence skipped',err.message);}
 }
 
 router.get('/api/test-rules/catalog', qaManagerOnly, (_req,res)=>res.json({ok:true,ruleTypes:RULE_TYPES,sources:RULE_SOURCES,scopeTypes:SCOPE_TYPES,triggers:TRIGGERS}));
 router.get('/api/test-rules/:sessionId', qaManagerOnly, (req,res)=>{
   const session=getSession(req.params.sessionId||'default');
   res.json({ok:true,databaseMode:persistence.enabled()?'POSTGRESQL_AND_SESSION':'SESSION_ONLY',rules:safeRules(session),conflicts:session.behaviorRuleConflicts||[],testCases:(session.testCases||[]).map(tc=>({id:tc.id,title:tc.title,ruleRefs:tc.ruleRefs||[],effectiveRules:tc.effectiveRules||[]}))});
+});
+router.post('/api/test-rules/:sessionId/sync-discovery', qaManagerOnly, async (req,res)=>{
+  const sessionId=req.params.sessionId||'default'; const session=getSession(sessionId);
+  try{
+    const sync=syncDiscovery(session); relinkAndAssess(session); await persist(sessionId,session,req);
+    res.json({ok:true,...sync,databaseMode:persistence.enabled()?'POSTGRESQL_AND_SESSION':'SESSION_ONLY',rules:session.behaviorRules,conflicts:session.behaviorRuleConflicts,automationReadiness:session.automationReadiness,testCases:session.testCases});
+  }catch(err){res.status(422).json({ok:false,reply:err.message});}
 });
 router.post('/api/test-rules/:sessionId', qaManagerOnly, async (req,res)=>{
   const sessionId=req.params.sessionId||'default'; const session=getSession(sessionId);
@@ -59,7 +82,7 @@ router.post('/api/test-rules/:sessionId/import', qaManagerOnly, async (req,res)=
   try{
     session.behaviorRules=upsertRules(safeRules(session),incoming.map(r=>({...r,source:'IMPORTED'})),'IMPORTED');
     relinkAndAssess(session); await persist(sessionId,session,req);
-    res.json({ok:true,imported:incoming.length,databaseMode:persistence.enabled()?'POSTGRESQL_AND_SESSION':'SESSION_ONLY',rules:session.behaviorRules,conflicts:session.behaviorRuleConflicts||[],automationReadiness:session.automationReadiness});
+    res.json({ok:true,imported:incoming.length,databaseMode:persistence.enabled()?'POSTGRESQL_AND_SESSION':'SESSION_ONLY',rules:session.behaviorRules,conflicts:session.behaviorRuleConflicts||[],automationReadiness:session.automationReadiness,testCases:session.testCases});
   }catch(err){res.status(422).json({ok:false,reply:err.message});}
 });
 router.post('/api/test-rules/:sessionId/conflicts/:conflictId/resolve', qaManagerOnly, async (req,res)=>{
@@ -70,7 +93,7 @@ router.post('/api/test-rules/:sessionId/conflicts/:conflictId/resolve', qaManage
   if(!['KEEP_APPROVED','ACCEPT_DISCOVERED'].includes(resolution)) return res.status(422).json({ok:false,reply:'resolution must be KEEP_APPROVED or ACCEPT_DISCOVERED.'});
   if(resolution==='ACCEPT_DISCOVERED'){
     const existing=safeRules(session).find(r=>r.ruleId===conflict.ruleId);
-    if(existing){session.behaviorRules=upsertRules(safeRules(session),[{...existing,value:conflict.discoveredValue,trigger:conflict.discoveredTrigger,source:'USER_DEFINED',approved:true}],'USER_DEFINED');}
+    if(existing) session.behaviorRules=upsertRules(safeRules(session),[{...existing,value:conflict.discoveredValue,trigger:conflict.discoveredTrigger,source:'USER_DEFINED',approved:true}],'USER_DEFINED');
   }
   session.behaviorRuleConflicts=conflicts.map(c=>c.conflictId===conflict.conflictId?{...c,status:'RESOLVED',resolution,resolvedAt:new Date().toISOString()}:c);
   relinkAndAssess(session); await persist(sessionId,session,req);
