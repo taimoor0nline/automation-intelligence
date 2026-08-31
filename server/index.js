@@ -23,6 +23,13 @@ const { optionalAuth } = require("./services/authService");
 const sessionPersistence = require("./middleware/sessionPersistence");
 const db = require("./db");
 
+function behavioralGroundingFor(testCase = {}) {
+  return testCase.behavioralGrounding
+    || testCase.canonicalValidation?.behavioralGrounding
+    || testCase.automationReadiness?.automationPlan?.behavioralGrounding
+    || null;
+}
+
 qwen.analyzeFailure = async (args) => {
   const ctx = requestContext.current();
   let sourceContext = null;
@@ -41,56 +48,31 @@ qwen.analyzeFailure = async (args) => {
   }
 
   const analysis = await analyzeFailureWithResolution({ ...args, sourceContext });
-  const expected = String(args?.expected || "");
-  const actual = String(args?.actual || "");
   const tc = args?.testCase || {};
-  const validationExpectation = /reject|validation|required|minimum|url/i.test(expected);
-  const validationNotShown = /remained empty|non-empty validation text|not visible|display:\s*none/i.test(actual);
-  const seededDemoCase = tc.id === "TC004" || tc.id === "TC005";
+  const grounding = behavioralGroundingFor(tc);
 
-  if (seededDemoCase && validationExpectation && validationNotShown) {
-    const hasSourceGuidance = analysis.sourceGuidanceLevel && analysis.sourceGuidanceLevel !== "BLACK_BOX";
-    const blackBoxReviewArea = tc.id === "TC004"
-      ? "Inspect the feedback submission age validation in both the browser-side form validation and the server/API validation path. The rule should have one consistent lower boundary: age >= 18."
-      : "Inspect the feedback website-field validation in both browser-side and server/API validation. A supplied value should be accepted only when it is a valid HTTP/HTTPS URL.";
-    const blackBoxHint = tc.id === "TC004"
-      ? "The rejection condition should treat every numeric age below 18 as invalid, preserve the upper boundary, return a validation error, and keep the form editable. Make the same rule authoritative on the server even if the browser also validates it."
-      : "Do not gate URL validation on whether the value contains a dot. If the optional website field is non-empty, parse/validate the complete URL and allow only the approved protocols; otherwise return the website validation error and keep the form editable.";
-    const blackBoxExample = tc.id === "TC004"
-      ? "Example pattern (illustrative, not an applied patch):\nconst age = Number(input.age);\nif (!input.age) errors.age = 'Age is required.';\nelse if (age < 18 || age > 100) errors.age = 'Age must be between 18 and 100.';"
-      : "Example pattern (illustrative, not an applied patch):\nif (input.website && !isValidHttpUrl(input.website)) {\n  errors.website = 'Please enter a valid website URL.';\n}\n// Do not skip validation merely because the value has no dot.";
-
+  // Generic safety policy: a historical AI-canonical case that has not passed the
+  // deterministic behavioral-grounding contract cannot establish an application
+  // defect by assertion failure alone. The test definition itself must be repaired
+  // or regenerated first. Grounded canonical tests, manual Cypress tests and REST
+  // tests remain eligible for normal evidence-based application-defect analysis.
+  if (String(tc.source || '').toLowerCase() === 'ai-canonical'
+      && grounding?.status !== 'GROUNDED'
+      && String(analysis?.classification || '').toUpperCase() === 'APPLICATION_DEFECT') {
     return {
       ...analysis,
-      classification: "APPLICATION_DEFECT",
-      summary: tc.id === "TC004"
-        ? "The application accepted age 17 even though the discovered minimum is 18 instead of showing the required age validation."
-        : "The application accepted the malformed website value even though the field requires a URL instead of showing the required website validation.",
-      probableCause: tc.id === "TC004"
-        ? "The target application's age boundary validation is not enforcing the approved minimum of 18."
-        : "The target application's website validation is not enforcing the approved URL-format requirement for values such as abc.",
-      severity: "high",
-      confidence: Math.max(Number(analysis.confidence) || 0, 0.98),
-      resolutionComment: tc.id === "TC004"
-        ? "Review the application's age-validation rule and align both client/server validation with the approved minimum age of 18. Do not change the test boundary or assertion to accommodate age 17."
-        : "Review the application's website-validation rule so a non-empty website value must satisfy the approved URL format. Do not weaken the URL test or remove the validation assertion.",
-      recommendedFix: tc.id === "TC004"
-        ? "Correct the age boundary logic so values below 18 are rejected and the age validation message is rendered while the form remains available for correction."
-        : "Correct website validation so malformed non-empty values such as abc are rejected and the website validation message is rendered while the form remains available for correction.",
-      recommendedOwner: "APPLICATION_TEAM",
-      developerReviewArea: hasSourceGuidance ? analysis.developerReviewArea : blackBoxReviewArea,
-      developerImplementationHint: hasSourceGuidance ? analysis.developerImplementationHint : blackBoxHint,
-      developerExampleFix: hasSourceGuidance ? analysis.developerExampleFix : blackBoxExample,
-      regressionChecks: tc.id === "TC004"
-        ? ["Age 17 is rejected.","Age 18 is accepted when all other fields are valid.","Age 100 remains accepted.","Age 101 remains rejected.","The age validation message is rendered and the user can correct the value."]
-        : ["Website abc is rejected.","A valid https:// URL is accepted.","A valid http:// URL is accepted if HTTP remains an approved protocol.","An empty website remains accepted because the field is optional.","The website validation message is rendered and the user can correct the value."],
-      verificationSteps: tc.id === "TC004"
-        ? ["Apply the reviewed age-validation correction in the application.","Re-run TC004 with age 17 and confirm submission is rejected.","Confirm [data-testid=\"age-error\"] becomes visible with non-empty validation text.","Re-run the valid age scenario to confirm valid feedback submission still succeeds."]
-        : ["Apply the reviewed website-validation correction in the application.","Re-run TC005 with website value abc and confirm submission is rejected.","Confirm [data-testid=\"website-error\"] becomes visible with non-empty validation text.","Re-run a valid HTTP/HTTPS website scenario to confirm valid feedback submission still succeeds."],
+      classification: 'AUTOMATION_DEFECT',
+      summary: 'The browser assertion failed, but this AI-generated canonical case does not carry the current deterministic behavioral-grounding contract. Regenerate or revalidate the test definition before attributing the failure to the application.',
+      probableCause: 'The approved test may omit an application prerequisite or assume a runtime validation trigger that static discovery did not prove. Application-defect classification is intentionally suppressed until behavioral grounding succeeds.',
+      confidence: Math.max(Number(analysis.confidence) || 0, 0.95),
+      resolutionComment: 'Regenerate or revalidate this canonical test with the current behavioral-grounding pipeline, then re-run the original business scenario. Do not modify the application based only on this stale test definition.',
+      recommendedFix: 'Repair the test definition through deterministic behavioral grounding rather than weakening its business assertion.',
+      recommendedOwner: 'TEST_AUTOMATION_TEAM',
       safeToAutoResolve: false,
-      resolutionSource: hasSourceGuidance ? analysis.resolutionSource : "AI_ADVISORY_WITH_DETERMINISTIC_DEMO_GUARDRAIL",
+      resolutionSource: 'DETERMINISTIC_BEHAVIORAL_GROUNDING_POLICY',
     };
   }
+
   return analysis;
 };
 
