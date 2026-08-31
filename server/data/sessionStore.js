@@ -12,11 +12,8 @@ function createSession() {
     additionalPaths: [],
     aiModelTier: "strong",
     credentials: null,
-    // Active actors are the small scenario-specific subset exposed to Canonical IR.
     testActors: [],
     actorCredentials: {},
-    // The actor directory can contain many imported accounts. Only public metadata
-    // and active refs may be persisted; directory credentials are runtime-only.
     testActorDirectory: [],
     testActorActiveRefs: [],
     testActorDirectoryCredentials: {},
@@ -31,6 +28,11 @@ function createSession() {
     canonicalElementRegistry: null,
     canonicalGenerationPlan: null,
     canonicalArchitectureVersion: 1,
+    // Reusable application/page/form/field/test behavior rules. In session-only mode
+    // this is the authoritative in-memory registry; DB mode persists the same model.
+    behaviorRules: [],
+    behaviorRuleConflicts: [],
+    behaviorRuleRegistryVersion: 1,
     testCases: [],
     automationReadiness: null,
     readinessValidated: false,
@@ -56,8 +58,6 @@ function hydrateSession(id, persisted) {
   }
   const existing = getSession(id);
   Object.assign(existing, createSession(), persisted);
-  // Browser credentials, actor/directory credentials, REST authentication secrets and
-  // local artifact paths are intentionally never restored from PostgreSQL.
   existing.credentials = null;
   existing.actorCredentials = {};
   existing.testActorDirectoryCredentials = {};
@@ -72,12 +72,17 @@ function isHydrated(id) { return hydrated.has(id); }
 function markHydrated(id) { hydrated.add(id); }
 
 function resetSession(id) {
+  const previous = sessions.get(id) || null;
   sessions.delete(id);
   hydrated.delete(id);
   const session = getSession(id);
-  // Generation intentionally resets ordinary run state. Imported actor credentials are
-  // held in a separate short-lived runtime store so that reset does not erase the actor
-  // directory the user just prepared. The lazy require avoids a module-cycle at startup.
+  // Shared rules are application knowledge and must survive test-generation iterations.
+  // They are copied into the new run session even when PostgreSQL is disabled.
+  if (previous) {
+    session.behaviorRules = Array.isArray(previous.behaviorRules) ? previous.behaviorRules.map((rule) => ({ ...rule })) : [];
+    session.behaviorRuleConflicts = Array.isArray(previous.behaviorRuleConflicts) ? previous.behaviorRuleConflicts.map((item) => ({ ...item })) : [];
+    session.behaviorRuleRegistryVersion = previous.behaviorRuleRegistryVersion || 1;
+  }
   try { require('../services/testActorRuntimeStore').applyToSession(id, session); } catch {}
   return session;
 }
