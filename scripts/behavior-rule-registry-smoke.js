@@ -46,7 +46,8 @@ const projected=projectRuleTriggers({actions:[{operation:'TYPE',elementRef:'el_e
 assert(projected.ir.actions.some(a=>a.operation==='BLUR'&&a.elementRef==='el_email'),'BLUR trigger must become executable canonical behavior');
 assert.match(projected.timingHints,/ON BLUR/i);
 
-assert.equal(applicationKey({targetUrl:'https://example.com/feedback'}),'target:https://example.com/feedback');
+assert.equal(applicationKey({targetUrl:'https://example.com/feedback'}),'target:https://example.com');
+assert.equal(applicationKey({targetUrl:'https://example.com/'}),'target:https://example.com','rules should be reused across starting pages on the same application');
 assert.equal(applicationKey({projectId:'project-123',targetUrl:'https://example.com'}),'project:project-123');
 for(const migration of ['012_behavior_rule_registry.sql','013_application_behavior_rules.sql'])assert(fs.existsSync(path.join(__dirname,'..','server','db',migration)),`${migration} must exist for DB mode`);
 console.log('[behavior-rule-registry-smoke] PASS');
