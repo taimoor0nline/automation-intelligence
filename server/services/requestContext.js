@@ -6,9 +6,19 @@ const { normalizeWorkflowRequirements } = require('./workflowRequirements');
 
 const storage = new AsyncLocalStorage();
 
+const PAGE_SCOPES = new Set(['STARTING_PAGE_ONLY', 'ALL_DISCOVERED_PAGES']);
+function normalizePageScope(value) {
+  const raw = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (raw === 'STARTING_PAGE' || raw === 'START_PAGE_ONLY' || raw === 'STARTING_ONLY') return 'STARTING_PAGE_ONLY';
+  if (raw === 'ALL_DISCOVERED' || raw === 'ALL_PAGES' || raw === 'DISCOVERED_PAGES') return 'ALL_DISCOVERED_PAGES';
+  return PAGE_SCOPES.has(raw) ? raw : 'ALL_DISCOVERED_PAGES';
+}
+
 function middleware(req, _res, next) {
   const sessionId = String(req.body?.sessionId || req.params?.sessionId || req.query?.sessionId || '').trim() || null;
   const actorDirectorySessionId = String(req.body?.actorDirectorySessionId || req.headers?.['x-test-actor-directory-session'] || '').trim() || null;
+  const hasPageScopeInput = Object.prototype.hasOwnProperty.call(req.body || {}, 'pageScope');
+  const pageScope = normalizePageScope(req.body?.pageScope);
 
   // The browser may prepare/import actors before the generation UI chooses its final
   // run session id. Copy that short-lived runtime state into the actual generation
@@ -49,6 +59,7 @@ function middleware(req, _res, next) {
     actorRuntimeStore.setFromSession(sessionId, session);
   }
   if (session && hasWorkflowRequirementsInput) session.workflowRequirements = workflowRequirements;
+  if (session && hasPageScopeInput) session.pageScope = pageScope;
 
   storage.run({
     sessionId,
@@ -56,6 +67,8 @@ function middleware(req, _res, next) {
     user: req.user || null,
     projectId: session?.projectId || null,
     repositoryId: session?.repositoryId || null,
+    pageScope,
+    hasPageScopeInput,
     // Runtime-only authoring input. It can include role credentials and therefore
     // must never be logged or persisted as request context metadata.
     hasTestActorsInput: hasTestActorsInput || testActors.length > 0,
@@ -67,4 +80,4 @@ function middleware(req, _res, next) {
 
 function current() { return storage.getStore() || {}; }
 
-module.exports = { middleware, current };
+module.exports = { middleware, current, normalizePageScope };
