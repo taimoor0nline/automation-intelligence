@@ -1,1 +1,1 @@
-module.exports = require("./pageDiscoveryV4");
+module.exports = require("./pageDiscoveryV5");
