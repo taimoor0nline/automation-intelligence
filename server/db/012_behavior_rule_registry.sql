@@ -1,5 +1,5 @@
 create table if not exists behavior_rules (
-  session_id varchar(120) not null references test_sessions(id) on delete cascade,
+  session_id text not null references test_sessions(id) on delete cascade,
   rule_id varchar(160) not null,
   version integer not null default 1,
   scope_type varchar(30) not null,
@@ -19,13 +19,12 @@ create table if not exists behavior_rules (
   updated_at timestamptz not null default now(),
   primary key(session_id, rule_id)
 );
-
 create index if not exists ix_behavior_rules_scope on behavior_rules(session_id,scope_type,scope_ref);
 create index if not exists ix_behavior_rules_element on behavior_rules(session_id,element_ref);
 
 create table if not exists behavior_rule_history (
   id bigserial primary key,
-  session_id varchar(120) not null references test_sessions(id) on delete cascade,
+  session_id text not null references test_sessions(id) on delete cascade,
   rule_id varchar(160) not null,
   version integer not null,
   snapshot_json jsonb not null,
@@ -34,7 +33,7 @@ create table if not exists behavior_rule_history (
 );
 
 create table if not exists behavior_rule_conflicts (
-  session_id varchar(120) not null references test_sessions(id) on delete cascade,
+  session_id text not null references test_sessions(id) on delete cascade,
   conflict_id varchar(160) not null,
   rule_id varchar(160),
   status varchar(40) not null default 'REVIEW_REQUIRED',
@@ -45,12 +44,11 @@ create table if not exists behavior_rule_conflicts (
 );
 
 create table if not exists test_case_rule_links (
-  session_id varchar(120) not null references test_sessions(id) on delete cascade,
+  session_id text not null references test_sessions(id) on delete cascade,
   external_case_id varchar(40) not null,
   rule_id varchar(160) not null,
   rule_version integer not null default 1,
   linked_at timestamptz not null default now(),
   primary key(session_id,external_case_id,rule_id)
 );
-
 create index if not exists ix_test_case_rule_links_rule on test_case_rule_links(session_id,rule_id);
