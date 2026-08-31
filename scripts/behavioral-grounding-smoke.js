@@ -42,6 +42,7 @@ const page = {
 };
 
 const registry = buildCanonicalElementRegistry([page]);
+assert.strictEqual(registry.version, 1, 'Form-aware registry metadata must remain backward-compatible with registry version 1.');
 const byTestId = new Map(registry.elements.map((item) => [item.testId, item]));
 const ref = (testId) => {
   const item = byTestId.get(testId);
@@ -81,7 +82,7 @@ const successGrounding = normalizeBehavioralIr(successIr, {
 });
 assert.strictEqual(successGrounding.unresolved.length, 0);
 assert(successGrounding.ir.actions.some((item) => item.operation === 'CHECK' && item.elementRef === ref('products-web')), 'Success path must add one Products Used selection.');
-assert(successGrounding.ir.actions.some((item) => item.operation === 'TYPE' && item.elementRef === ref('website') && item.value === 'https://example.com'), 'Success path must neutralize the validation-bearing optional URL with a valid value.');
+assert(!successGrounding.ir.actions.some((item) => item.elementRef === ref('website')), 'Optional URL fields must remain untouched when the scenario does not require them.');
 assert(successGrounding.ir.actions.findIndex((item) => item.elementRef === ref('products-web')) < successGrounding.ir.actions.findIndex((item) => item.elementRef === ref('submit-feedback')), 'Completed prerequisites must execute before submit.');
 
 const successValidation = validateCanonicalIr(successGrounding.ir, {
@@ -116,6 +117,7 @@ assert.strictEqual(emailGrounding.unresolved.length, 0);
 assert(emailGrounding.ir.actions.some((item) => item.operation === 'CLICK' && item.elementRef === ref('submit-feedback')), 'Unproven blur-based custom error feedback must fall back to deterministic submit validation.');
 assert(emailGrounding.ir.actions.some((item) => item.operation === 'CHECK' && item.elementRef === ref('products-web')), 'Negative email validation must complete unrelated Products Used prerequisites.');
 assert(!emailGrounding.ir.actions.some((item) => item.operation === 'TYPE' && item.elementRef === ref('email') && item.value !== 'invalid-email'), 'Behavioral grounding must not overwrite the invalid field under test.');
+assert(!emailGrounding.ir.actions.some((item) => item.elementRef === ref('website')), 'Negative field isolation must not populate unrelated optional fields.');
 
 const emailValidation = validateCanonicalIr(emailGrounding.ir, {
   registry,
