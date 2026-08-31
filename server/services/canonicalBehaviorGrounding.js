@@ -44,7 +44,11 @@ function validationBearing(element = {}) {
   if (!isFormControl(element) || element.disabled === true) return false;
   const type = String(element.type || '').toLowerCase();
   if (['hidden','button','submit','reset','image','file'].includes(type)) return false;
-  return element.required === true || Boolean(element.errorRef);
+  // HTML-required controls are deterministic prerequisites. Custom checkbox/radio
+  // groups are also treated as prerequisites when discovery links them to a group
+  // validation error. An optional text/URL field can have an error container merely
+  // for format validation when provided, so do not invent a value for it.
+  return element.required === true || (['checkbox','radio'].includes(type) && Boolean(element.errorRef));
 }
 
 function actionElementRef(action = {}) {
@@ -213,7 +217,7 @@ function normalizeBehavioralIr(ir, { registry = {}, plannedUnit = null, story = 
       hasSubmit = true;
       notes.push({
         code: 'VALIDATION_TRIGGER_SUBMIT',
-        message: `Custom validation feedback was grounded to form submission instead of assuming an unproven blur/change handler.`,
+        message: 'Custom validation feedback was grounded to form submission instead of assuming an unproven blur/change handler.',
         elementRef: submit.elementRef,
       });
     } else {
@@ -228,9 +232,7 @@ function normalizeBehavioralIr(ir, { registry = {}, plannedUnit = null, story = 
   for (let index = 0; index < actions.length; index += 1) {
     const submit = submitElementForAction(actions[index], byRef);
     if (!submit) continue;
-
-    const shouldComplete = positiveIntent || hasErrorAssertions;
-    if (!shouldComplete) continue;
+    if (!positiveIntent && !hasErrorAssertions) continue;
 
     const exclusions = hasErrorAssertions && !positiveIntent ? protectedKeys : new Set();
     const priorActions = actions.slice(0, index);
