@@ -56,6 +56,7 @@
       modelField(),
       fieldFor('targetUrl'),
       fieldFor('additionalPaths'),
+      fieldFor('pageScope'),
       applicationLoginField(),
       document.getElementById('testActorPanel'),
       fieldFor('story'),
@@ -76,6 +77,7 @@
       && document.getElementById('aiModelTier')
       && document.getElementById('targetUrl')
       && document.getElementById('additionalPaths')
+      && document.getElementById('pageScope')
     );
   }
 
