@@ -6,7 +6,7 @@ function applicationKey(session = {}) {
   if (session.projectId) return `project:${String(session.projectId)}`;
   try {
     const url = new URL(String(session.targetUrl || ''));
-    return `target:${url.origin}${url.pathname || '/'}`.slice(0,320);
+    return `target:${url.origin}`.slice(0,320);
   } catch {
     return `target:${String(session.targetUrl || 'default').slice(0,300)}`;
   }
@@ -27,8 +27,6 @@ async function load(session = {}) {
     memory.set(key,clone(state));
     return state;
   } catch (err) {
-    // DB is optional for this feature; continue with the in-process knowledge store
-    // if migrations have not yet been applied or the optional DB is temporarily down.
     if (mem) return clone(mem);
     return { applicationKey:key, rules:[], conflicts:[], persistenceWarning:err.message };
   }
