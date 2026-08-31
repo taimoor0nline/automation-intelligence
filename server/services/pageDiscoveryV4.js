@@ -1,6 +1,7 @@
 const v3 = require('./pageDiscoveryV3');
 const { annotatePageDiscovery, buildWebCapabilityMatrix } = require('./webCapabilityMatrix');
 const requestContext = require('./requestContext');
+const { getSession } = require('../data/sessionStore');
 
 async function discoverPage(url) {
   return annotatePageDiscovery(await v3.discoverPage(url));
@@ -21,11 +22,20 @@ function attachMatrix(pages, scope) {
   return pages;
 }
 
+function persistEffectiveScope(context, scope) {
+  if (!context?.sessionId) return;
+  try {
+    const session = getSession(context.sessionId);
+    if (session) session.pageScope = scope;
+  } catch {}
+}
+
 async function discoverPages(urls) {
   const context = requestContext.current();
   const scope = context.pageScope === 'STARTING_PAGE_ONLY' ? 'STARTING_PAGE_ONLY' : 'ALL_DISCOVERED_PAGES';
   const seeds = [...new Set((urls || []).filter(Boolean))];
   if (!seeds.length) return [];
+  persistEffectiveScope(context, scope);
 
   // Starting-page scope is a hard planning/discovery boundary, not a UI filter.
   // Route hints and additional known pages are deliberately not crawled in this mode.
