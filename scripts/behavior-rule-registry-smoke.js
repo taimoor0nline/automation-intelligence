@@ -8,6 +8,8 @@ const {
   upsertRules,
   applyEffectiveRulesToIr,
 } = require('../server/services/behaviorRuleRegistry');
+const { projectRuleTriggers } = require('../server/services/behaviorRuleExecutionProjection');
+const { applicationKey } = require('../server/services/behaviorRuleKnowledgeStore');
 
 const registry={version:1,pages:[{pageRef:'page_feedback',path:'/feedback'}],elements:[
   {elementRef:'el_email',pageRef:'page_feedback',formId:'feedbackForm',tag:'input',type:'email',required:true,errorRef:'err_email'},
@@ -38,5 +40,13 @@ const negative={...linked,type:'negative',title:'Reject age below minimum',canon
 const negAdjusted=applyEffectiveRulesToIr(negative.canonicalIr,negative.effectiveRules,negative);
 assert.equal(negAdjusted.actions[0].value,'20','negative below-minimum case should follow updated shared rule');
 
+const emailRule=discovered.find(r=>r.elementRef==='el_email'&&r.ruleType==='EMAIL_FORMAT');
+const reviewedEmail={...emailRule,trigger:'BLUR',source:'USER_DEFINED',approved:true};
+const projected=projectRuleTriggers({actions:[{operation:'TYPE',elementRef:'el_email',value:'bad-email'}],assertions:[]},[reviewedEmail]);
+assert(projected.ir.actions.some(a=>a.operation==='BLUR'&&a.elementRef==='el_email'),'BLUR trigger must become executable canonical behavior');
+assert.match(projected.timingHints,/ON BLUR/i);
+
+assert.equal(applicationKey({targetUrl:'https://example.com/feedback'}),'target:https://example.com/feedback');
+assert.equal(applicationKey({projectId:'project-123',targetUrl:'https://example.com'}),'project:project-123');
 for(const migration of ['012_behavior_rule_registry.sql','013_application_behavior_rules.sql'])assert(fs.existsSync(path.join(__dirname,'..','server','db',migration)),`${migration} must exist for DB mode`);
 console.log('[behavior-rule-registry-smoke] PASS');
