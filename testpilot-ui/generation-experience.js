@@ -31,8 +31,9 @@
     const obsoleteBatchField = document.getElementById('readinessBatchSize')?.closest('.field');
     if (obsoleteBatchField) obsoleteBatchField.remove();
 
-    // Actor configuration is loaded early so generation requests can include the
-    // optional runtime-only role identities before progressive generation starts.
+    // Page scope and actor configuration are loaded early so generation requests
+    // carry deterministic discovery/authentication boundaries before planning starts.
+    loadScript('/page-scope.js', 'data-page-scope');
     loadScript('/test-actors.js', 'data-test-actors');
     loadScript('/test-actor-directory.js', 'data-test-actor-directory');
     loadScript('/test-actor-login-visibility.js', 'data-test-actor-login-visibility');
@@ -62,6 +63,7 @@
     loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/automation-details-cypress-preview.js', 'data-automation-details-cypress-preview');
+    loadScript('/test-case-page-context.js', 'data-test-case-page-context');
     // add-test-mode.js is loaded synchronously by the server shell. These helpers
     // are loaded after window load and turn new manual browser tests into a supported
     // Cypress-syntax authoring flow instead of free-form narrative automation steps.
