@@ -21,7 +21,8 @@
     "test:multi-role": "node scripts/multi-role-actor-regression-smoke.js",
     "test:actor-import": "node scripts/test-actor-import-smoke.js",
     "test:unified-users": "node scripts/unified-test-user-ui-smoke.js",
-    "test:capabilities": "node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js && node scripts/multi-role-actor-regression-smoke.js && node scripts/test-actor-import-smoke.js && node scripts/unified-test-user-ui-smoke.js"
+    "test:page-scope": "node scripts/page-scope-regression-smoke.js",
+    "test:capabilities": "node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js && node scripts/multi-role-actor-regression-smoke.js && node scripts/test-actor-import-smoke.js && node scripts/unified-test-user-ui-smoke.js && node scripts/page-scope-regression-smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
