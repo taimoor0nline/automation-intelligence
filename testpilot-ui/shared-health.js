@@ -64,6 +64,9 @@
   // The mode switch is the only startup enhancement allowed to load before first paint.
   // It is intentionally independent of health, auth, database and AI readiness.
   loadUiExtension('/fast-mode-navigation.js', 'data-fast-mode-navigation');
+  // Demo/status enhancement reads /health and keeps no-database mode obvious while
+  // making the reusable rule-review action prominent. It does not gate core startup.
+  loadUiExtension('/demo-ui.js', 'data-testnexus-demo-ui');
 
   function loadOptionalExtensions() {
     loadUiExtension('/test-case-help.js', 'data-ai-testpilot-help');
