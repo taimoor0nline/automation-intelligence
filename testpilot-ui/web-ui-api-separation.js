@@ -5,10 +5,7 @@
   const WEB_EXCLUDED_CATEGORY = 'API';
   const WEB_EXCLUDED_SECURITY_AREA = 'API_SECURITY';
 
-  function pretty(value) {
-    return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase());
-  }
-
+  function pretty(value) { return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
   function sanitizeStoredArray(key, excludedValue) {
     try {
       const parsed = JSON.parse(sessionStorage.getItem(key) || 'null');
@@ -20,23 +17,19 @@
 
   function hideGenerationApiOptions() {
     const apiInput = document.querySelector(`#generationCategoryMenu input[data-test-category][value="${WEB_EXCLUDED_CATEGORY}"]`);
-    if (apiInput) {
-      apiInput.checked = false;
-      const option = apiInput.closest('.generation-category-option');
-      if (option && !option.hidden) option.hidden = true;
-    }
-
+    if (apiInput) { apiInput.checked = false; const option = apiInput.closest('.generation-category-option'); if (option) option.remove(); }
     const apiSecurityInput = document.querySelector(`#securitySubcategoryMenu input[data-security-subcategory][value="${WEB_EXCLUDED_SECURITY_AREA}"]`);
-    if (apiSecurityInput) {
-      apiSecurityInput.checked = false;
-      const option = apiSecurityInput.closest('.generation-category-option');
-      if (option && !option.hidden) option.hidden = true;
-    }
+    if (apiSecurityInput) { apiSecurityInput.checked = false; const option = apiSecurityInput.closest('.generation-category-option'); if (option) option.remove(); }
   }
 
   function removeReviewApiOptions() {
     document.querySelector('#reviewCategory option[value="API"]')?.remove();
     document.querySelector('#reviewSecuritySubcategory option[value="API_SECURITY"]')?.remove();
+    document.querySelector('#editTestCategory option[value="API"]')?.remove();
+    document.querySelector('#editSecuritySubcategory option[value="API_SECURITY"]')?.remove();
+    // Defensive cleanup for any stale navigation/button injected by older cached scripts.
+    document.querySelectorAll('a[href="/rest.html"],button[data-mode="api"],button[data-test-mode="api"]').forEach((node) => node.remove());
+    const mode = document.getElementById('testModeSwitch'); if (mode) mode.remove();
   }
 
   function syncCategorySummary() {
@@ -45,19 +38,13 @@
     const count = document.getElementById('generationCategoryCount');
     const selectAll = document.getElementById('generationCategorySelectAll');
     if (!menu || !button || !selectAll) return;
-
-    const visibleInputs = [...menu.querySelectorAll('input[data-test-category]:not(:disabled)')]
-      .filter((input) => String(input.value).toUpperCase() !== WEB_EXCLUDED_CATEGORY);
+    const visibleInputs = [...menu.querySelectorAll('input[data-test-category]:not(:disabled)')].filter((input) => String(input.value).toUpperCase() !== WEB_EXCLUDED_CATEGORY);
     const selected = visibleInputs.filter((input) => input.checked);
     const all = visibleInputs.length > 0 && selected.length === visibleInputs.length;
-
-    selectAll.checked = all;
-    selectAll.indeterminate = !all && selected.length > 0;
+    selectAll.checked = all; selectAll.indeterminate = !all && selected.length > 0;
     const text = all ? 'All available test categories' : `${selected.length} categor${selected.length === 1 ? 'y' : 'ies'} selected`;
-    const expectedHtml = `<span>${text}</span><span class="generation-chevron">⌄</span>`;
-    if (button.innerHTML !== expectedHtml) button.innerHTML = expectedHtml;
-    const title = selected.map((input) => pretty(input.value)).join(', ');
-    if (button.title !== title) button.title = title;
+    button.innerHTML = `<span>${text}</span><span class="generation-chevron">⌄</span>`;
+    button.title = selected.map((input) => pretty(input.value)).join(', ');
     if (count) count.textContent = all ? 'All' : String(selected.length);
   }
 
@@ -66,27 +53,16 @@
     const button = document.getElementById('securitySubcategoryButton');
     const selectAll = document.getElementById('securitySubcategorySelectAll');
     if (!menu || !button || !selectAll) return;
-
-    const visibleInputs = [...menu.querySelectorAll('input[data-security-subcategory]')]
-      .filter((input) => String(input.value).toUpperCase() !== WEB_EXCLUDED_SECURITY_AREA);
+    const visibleInputs = [...menu.querySelectorAll('input[data-security-subcategory]')].filter((input) => String(input.value).toUpperCase() !== WEB_EXCLUDED_SECURITY_AREA);
     const selected = visibleInputs.filter((input) => input.checked);
     const all = visibleInputs.length > 0 && selected.length === visibleInputs.length;
-
-    selectAll.checked = all;
-    selectAll.indeterminate = !all && selected.length > 0;
+    selectAll.checked = all; selectAll.indeterminate = !all && selected.length > 0;
     const text = all ? 'All security areas' : `${selected.length} selected`;
-    const expectedHtml = `<span>${text}</span><span class="generation-chevron">⌄</span>`;
-    if (button.innerHTML !== expectedHtml) button.innerHTML = expectedHtml;
-    const title = selected.map((input) => pretty(input.value)).join(', ');
-    if (button.title !== title) button.title = title;
+    button.innerHTML = `<span>${text}</span><span class="generation-chevron">⌄</span>`;
+    button.title = selected.map((input) => pretty(input.value)).join(', ');
   }
 
-  function enforceWebOnlyUi() {
-    hideGenerationApiOptions();
-    removeReviewApiOptions();
-    syncCategorySummary();
-    syncSecuritySummary();
-  }
+  function enforceWebOnlyUi() { hideGenerationApiOptions(); removeReviewApiOptions(); syncCategorySummary(); syncSecuritySummary(); }
 
   sanitizeStoredArray('aiTestPilotGenerationCategories', WEB_EXCLUDED_CATEGORY);
   sanitizeStoredArray('aiTestPilotSecuritySubcategories', WEB_EXCLUDED_SECURITY_AREA);
@@ -99,12 +75,8 @@
       const isGenerationRequest = method === 'POST' && (/\/api\/generation\/start(?:\?|$)/.test(url) || /\/api\/chat(?:\?|$)/.test(url));
       if (isGenerationRequest && typeof init?.body === 'string') {
         const body = JSON.parse(init.body);
-        if (Array.isArray(body.selectedTestCategories)) {
-          body.selectedTestCategories = body.selectedTestCategories.filter((value) => String(value).toUpperCase() !== WEB_EXCLUDED_CATEGORY);
-        }
-        if (Array.isArray(body.selectedSecuritySubcategories)) {
-          body.selectedSecuritySubcategories = body.selectedSecuritySubcategories.filter((value) => String(value).toUpperCase() !== WEB_EXCLUDED_SECURITY_AREA);
-        }
+        if (Array.isArray(body.selectedTestCategories)) body.selectedTestCategories = body.selectedTestCategories.filter((value) => String(value).toUpperCase() !== WEB_EXCLUDED_CATEGORY);
+        if (Array.isArray(body.selectedSecuritySubcategories)) body.selectedSecuritySubcategories = body.selectedSecuritySubcategories.filter((value) => String(value).toUpperCase() !== WEB_EXCLUDED_SECURITY_AREA);
         init = { ...init, body: JSON.stringify(body) };
       }
     } catch {}
@@ -117,13 +89,6 @@
     setTimeout(enforceWebOnlyUi, 0);
   });
 
-  function start() {
-    // Bounded retries replace the previous whole-document MutationObserver.
-    // The category/review widgets are injected during startup, so checking a few times is sufficient
-    // and avoids repeatedly scanning the DOM while all other UI modules are loading.
-    [0, 80, 220, 600, 1200].forEach((delay) => setTimeout(enforceWebOnlyUi, delay));
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
-  else start();
+  function start() { [0,40,100,220,500,900,1500].forEach((delay) => setTimeout(enforceWebOnlyUi, delay)); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
 })();
