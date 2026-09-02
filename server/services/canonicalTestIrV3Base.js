@@ -1,4 +1,4 @@
-const v2 = require('./canonicalTestIrV2');
+const v2 = require('./canonicalTestIrV2b');
 const { publicActorCatalog } = require('./testActorProfiles');
 
 const LOGIN_AS_ACTOR_OPERATION = 'LOGIN_AS_ACTOR';
