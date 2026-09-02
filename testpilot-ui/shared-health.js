@@ -27,9 +27,7 @@
       } finally {
         clearTimeout(timer);
       }
-    })().finally(() => {
-      healthPromise = null;
-    });
+    })().finally(() => { healthPromise = null; });
 
     return healthPromise;
   }
@@ -46,7 +44,7 @@
     document.head.appendChild(script);
   }
 
-  function ensureClickThrough() {
+  function ensureFirstPaintRules() {
     if (document.getElementById('testNexusStartupInteractionGuard')) return;
     const style = document.createElement('style');
     style.id = 'testNexusStartupInteractionGuard';
@@ -54,27 +52,26 @@
       html,body{pointer-events:auto!important}
       body{cursor:auto!important}
       .modal:not(.show),.platform-modal:not(.show){pointer-events:none!important;display:none!important}
+      .human-note{display:none!important}
+      #testModeSwitch{display:none!important}
     `;
     document.head.appendChild(style);
   }
 
-  ensureClickThrough();
+  ensureFirstPaintRules();
 
-  // REST/API testing remains in the codebase for later, but the demo intentionally
-  // does not expose a Web UI / REST API mode switch.
+  // Demo/status is small and useful at startup. The REST/API mode switch is no
+  // longer loaded at all. Critical generation controls are loaded by
+  // generation-experience.js, not by the idle-extension path here.
   loadUiExtension('/demo-ui.js', 'data-testnexus-demo-ui');
 
   function loadOptionalExtensions() {
     loadUiExtension('/test-case-help.js', 'data-ai-testpilot-help');
     loadUiExtension('/test-category-ui.js', 'data-ai-testpilot-category-ui');
-    loadUiExtension('/generation-options.js', 'data-ai-testpilot-generation-options');
   }
 
   function scheduleOptionalExtensions() {
-    const run = () => {
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(loadOptionalExtensions, { timeout: 1200 });
-      else setTimeout(loadOptionalExtensions, 150);
-    };
+    const run = () => setTimeout(loadOptionalExtensions, 250);
     if (document.readyState === 'complete') run();
     else window.addEventListener('load', run, { once: true });
   }
