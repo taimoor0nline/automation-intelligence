@@ -15,6 +15,13 @@ function emitAction(action) {
     if (!actorRef) throw new Error('LOGIN_AS_ACTOR requires actorRef.');
     return `    cy.loginAsTestActor(${js(actorRef)});`;
   }
+  if (action?.operation === 'SUBMIT') {
+    if (!action.selector) throw new Error('SUBMIT requires a grounded selector.');
+    // Canonical SUBMIT represents user form submission intent. Discovery may ground
+    // that intent to either the form itself or its submit button. Cypress .submit()
+    // only accepts <form>, so choose the correct browser interaction at runtime.
+    return `    cy.get(${js(action.selector)}).then(($el) => { if ($el.is('form')) cy.wrap($el).submit(); else cy.wrap($el).click(); });`;
+  }
   return v5.emitAction(action);
 }
 
