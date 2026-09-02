@@ -17,11 +17,14 @@
     select.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  function loadScript(src, marker) {
+  function loadScript(src, marker, ordered = false) {
     if (document.querySelector(`script[${marker}]`)) return;
     const script = document.createElement('script');
     script.src = src;
-    script.async = true;
+    // Critical generation controls must execute in insertion order. Historically
+    // these scripts were async/idle-loaded, so scenario types could wait for a
+    // category picker that had not arrived yet.
+    script.async = !ordered;
     script.setAttribute(marker, 'true');
     document.body.appendChild(script);
   }
@@ -31,18 +34,19 @@
     const obsoleteBatchField = document.getElementById('readinessBatchSize')?.closest('.field');
     if (obsoleteBatchField) obsoleteBatchField.remove();
 
-    // Page scope and actor configuration are loaded early so generation requests
-    // carry deterministic discovery/authentication boundaries before planning starts.
-    loadScript('/page-scope.js', 'data-page-scope');
-    loadScript('/test-actors.js', 'data-test-actors');
-    loadScript('/test-actor-directory.js', 'data-test-actor-directory');
-    loadScript('/test-actor-login-visibility.js', 'data-test-actor-login-visibility');
-    loadScript('/journey-form-order.js', 'data-journey-form-order');
-
-    // Keep the review pane compact immediately. This lightweight helper removes the
-    // legacy review banner, shows an animated AI-working state and numbers test cards.
+    // Never show the legacy Human-in-the-Loop banner. shared-health also hides it
+    // before first paint; this removes any stale DOM copy left by cached shells.
     document.querySelectorAll('.human-note').forEach((node) => node.remove());
-    loadScript('/generation-activity-ui.js', 'data-generation-activity-ui');
+
+    // CRITICAL STARTUP UI — load immediately and deterministically.
+    loadScript('/page-scope.js', 'data-page-scope', true);
+    loadScript('/test-actors.js', 'data-test-actors', true);
+    loadScript('/test-actor-directory.js', 'data-test-actor-directory', true);
+    loadScript('/test-actor-login-visibility.js', 'data-test-actor-login-visibility', true);
+    loadScript('/generation-options.js', 'data-ai-testpilot-generation-options', true);
+    loadScript('/generation-types.js', 'data-generation-types', true);
+    loadScript('/journey-form-order.js', 'data-journey-form-order', true);
+    loadScript('/generation-activity-ui.js', 'data-generation-activity-ui', true);
 
     const generateBtn = document.getElementById('generateBtn');
     if (generateBtn && generateBtn.dataset.fastProfileBound !== '1') {
@@ -53,7 +57,6 @@
 
   function loadPrimaryEnhancements() {
     loadScript('/testnexus-branding.js', 'data-testnexus-branding');
-    loadScript('/generation-types.js', 'data-generation-types');
     loadScript('/selection-master-fix.js', 'data-selection-master-fix');
     loadScript('/custom-generation-scopes.js', 'data-custom-generation-scopes');
     loadScript('/generation-loading-ux.js', 'data-generation-loading-ux');
@@ -64,9 +67,6 @@
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/automation-details-cypress-preview.js', 'data-automation-details-cypress-preview');
     loadScript('/test-case-page-context.js', 'data-test-case-page-context');
-    // add-test-mode.js is loaded synchronously by the server shell. These helpers
-    // are loaded after window load and turn new manual browser tests into a supported
-    // Cypress-syntax authoring flow instead of free-form narrative automation steps.
     loadScript('/manual-cypress-authoring.js', 'data-manual-cypress-authoring');
     loadScript('/manual-cypress-authoring-ux.js', 'data-manual-cypress-authoring-ux');
   }
@@ -81,14 +81,9 @@
 
   function scheduleEnhancements() {
     const afterLoad = () => {
-      const primary = () => loadPrimaryEnhancements();
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(primary, { timeout: 700 });
-      else setTimeout(primary, 80);
-
-      setTimeout(() => {
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(loadSecondaryEnhancements, { timeout: 1500 });
-        else loadSecondaryEnhancements();
-      }, 700);
+      // Non-critical visual/reporting helpers may wait until after first paint.
+      setTimeout(loadPrimaryEnhancements, 20);
+      setTimeout(loadSecondaryEnhancements, 450);
     };
 
     if (document.readyState === 'complete') afterLoad();
