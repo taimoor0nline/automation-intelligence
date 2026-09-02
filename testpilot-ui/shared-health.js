@@ -54,18 +54,14 @@
       html,body{pointer-events:auto!important}
       body{cursor:auto!important}
       .modal:not(.show),.platform-modal:not(.show){pointer-events:none!important;display:none!important}
-      #testModeSwitch,#testModeSwitch *{pointer-events:auto!important}
     `;
     document.head.appendChild(style);
   }
 
   ensureClickThrough();
 
-  // The mode switch is the only startup enhancement allowed to load before first paint.
-  // It is intentionally independent of health, auth, database and AI readiness.
-  loadUiExtension('/fast-mode-navigation.js', 'data-fast-mode-navigation');
-  // Demo/status enhancement reads /health and keeps no-database mode obvious while
-  // making the reusable rule-review action prominent. It does not gate core startup.
+  // REST/API testing remains in the codebase for later, but the demo intentionally
+  // does not expose a Web UI / REST API mode switch.
   loadUiExtension('/demo-ui.js', 'data-testnexus-demo-ui');
 
   function loadOptionalExtensions() {
