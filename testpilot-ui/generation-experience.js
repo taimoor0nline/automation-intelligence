@@ -21,9 +21,6 @@
     if (document.querySelector(`script[${marker}]`)) return;
     const script = document.createElement('script');
     script.src = src;
-    // Critical generation controls must execute in insertion order. Historically
-    // these scripts were async/idle-loaded, so scenario types could wait for a
-    // category picker that had not arrived yet.
     script.async = !ordered;
     script.setAttribute(marker, 'true');
     document.body.appendChild(script);
@@ -33,20 +30,21 @@
     setFastProfile();
     const obsoleteBatchField = document.getElementById('readinessBatchSize')?.closest('.field');
     if (obsoleteBatchField) obsoleteBatchField.remove();
-
-    // Never show the legacy Human-in-the-Loop banner. shared-health also hides it
-    // before first paint; this removes any stale DOM copy left by cached shells.
     document.querySelectorAll('.human-note').forEach((node) => node.remove());
 
-    // CRITICAL STARTUP UI — load immediately and deterministically.
+    // Critical journey controls execute in a deterministic order. Web/API separation
+    // is deliberately part of this chain so API options never flash/select in the demo.
     loadScript('/page-scope.js', 'data-page-scope', true);
     loadScript('/test-actors.js', 'data-test-actors', true);
     loadScript('/test-actor-directory.js', 'data-test-actor-directory', true);
     loadScript('/test-actor-login-visibility.js', 'data-test-actor-login-visibility', true);
     loadScript('/generation-options.js', 'data-ai-testpilot-generation-options', true);
+    loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation', true);
     loadScript('/generation-types.js', 'data-generation-types', true);
     loadScript('/journey-form-order.js', 'data-journey-form-order', true);
     loadScript('/generation-activity-ui.js', 'data-generation-activity-ui', true);
+    loadScript('/test-category-ui.js', 'data-ai-testpilot-category-ui', true);
+    loadScript('/test-case-context-tags.js', 'data-test-case-context-tags', true);
 
     const generateBtn = document.getElementById('generateBtn');
     if (generateBtn && generateBtn.dataset.fastProfileBound !== '1') {
@@ -63,7 +61,6 @@
     loadScript('/progressive-generation.js', 'data-progressive-generation');
     loadScript('/generation-progress-clarity.js', 'data-generation-progress-clarity');
     loadScript('/review-filters.js', 'data-review-filters');
-    loadScript('/web-ui-api-separation.js', 'data-web-ui-api-separation');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/automation-details-cypress-preview.js', 'data-automation-details-cypress-preview');
     loadScript('/test-case-page-context.js', 'data-test-case-page-context');
@@ -81,11 +78,9 @@
 
   function scheduleEnhancements() {
     const afterLoad = () => {
-      // Non-critical visual/reporting helpers may wait until after first paint.
       setTimeout(loadPrimaryEnhancements, 20);
       setTimeout(loadSecondaryEnhancements, 450);
     };
-
     if (document.readyState === 'complete') afterLoad();
     else window.addEventListener('load', afterLoad, { once: true });
   }
