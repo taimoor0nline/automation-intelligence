@@ -1,1 +1,1 @@
-module.exports = require('./canonicalTestGenerationServiceV2');
+module.exports = require('./canonicalTestGenerationServiceV3');
