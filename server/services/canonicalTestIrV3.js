@@ -1,4 +1,4 @@
-const v2 = require('./canonicalTestIrV2');
+const v2 = require('./canonicalTestIrV2b');
 const { publicActorCatalog } = require('./testActorProfiles');
 
 const LOGIN_AS_ACTOR_OPERATION = 'LOGIN_AS_ACTOR';
@@ -40,8 +40,6 @@ function preprocessActorIr(ir) {
     ...ir,
     actions: (Array.isArray(ir.actions) ? ir.actions : []).map((action) => {
       if (String(action?.operation || '').trim().toUpperCase() !== LOGIN_AS_ACTOR_OPERATION) return action;
-      // Reuse the already-grounded LOGIN_VALID validation path. The actor identity
-      // is restored after deterministic validation and remains runtime-only.
       return { operation: 'LOGIN_VALID' };
     }),
   };
@@ -52,8 +50,6 @@ function validateCanonicalIr(ir, context = {}) {
   if (actorErrors.length) {
     return {
       ok: false,
-      // Missing role credentials are user input, not an AI repair and not the same
-      // as the default TEST_USERNAME/TEST_PASSWORD credential pair.
       reasonCode: actorErrors.some((item) => /credentials/i.test(item)) ? 'MISSING_ACTOR_CREDENTIALS' : 'CANONICAL_IR_INVALID',
       reason: actorErrors[0],
       errors: actorErrors,
