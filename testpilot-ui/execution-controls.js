@@ -3,11 +3,12 @@
   window.__testNexusExecutionControls = true;
 
   const START_LABEL = 'Start Tests';
-  const RETEST_LABEL = 'Re-test Approved Tests';
+  const RETEST_LABEL = 'Re-run Selected';
   let cancellationRequested = false;
   let resetting = false;
   let lastApprovedIds = [];
   let hasCompletedExecution = false;
+  let individualLaunch = null;
 
   function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -34,12 +35,16 @@
       .filter(Boolean);
   }
 
-  function applyApprovedIds(ids) {
+  function setCheckedIds(ids) {
     const wanted = new Set((ids || []).map((id) => String(id).toUpperCase()));
-    if (!wanted.size) return;
     for (const checkbox of document.querySelectorAll('.case-check')) {
       checkbox.checked = wanted.has(String(checkbox.value || '').toUpperCase());
     }
+  }
+
+  function applyApprovedIds(ids) {
+    if (!Array.isArray(ids)) return;
+    setCheckedIds(ids);
   }
 
   function statusText() {
@@ -72,6 +77,9 @@
       #resetExecutionBtn{border-color:#dbe3ef;background:#f8fafc;color:#334155}
       #resetExecutionBtn:hover{background:#eef2f7}
       #resetExecutionBtn:disabled,#stopExecutionBtn:disabled{opacity:.5;cursor:not-allowed}
+      .case-rerun-btn{display:none;white-space:nowrap;border-color:#c7d2fe!important;background:#eef2ff!important;color:#3730a3!important}
+      .case-rerun-btn:hover{background:#e0e7ff!important}
+      .case-rerun-btn:disabled{opacity:.45;cursor:not-allowed}
       @media(max-width:760px){.runbar{align-items:flex-start;flex-direction:column}.execution-run-actions{width:100%;margin-left:0;justify-content:flex-start}}
     `;
     document.head.appendChild(style);
@@ -105,42 +113,68 @@
     try { if (typeof clearError === 'function') clearError(); } catch {}
   }
 
-  function ensureControls() {
-    ensureStyles();
+  function ensureCaseRerunButtons() {
+    for (const card of document.querySelectorAll('#cases .case')) {
+      const checkbox = card.querySelector('.case-check');
+      const actions = card.querySelector('.case-actions');
+      if (!checkbox || !actions) continue;
+      const id = String(checkbox.value || '').trim();
+      if (!id || actions.querySelector('.case-rerun-btn')) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn ghost case-rerun-btn';
+      button.dataset.testCaseId = id;
+      button.textContent = 'Re-run';
+      button.title = `Re-run ${id} only`;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        rerunIndividual(id);
+      });
+      actions.insertBefore(button, actions.firstChild);
+    }
+    refreshCaseRerunButtons();
+  }
+
+  function refreshCaseRerunButtons() {
+    const running = isRunningStatus();
+    const show = hasCompletedExecution && !running && !resetting;
+    for (const button of document.querySelectorAll('.case-rerun-btn')) {
+      const id = String(button.dataset.testCaseId || '').toUpperCase();
+      const checkbox = Array.from(document.querySelectorAll('.case-check')).find((item) => String(item.value || '').toUpperCase() === id);
+      button.style.display = show ? 'inline-flex' : 'none';
+      button.disabled = !show || !checkbox || checkbox.disabled;
+    }
+  }
+
+  function rerunIndividual(testCaseId) {
+    if (!hasCompletedExecution || isRunningStatus() || resetting || cancellationRequested) return;
+    const id = String(testCaseId || '').toUpperCase();
+    const checkbox = Array.from(document.querySelectorAll('.case-check')).find((item) => String(item.value || '').toUpperCase() === id);
+    if (!checkbox || checkbox.disabled) {
+      try { if (typeof showError === 'function') showError(`${id} is not currently Automation Ready for execution.`); } catch {}
+      return;
+    }
     const runBtn = document.getElementById('runBtn');
-    const runbar = runBtn?.closest('.runbar');
-    if (!runBtn || !runbar) return;
+    if (!runBtn) return;
 
-    let actions = document.getElementById('executionRunActions');
-    if (!actions) {
-      actions = document.createElement('div');
-      actions.id = 'executionRunActions';
-      actions.className = 'execution-run-actions';
-      runbar.appendChild(actions);
-    }
+    const previousSelection = checkedIds();
+    individualLaunch = { id, previousSelection };
+    setCheckedIds([id]);
+    runBtn.disabled = false;
+    window.dispatchEvent(new CustomEvent('testnexus:individual-rerun-requested', { detail: { testCaseId: id } }));
+    runBtn.click();
 
-    if (!document.getElementById('stopExecutionBtn')) {
-      const stop = document.createElement('button');
-      stop.id = 'stopExecutionBtn';
-      stop.type = 'button';
-      stop.className = 'btn ghost';
-      stop.textContent = 'Stop Execution';
-      stop.addEventListener('click', stopExecution);
-      actions.appendChild(stop);
-    }
-
-    if (!document.getElementById('resetExecutionBtn')) {
-      const reset = document.createElement('button');
-      reset.id = 'resetExecutionBtn';
-      reset.type = 'button';
-      reset.className = 'btn ghost';
-      reset.textContent = 'Reset Execution';
-      reset.addEventListener('click', resetExecution);
-      actions.appendChild(reset);
-    }
-
-    if (runBtn.parentElement !== actions) actions.appendChild(runBtn);
-    refreshControls();
+    // The base execution handler reads the checkbox selection synchronously before
+    // its first await/fetch. Restore the tester's selection immediately afterwards so
+    // an individual re-run does not change the approved selection in the review list.
+    setTimeout(() => {
+      if (individualLaunch?.id === id) {
+        setCheckedIds(previousSelection);
+        individualLaunch = null;
+        refreshControls();
+      }
+    }, 0);
   }
 
   async function requestCancellation(session) {
@@ -303,6 +337,8 @@
       }
     }
 
+    ensureCaseRerunButtons();
+    refreshCaseRerunButtons();
     if (cancellationRequested && current === 'error' && !resetting) finishStopped();
   }
 
@@ -313,13 +349,22 @@
     document.addEventListener('click', (event) => {
       const runBtn = event.target.closest('#runBtn');
       if (!runBtn) return;
-      const approved = hasCompletedExecution && lastApprovedIds.length ? lastApprovedIds : checkedIds();
-      if (approved.length) {
-        lastApprovedIds = [...approved];
-        if (hasCompletedExecution) applyApprovedIds(lastApprovedIds);
-      }
+
+      // Always honor the CURRENT review selection. The previous implementation
+      // silently restored lastApprovedIds after a completed run, which made it
+      // impossible to re-run a newly selected subset.
+      const approved = individualLaunch ? [individualLaunch.id] : checkedIds();
+      if (approved.length && !individualLaunch) lastApprovedIds = [...approved];
       cancellationRequested = false;
       setTimeout(refreshControls, 0);
+    }, true);
+
+    document.addEventListener('change', (event) => {
+      if (!event.target?.matches('.case-check')) return;
+      const runBtn = document.getElementById('runBtn');
+      if (runBtn && !isRunningStatus()) runBtn.disabled = checkedIds().length === 0;
+      if (hasCompletedExecution) setRunLabel(RETEST_LABEL, true);
+      refreshCaseRerunButtons();
     }, true);
 
     const generateBtn = document.getElementById('generateBtn');
@@ -328,6 +373,7 @@
         cancellationRequested = false;
         hasCompletedExecution = false;
         lastApprovedIds = [];
+        individualLaunch = null;
         setRunLabel(START_LABEL, true);
         setTimeout(refreshControls, 0);
       }, true);
@@ -345,7 +391,7 @@
       if (!event.detail?.individual && Array.isArray(approvedIds) && approvedIds.length) lastApprovedIds = [...approvedIds];
       hasCompletedExecution = true;
       const runBtn = document.getElementById('runBtn');
-      if (runBtn) runBtn.disabled = false;
+      if (runBtn) runBtn.disabled = checkedIds().length === 0;
       setRunLabel(RETEST_LABEL, true);
       setTimeout(refreshControls, 0);
     });
@@ -358,15 +404,19 @@
     if (status) new MutationObserver(refreshControls).observe(status, { childList: true, characterData: true, subtree: true, attributes: true });
     const results = document.getElementById('results');
     if (results) new MutationObserver(refreshControls).observe(results, { childList: true, subtree: true });
+    const cases = document.getElementById('cases');
+    if (cases) new MutationObserver(() => { ensureCaseRerunButtons(); refreshControls(); }).observe(cases, { childList: true, subtree: true });
   }
 
   function start() {
     ensureControls();
     bindLifecycle();
+    ensureCaseRerunButtons();
     setRunLabel(START_LABEL, true);
     let attempts = 0;
     const timer = setInterval(() => {
       ensureControls();
+      ensureCaseRerunButtons();
       refreshControls();
       if (++attempts > 120) clearInterval(timer);
     }, 250);

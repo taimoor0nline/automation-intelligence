@@ -59,6 +59,7 @@
     loadScript('/custom-generation-scopes.js', 'data-custom-generation-scopes');
     loadScript('/generation-loading-ux.js', 'data-generation-loading-ux');
     loadScript('/progressive-generation.js', 'data-progressive-generation');
+    loadScript('/requirement-coverage-ui.js', 'data-requirement-coverage-ui');
     loadScript('/generation-progress-clarity.js', 'data-generation-progress-clarity');
     loadScript('/review-filters.js', 'data-review-filters');
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
@@ -71,7 +72,7 @@
   function loadSecondaryEnhancements() {
     loadScript('/test-case-compare.js', 'data-test-case-compare');
     loadScript('/execution-report-actions.js', 'data-execution-report-actions');
-    loadScript('/execution-controls.js', 'data-execution-controls');
+    loadScript('/execution-controls.js', 'data-execution-controls', true);
     loadScript('/execution-error-classification.js', 'data-execution-error-classification');
     loadScript('/streaming-failure-analysis.js', 'data-streaming-failure-analysis');
   }
