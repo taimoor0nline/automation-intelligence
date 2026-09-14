@@ -1,4 +1,5 @@
 require('./startupIntegrityGuards').install();
+require('./runtimeHardeningPatches').install();
 
 const configuredMax = Number(process.env.AI_TEST_CASE_COUNT || 5);
 const MAX_GENERATED_CASES = Math.max(1, Math.min(Number.isFinite(configuredMax) ? Math.trunc(configuredMax) : 5, 50));
