@@ -69,7 +69,6 @@ router.use((req, res, next) => {
       hasCredentials: Boolean(session.credentials?.username && session.credentials?.password),
       actorCatalog: session.testActors || [],
       actorCredentialRefs: configuredActorRefs(session),
-      story: session.story || '',
     });
     const approved = new Set((Array.isArray(body.approvedIds) ? body.approvedIds : []).map((id) => String(id || '').toUpperCase()));
 
