@@ -4,6 +4,12 @@ const MAX_PAGES = Math.max(1, Math.min(Number(Cypress.env('DISCOVERY_MAX_PAGES')
 const QUIET_MS = 450;
 const MAX_SETTLE_MS = 6000;
 const SKIP_EXTENSIONS = /\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|eot|pdf|zip|json|xml|webmanifest|txt|csv|wasm|mp3|mp4|webm)(?:$|[?#])/i;
+const SAFE_RESPONSE_HEADERS = new Set([
+  'content-type','cache-control','content-security-policy','strict-transport-security',
+  'x-frame-options','x-content-type-options','referrer-policy','permissions-policy',
+  'access-control-allow-origin','access-control-allow-methods','cross-origin-opener-policy',
+  'cross-origin-resource-policy','cross-origin-embedder-policy',
+]);
 
 function clean(value, max = 500) {
   return String(value ?? '').trim().slice(0, max);
@@ -126,6 +132,7 @@ function serializeElement(win, element) {
   const doc = element.ownerDocument;
   const tag = element.tagName.toLowerCase();
   const type = clean(element.getAttribute('type') || (tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : tag), 60).toLowerCase();
+  const visibleText = ['button', 'a'].includes(tag) || element.getAttribute('role') ? clean(element.textContent, 500) || null : null;
   const result = {
     id: element.id || null,
     testId: element.getAttribute('data-testid') || element.getAttribute('data-cy') || element.getAttribute('data-test') || null,
@@ -140,13 +147,15 @@ function serializeElement(win, element) {
     hidden: Boolean(element.hidden),
     tag,
     type,
-    text: ['button', 'a'].includes(tag) || element.getAttribute('role') ? clean(element.textContent, 500) || null : null,
-    label: labelText(doc, element) || element.getAttribute('placeholder') || element.getAttribute('name') || null,
+    text: visibleText,
+    label: labelText(doc, element) || element.getAttribute('placeholder') || element.getAttribute('name') || visibleText || null,
     placeholder: element.getAttribute('placeholder') || null,
     required: element.required === true,
     disabled: element.disabled === true,
     readonly: element.readOnly === true,
     multiple: element.multiple === true,
+    contenteditable: element.isContentEditable === true,
+    tabIndex: Number.isFinite(Number(element.tabIndex)) ? Number(element.tabIndex) : null,
     min: element.getAttribute('min'),
     max: element.getAttribute('max'),
     step: element.getAttribute('step'),
@@ -184,24 +193,53 @@ function pageUrlCandidate(raw, baseUrl) {
   }
 }
 
-function networkHint(rawUrl, method, pageUrl) {
+function safeHeaders(headers = {}) {
+  const output = {};
+  for (const [name, value] of Object.entries(headers || {})) {
+    const key = String(name || '').toLowerCase();
+    if (!SAFE_RESPONSE_HEADERS.has(key)) continue;
+    output[key] = clean(Array.isArray(value) ? value.join(', ') : value, 1200);
+  }
+  return output;
+}
+
+function networkHint(request, pageUrl) {
   try {
     const page = new URL(pageUrl);
-    const url = new URL(rawUrl, page);
+    const url = new URL(request?.url, page);
     if (url.origin !== page.origin) return null;
     const path = `${url.pathname}${url.search}` || '/';
-    if (!/^\/(?:api|graphql|rest)\b/i.test(path)) return null;
-    return { method: String(method || 'GET').toUpperCase(), url: path, source: 'browser-network' };
+    const method = String(request?.method || 'GET').toUpperCase();
+    const stateChanging = ['POST','PUT','PATCH','DELETE'].includes(method);
+    const apiLike = /^\/(?:api|graphql|rest)\b/i.test(path);
+    if (!stateChanging && !apiLike) return null;
+    return {
+      method,
+      url: path,
+      status: Number.isFinite(Number(request?.status)) ? Number(request.status) : null,
+      responseHeaders: request?.responseHeaders && typeof request.responseHeaders === 'object' ? request.responseHeaders : {},
+      source: 'browser-network',
+    };
   } catch {
     return null;
   }
 }
 
+function browserState(win) {
+  const cookieNames = String(win.document.cookie || '').split(';').map((part) => part.split('=')[0].trim()).filter(Boolean).slice(0, 100);
+  const localStorageKeys = [];
+  const sessionStorageKeys = [];
+  try { for (let i = 0; i < win.localStorage.length && localStorageKeys.length < 100; i += 1) localStorageKeys.push(String(win.localStorage.key(i))); } catch {}
+  try { for (let i = 0; i < win.sessionStorage.length && sessionStorageKeys.length < 100; i += 1) sessionStorageKeys.push(String(win.sessionStorage.key(i))); } catch {}
+  return { cookieNames: [...new Set(cookieNames)], localStorageKeys: [...new Set(localStorageKeys.filter(Boolean))], sessionStorageKeys: [...new Set(sessionStorageKeys.filter(Boolean))] };
+}
+
 function discoverDocument(win, requests) {
   const doc = win.document;
   const selector = [
-    'input', 'select', 'textarea', 'button', 'a[href]',
-    '[data-testid]', '[data-cy]', '[data-test]', '[role="alert"]', '[role="status"]', '[aria-live]',
+    'input', 'select', 'textarea', 'button', 'a[href]', '[contenteditable="true"]',
+    '[data-testid]', '[data-cy]', '[data-test]', '[role="button"]', '[role="link"]', '[role="textbox"]', '[role="combobox"]',
+    '[role="checkbox"]', '[role="radio"]', '[role="switch"]', '[role="tab"]', '[role="alert"]', '[role="status"]', '[aria-live]',
     'img[id]', 'table[id]', 'h1[id]', 'h2[id]'
   ].join(',');
   const seen = new Set();
@@ -226,12 +264,13 @@ function discoverDocument(win, requests) {
     const value = pageUrlCandidate(raw, win.location.href);
     if (value && !routeSeen.has(value)) { routeSeen.add(value); routeHints.push(value); }
   };
+  // Public rendered links define navigable public-page discovery. Form actions are
+  // network behavior, not automatically crawlable pages.
   Array.from(doc.querySelectorAll('a[href]')).forEach((el) => addRoute(el.getAttribute('href')));
-  Array.from(doc.querySelectorAll('form[action]')).forEach((el) => addRoute(el.getAttribute('action')));
 
   const networkMap = new Map();
   for (const request of requests || []) {
-    const hint = networkHint(request.url, request.method, win.location.href);
+    const hint = networkHint(request, win.location.href);
     if (hint) networkMap.set(`${hint.method} ${hint.url}`, hint);
   }
 
@@ -245,6 +284,7 @@ function discoverDocument(win, requests) {
     messages,
     routeHints,
     networkHints: Array.from(networkMap.values()),
+    browserState: browserState(win),
     discoveryEngine: 'BROWSER_RENDERED_DOM',
   };
 }
@@ -303,7 +343,12 @@ describe('TestNexus internal rendered page discovery', () => {
     let currentRequests = [];
 
     cy.intercept({ url: '**' }, (req) => {
-      currentRequests.push({ method: req.method, url: req.url });
+      const record = { method: req.method, url: req.url, status: null, responseHeaders: {} };
+      currentRequests.push(record);
+      req.on('response', (res) => {
+        record.status = Number.isFinite(Number(res?.statusCode)) ? Number(res.statusCode) : null;
+        record.responseHeaders = safeHeaders(res?.headers || {});
+      });
     });
 
     function next() {
@@ -332,7 +377,7 @@ describe('TestNexus internal rendered page discovery', () => {
 
     next().then(() => {
       cy.writeFile(outputFile, {
-        version: 1,
+        version: 2,
         engine: 'BROWSER_RENDERED_DOM',
         discoveredAt: new Date().toISOString(),
         pages,
