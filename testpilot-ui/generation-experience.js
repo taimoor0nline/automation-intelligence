@@ -22,9 +22,11 @@
       const existing = inFlightSync.get(key);
       if (existing) return existing.then((response) => response.clone());
 
-      const request = baseFetch(input, init)
-        .finally(() => inFlightSync.delete(key));
+      const request = baseFetch(input, init);
       inFlightSync.set(key, request);
+      request.finally(() => setTimeout(() => {
+        if (inFlightSync.get(key) === request) inFlightSync.delete(key);
+      }, 1500));
       return request.then((response) => response.clone());
     };
   }
