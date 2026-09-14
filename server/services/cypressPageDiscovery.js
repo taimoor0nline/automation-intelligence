@@ -99,6 +99,8 @@ async function discoverRenderedPages(urls = [], options = {}) {
   const timeoutMs = Math.max(30000, Math.min(numberEnv(process.env.CYPRESS_DISCOVERY_TIMEOUT_MS, 60000), 180000));
   const maxPages = Math.max(1, Math.min(numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6), 12));
 
+  const seedJson = JSON.stringify(seeds);
+  const outputForCypress = outputRelative.replace(/\\/g, '/');
   const env = {
     ...process.env,
     AUTOMATION_RUN_ID: `discovery-${token}`,
@@ -109,10 +111,12 @@ async function discoverRenderedPages(urls = [], options = {}) {
     AUTOMATION_SCREENSHOT_EACH_TEST: 'false',
     AUTOMATION_TEST_COMPLETION_PAUSE_MS: '0',
     DEMO_STEP_DELAY_MS: '0',
-    DISCOVERY_TARGET_URLS_JSON: JSON.stringify(seeds),
-    DISCOVERY_OUTPUT_FILE: outputRelative.replace(/\\/g, '/'),
-    DISCOVERY_PAGE_SCOPE: pageScope,
-    DISCOVERY_MAX_PAGES: String(maxPages),
+    // Cypress only automatically imports process environment variables prefixed
+    // with CYPRESS_ into Cypress.env(). Keep discovery inputs framework-owned.
+    CYPRESS_DISCOVERY_TARGET_URLS_JSON: seedJson,
+    CYPRESS_DISCOVERY_OUTPUT_FILE: outputForCypress,
+    CYPRESS_DISCOVERY_PAGE_SCOPE: pageScope,
+    CYPRESS_DISCOVERY_MAX_PAGES: String(maxPages),
   };
 
   const args = [
