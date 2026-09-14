@@ -52,21 +52,21 @@ function optionList(item = {}) {
 function capabilitiesFor(item = {}) {
   const tag = clean(item.tag || item.tagName, 30).toLowerCase();
   const type = clean(item.type, 40).toLowerCase();
+  const role = clean(item.role, 40).toLowerCase();
   const capabilities = new Set(['ASSERT_EXISTS', 'ASSERT_VISIBLE']);
   const isFormControl = ['input', 'textarea', 'select'].includes(tag);
   const nonTypeableInputTypes = new Set(['checkbox','radio','file','button','submit','reset','image','hidden']);
-  const isTypeable = tag === 'textarea' || (tag === 'input' && !nonTypeableInputTypes.has(type));
-  const textLike = !isFormControl || ['button', 'submit'].includes(type);
+  const contenteditable = item.contenteditable === true || clean(item.contenteditable, 10).toLowerCase() === 'true';
+  const isTypeable = contenteditable || tag === 'textarea' || (tag === 'input' && !nonTypeableInputTypes.has(type));
+  const textLike = contenteditable || !isFormControl || ['button', 'submit'].includes(type);
 
   if (textLike || item.text) capabilities.add('TEXT');
-  if (isFormControl) {
-    capabilities.add('VALUE');
-    capabilities.add('VALIDITY');
-  }
+  if (isFormControl || contenteditable) capabilities.add('VALUE');
+  if (isFormControl) capabilities.add('VALIDITY');
   if (isTypeable) capabilities.add('TYPE');
-  if (tag === 'select') capabilities.add('SELECT');
-  if (type === 'checkbox' || type === 'radio') capabilities.add('CHECK');
-  if (tag === 'button' || type === 'button' || type === 'submit' || type === 'checkbox' || type === 'radio' || item.href) capabilities.add('CLICK');
+  if (tag === 'select' || role === 'combobox') capabilities.add('SELECT');
+  if (type === 'checkbox' || type === 'radio' || ['checkbox','radio','switch'].includes(role)) capabilities.add('CHECK');
+  if (tag === 'button' || type === 'button' || type === 'submit' || type === 'checkbox' || type === 'radio' || item.href || ['button','link','checkbox','radio','switch','tab'].includes(role)) capabilities.add('CLICK');
   if (type === 'file') capabilities.add('SELECT_FILE');
   if (item.required !== undefined) capabilities.add('REQUIRED_STATE');
   return [...capabilities].sort();
@@ -83,6 +83,7 @@ function aliasesFor(item = {}, selector = '') {
     item.placeholder,
     item.text,
     item.groupLabel,
+    item.role,
   ].map((value) => clean(value, 300)).filter(Boolean))];
 }
 
@@ -150,11 +151,14 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
     const entry = {
       elementRef,
       selector,
+      selectorStrategy: clean(item.selectorStrategy, 80) || null,
+      selectorStability: clean(item.selectorStability, 30).toUpperCase() || null,
       pageRef: page.pageRef,
       path: page.path,
       kind,
       tag: clean(item.tag || item.tagName, 40).toLowerCase() || null,
       type: clean(item.type, 60).toLowerCase() || null,
+      role: clean(item.role, 80).toLowerCase() || null,
       testId: clean(item.testId, 180) || null,
       id: clean(item.id, 180) || null,
       name: clean(item.name, 180) || null,
@@ -162,8 +166,13 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
       text: clean(item.text, 500) || null,
       ariaLabel: clean(item.ariaLabel, 300) || null,
       placeholder: clean(item.placeholder, 300) || null,
+      autocomplete: clean(item.autocomplete, 120) || null,
+      contenteditable: item.contenteditable === true,
+      tabIndex: Number.isFinite(Number(item.tabIndex)) ? Number(item.tabIndex) : null,
+      checked: item.checked === true ? true : item.checked === false ? false : null,
       required: item.required === true ? true : item.required === false ? false : null,
       disabled: item.disabled === true ? true : item.disabled === false ? false : null,
+      readonly: item.readonly === true ? true : item.readonly === false ? false : null,
       min: item.min ?? null,
       max: item.max ?? null,
       minlength: item.minlength ?? item.minLength ?? null,
@@ -210,7 +219,7 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
   linkValidationErrors(elements);
 
   const registryCore = {
-    version: 1,
+    version: 2,
     pages,
     elements,
   };
@@ -238,11 +247,18 @@ function registryForModel(registry = {}) {
       kind: entry.kind,
       tag: entry.tag,
       type: entry.type,
+      role: entry.role,
       label: entry.label,
       text: entry.text,
       ariaLabel: entry.ariaLabel,
       placeholder: entry.placeholder,
+      autocomplete: entry.autocomplete,
+      contenteditable: entry.contenteditable,
+      tabIndex: entry.tabIndex,
+      checked: entry.checked,
       required: entry.required,
+      disabled: entry.disabled,
+      readonly: entry.readonly,
       min: entry.min,
       max: entry.max,
       minlength: entry.minlength,
@@ -254,6 +270,8 @@ function registryForModel(registry = {}) {
       groupLabel: entry.groupLabel,
       options: entry.options,
       capabilities: entry.capabilities,
+      selectorStrategy: entry.selectorStrategy,
+      selectorStability: entry.selectorStability,
       errorRef: entry.errorRef || null,
     })),
   };
