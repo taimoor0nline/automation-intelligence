@@ -8,10 +8,10 @@ function evidence(pageDiscoveries = []) {
   const messages = pages.flatMap((page) => Array.isArray(page?.messages) ? page.messages : []);
   const networkHints = pages.flatMap((page) => Array.isArray(page?.networkHints) ? page.networkHints : []);
   const pageTitles = pages.map((page) => String(page?.pageTitle || '')).filter(Boolean);
-  const elementText = (item) => [item?.tag, item?.type, item?.id, item?.name, item?.testId, item?.label, item?.ariaLabel, item?.placeholder].filter(Boolean).join(' ').toLowerCase();
+  const elementText = (item) => [item?.tag, item?.type, item?.role, item?.id, item?.name, item?.testId, item?.label, item?.text, item?.ariaLabel, item?.placeholder].filter(Boolean).join(' ').toLowerCase();
   const hasPassword = elements.some((item) => String(item?.type || '').toLowerCase() === 'password');
   const hasUsername = elements.some((item) => /username|user name|email|login/.test(elementText(item)) && String(item?.type || '').toLowerCase() !== 'password');
-  const hasLoginSubmit = elements.some((item) => /login|log in|sign in|signin|submit/.test(elementText(item)) && ['button','submit'].includes(String(item?.type || '').toLowerCase()));
+  const hasLoginSubmit = elements.some((item) => /login|log in|sign in|signin|submit|continue/.test(elementText(item)) && (['button','submit'].includes(String(item?.type || '').toLowerCase()) || String(item?.tag || '').toLowerCase() === 'button' || String(item?.role || '').toLowerCase() === 'button'));
   const paths = pages.map((page) => {
     try { const u = new URL(page?.finalUrl || page?.url || 'http://testnexus.local/'); return `${u.pathname}${u.search}` || '/'; }
     catch { return '/'; }
@@ -41,11 +41,39 @@ function unsupportedReason(unit, facts, story = '') {
     return 'The planned title assertion has no discovered document title.';
   }
 
-  if (/\b(?:header|security header|cors|csrf|tls|dependency|vulnerability scan)\b/.test(rationale) && !new RegExp('(?:header|security header|cors|csrf|tls|dependency|vulnerability)', 'i').test(storyText)) {
-    return 'The selected category alone does not justify this security requirement; the story/discovery does not establish it as an expected behavior.';
-  }
-
   return null;
+}
+
+function planningActorRefs() {
+  try {
+    const requestContext = require('./requestContext');
+    const { getSession } = require('../data/sessionStore');
+    const current = requestContext.current();
+    const session = current.sessionId ? getSession(current.sessionId) : null;
+    return Object.entries(session?.actorCredentials || {}).filter(([, value]) => value?.username && value?.password).map(([key]) => key);
+  } catch { return []; }
+}
+
+function scenarioPolicyReason(unit, args) {
+  const { validateWebScenarioPolicy } = require('./webScenarioPolicy');
+  const { inferSecuritySubcategory } = require('./securityTaxonomy');
+  const category = String(unit?.category || '').toUpperCase();
+  const rationale = String(unit?.rationale || unit?.objective || '');
+  const pseudo = {
+    id: 'PLANNED',
+    title: rationale,
+    coverageRationale: rationale,
+    generationStory: args.story || '',
+    testCategory: category,
+    securitySubcategory: category === 'SECURITY' ? inferSecuritySubcategory({ title: rationale, expectedResults: [] }) : null,
+    canonicalIr: { actions: [], assertions: [] },
+  };
+  const result = validateWebScenarioPolicy(pseudo, {
+    pageDiscoveries: args.pageDiscoveries || [],
+    story: args.story || '',
+    actorCredentialRefs: planningActorRefs(),
+  });
+  return result.ok ? null : result.errors?.[0]?.message || 'The scenario is not supported by the strict generic web-testing policy.';
 }
 
 function safeFallback(args, facts) {
@@ -73,7 +101,7 @@ function install() {
     const kept = [];
     const dropped = [];
     for (const unit of plan.units || []) {
-      const reason = unsupportedReason(unit, facts, args.story || '');
+      const reason = unsupportedReason(unit, facts, args.story || '') || scenarioPolicyReason(unit, args);
       if (reason) dropped.push({ unit, reason });
       else kept.push(unit);
     }
@@ -100,11 +128,11 @@ function install() {
       knownGaps,
       coverageScore,
       coverageSummary: dropped.length
-        ? `${plan.coverageSummary || ''} ${dropped.length} proposed case(s) were removed by deterministic evidence gating because the rendered application did not support their assumptions.`.trim()
+        ? `${plan.coverageSummary || ''} ${dropped.length} proposed case(s) were removed by deterministic evidence/policy gating before generation.`.trim()
         : plan.coverageSummary,
     };
   };
   planner.__strictEvidencePlannerGuard = true;
 }
 
-module.exports = { install, evidence, unsupportedReason, safeFallback };
+module.exports = { install, evidence, unsupportedReason, scenarioPolicyReason, safeFallback };
