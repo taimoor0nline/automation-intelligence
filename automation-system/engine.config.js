@@ -95,6 +95,9 @@ module.exports = defineConfig({
     baseUrl: process.env.AUTOMATION_BASE_URL || process.env.TEST_BASE_URL || "http://localhost:4000",
     specPattern: "tests/e2e/**/*.cy.js",
     supportFile: "tests/support/e2e.js",
+    // Generic web execution traverses open Shadow DOM by default. Closed shadow
+    // roots remain an explicit unsupported/adapter capability and are never guessed.
+    includeShadowDom: true,
     videosFolder: "artifacts/videos",
     screenshotsFolder: "artifacts/screenshots",
     downloadsFolder: "artifacts/downloads",
