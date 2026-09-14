@@ -64,15 +64,16 @@ function normalizeRenderedPage(page = {}) {
 function mergePage(rendered, source) {
   if (!source) return rendered;
   const networkHints = uniqueBy([...(rendered.networkHints || []), ...(source.networkHints || [])], (item) => `${item.method || '*'} ${item.url || ''}`);
-  const routeHints = uniqueBy([...(rendered.routeHints || []), ...(source.routeHints || [])], String);
   const meta = uniqueBy([...(rendered.meta || []), ...(source.meta || [])], (item) => String(item?.name || '').toLowerCase());
   return {
     ...source,
     ...rendered,
-    // Rendered DOM is authoritative for interactive/assertion targets.
+    // Rendered DOM is authoritative for controls and navigable routes. Static source
+    // may supplement passive metadata/network hints, but may not introduce script
+    // literals or form actions as extra browser pages.
     elements: rendered.elements || [],
     messages: rendered.messages || [],
-    routeHints,
+    routeHints: rendered.routeHints || [],
     networkHints,
     meta,
     staticSourceSupplemented: true,
