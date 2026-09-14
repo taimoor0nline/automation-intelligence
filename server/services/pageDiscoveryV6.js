@@ -84,14 +84,30 @@ function persistEffectiveScope(scope) {
   } catch {}
 }
 
-async function staticSupplement(urls) {
+async function staticFallback(urls) {
   if (!boolEnv(process.env.CYPRESS_DISCOVERY_STATIC_SUPPLEMENT, true)) return [];
   try {
     return (await v5.discoverPages(urls)).filter(isNavigablePage);
   } catch (err) {
-    console.warn(`[discovery] Static supplementary discovery skipped: ${err.message}`);
+    console.warn(`[discovery] Static fallback skipped: ${err.message}`);
     return [];
   }
+}
+
+async function supplementRenderedPages(renderedPages) {
+  if (!boolEnv(process.env.CYPRESS_DISCOVERY_STATIC_SUPPLEMENT, true)) return [];
+  const out = [];
+  for (const page of renderedPages || []) {
+    const url = page?.finalUrl || page?.url;
+    if (!url || !isNavigablePage(page)) continue;
+    try {
+      const source = await v5.discoverPage(url);
+      if (isNavigablePage(source)) out.push(source);
+    } catch (err) {
+      console.warn(`[discovery] Static source supplement skipped for ${url}: ${err.message}`);
+    }
+  }
+  return out;
 }
 
 async function discoverPages(urls, options = {}) {
@@ -113,9 +129,13 @@ async function discoverPages(urls, options = {}) {
     console.warn(`[discovery] Rendered browser discovery unavailable; using static fallback: ${err.message}`);
   }
 
-  const staticPages = await staticSupplement(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds);
-  if (!rendered.length) return attachMatrix(staticPages, scope);
+  if (!rendered.length) {
+    return attachMatrix(await staticFallback(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds), scope);
+  }
 
+  // Supplement only the pages Cypress actually rendered. Do not ask the static
+  // source crawler to follow manifest/icon/script literals as if they were pages.
+  const staticPages = await supplementRenderedPages(rendered);
   const staticByKey = new Map(staticPages.map((page) => [pageKey(page), page]));
   const merged = rendered.map((page) => mergePage(page, staticByKey.get(pageKey(page))));
   return attachMatrix(merged, scope);
