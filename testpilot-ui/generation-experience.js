@@ -72,7 +72,7 @@
   function loadSecondaryEnhancements() {
     loadScript('/test-case-compare.js', 'data-test-case-compare');
     loadScript('/execution-report-actions.js', 'data-execution-report-actions');
-    loadScript('/execution-controls.js', 'data-execution-controls');
+    loadScript('/execution-controls.js', 'data-execution-controls', true);
     loadScript('/execution-error-classification.js', 'data-execution-error-classification');
     loadScript('/streaming-failure-analysis.js', 'data-streaming-failure-analysis');
   }
