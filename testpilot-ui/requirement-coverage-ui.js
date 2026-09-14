@@ -6,8 +6,10 @@
   let currentSessionId=null;
   let lastRenderedKey='';
   let refreshTimer=null;
+  let generationWasActive=Boolean(document.body?.classList.contains('generation-active'));
+  let terminalFetchedForSession='';
 
-  function esc(value){return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+  function esc(value){return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));}
 
   // Capture the generated session id without changing the progressive-generation flow.
   const previousFetch=window.fetch.bind(window);
@@ -16,7 +18,11 @@
       const url=typeof input==='string'?input:String(input?.url||'');
       if(url.includes('/api/generation/start')&&init?.body){
         const payload=JSON.parse(String(init.body));
-        if(payload?.sessionId) currentSessionId=String(payload.sessionId);
+        if(payload?.sessionId){
+          currentSessionId=String(payload.sessionId);
+          terminalFetchedForSession='';
+          lastRenderedKey='';
+        }
       }
     }catch{}
     return previousFetch(input,init);
@@ -30,7 +36,7 @@
     const uncovered=rows.filter((row)=>!row.covered);
     const failures=Array.isArray(coverage.generationFailures)?coverage.generationFailures:[];
     const redundant=Array.isArray(coverage.redundantTestCases)?coverage.redundantTestCases:[];
-    const key=JSON.stringify({score:coverage.score,covered:coverage.coveredCount,total:coverage.totalRequirements,ready:coverage.executableTestCaseCount,failures:coverage.generationFailureCount,redundant});
+    const key=JSON.stringify({score:coverage.score,covered:coverage.coveredCount,total:coverage.totalRequirements,ready:coverage.executableTestCaseCount,failures:coverage.generationFailureCount,redundant,complete:coverage.generationComplete});
     if(key===lastRenderedKey)return;
     lastRenderedKey=key;
 
@@ -59,32 +65,47 @@
       </details>`;
   }
 
-  async function refresh(){
+  async function refresh({force=false}={}){
     if(!currentSessionId)return;
-    const body=document.body;
-    if(body?.classList.contains('generation-active'))return;
+    if(document.body?.classList.contains('generation-active'))return;
+    if(!force&&terminalFetchedForSession===currentSessionId)return;
     try{
       const response=await nativeFetch(`/api/requirement-coverage/${encodeURIComponent(currentSessionId)}`,{headers:{Accept:'application/json'},cache:'no-store'});
       if(!response.ok)return;
       const data=await response.json();
-      if(data?.coverage)render(data.coverage);
+      if(data?.coverage){
+        render(data.coverage);
+        // Once generation/readiness is terminal, no DOM mutation may trigger another
+        // identical coverage request. A new generation resets this marker.
+        if(data.coverage.generationComplete||data.coverage.readinessValidated||data.coverage.generationFailureCount>0) terminalFetchedForSession=currentSessionId;
+      }
     }catch{}
   }
 
-  function scheduleRefresh(delay=80){
+  function scheduleRefresh(delay=180){
     clearTimeout(refreshTimer);
-    refreshTimer=setTimeout(refresh,delay);
+    refreshTimer=setTimeout(()=>refresh(),delay);
   }
 
-  const observer=new MutationObserver(()=>{
-    if(document.getElementById('generationCoverageProposal')&&!document.body?.classList.contains('generation-active'))scheduleRefresh();
-  });
-  observer.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});
+  // Only watch the generation lifecycle class. The previous subtree observer reacted
+  // to its own rendered coverage markup and unrelated UI mutations.
+  if(document.body){
+    const observer=new MutationObserver(()=>{
+      const active=Boolean(document.body.classList.contains('generation-active'));
+      if(generationWasActive&&!active)scheduleRefresh(220);
+      generationWasActive=active;
+    });
+    observer.observe(document.body,{attributes:true,attributeFilter:['class']});
+  }
 
   document.addEventListener('click',(event)=>{
     if(event.target?.id==='generateBtn'){
+      terminalFetchedForSession='';
       lastRenderedKey='';
-      setTimeout(()=>scheduleRefresh(700),700);
+      generationWasActive=true;
     }
   },true);
+
+  window.addEventListener('testnexus:generation-completed',()=>scheduleRefresh(100));
+  window.addEventListener('testnexus:generation-failed',()=>scheduleRefresh(100));
 })();
