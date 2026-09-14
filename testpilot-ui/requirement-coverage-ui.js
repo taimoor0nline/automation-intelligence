@@ -9,7 +9,7 @@
   let generationWasActive=Boolean(document.body?.classList.contains('generation-active'));
   let terminalFetchedForSession='';
 
-  function esc(value){return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));}
+  function esc(value){return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
 
   // Capture the generated session id without changing the progressive-generation flow.
   const previousFetch=window.fetch.bind(window);
@@ -36,30 +36,43 @@
     const uncovered=rows.filter((row)=>!row.covered);
     const failures=Array.isArray(coverage.generationFailures)?coverage.generationFailures:[];
     const redundant=Array.isArray(coverage.redundantTestCases)?coverage.redundantTestCases:[];
-    const key=JSON.stringify({score:coverage.score,covered:coverage.coveredCount,total:coverage.totalRequirements,ready:coverage.executableTestCaseCount,failures:coverage.generationFailureCount,redundant,complete:coverage.generationComplete});
+    const total=Number(coverage.totalRequirements||0);
+    const exploratory=total===0;
+    const key=JSON.stringify({score:coverage.score,covered:coverage.coveredCount,total,ready:coverage.executableTestCaseCount,failures:coverage.generationFailureCount,redundant,complete:coverage.generationComplete});
     if(key===lastRenderedKey)return;
     lastRenderedKey=key;
 
     const coveredHtml=covered.length?covered.map((row)=>`${esc(row.requirement)}${row.testCaseIds?.length?` <span style="color:#64748b">(${row.testCaseIds.map(esc).join(', ')})</span>`:''}`).join(' · '):'None';
     const uncoveredHtml=uncovered.length?uncovered.map((row)=>esc(row.requirement)).join(' · '):'None';
     const failureHtml=failures.length?failures.map((item)=>`${esc(item.plannedId||'Planned case')}: ${esc(item.message)}`).join('<br>'):'';
+    const title=exploratory?'Exploratory scope':'Explicit requirement coverage';
+    const subtitle=exploratory
+      ?'The story describes an exploratory testing goal rather than measurable acceptance clauses. TestNexus reports grounded executable coverage instead of inventing a requirement percentage.'
+      :'Measured from story requirements mapped to Automation Ready canonical assertions, not source-code coverage.';
+    const score=exploratory?'—':`${Math.round(Number(coverage.score)||0)}%`;
+    const requirementMeta=exploratory
+      ?'<span>No explicit mandatory clauses</span>'
+      :`<span>${coverage.coveredCount||0}/${total} mandatory requirements covered</span>`;
+    const traceability=exploratory
+      ?`<div><b>Mode:</b> Evidence-grounded exploratory testing. Only cases supported by rendered application evidence may become Automation Ready.</div>`
+      :`<div><b>Covered:</b> ${coveredHtml}</div><div><b>Uncovered mandatory:</b> ${uncoveredHtml}</div>`;
+
     box.innerHTML=`
       <div class="generation-coverage-head">
-        <div><strong>Explicit requirement coverage</strong><span>Measured from story requirements mapped to Automation Ready canonical assertions, not source-code coverage.</span></div>
-        <div class="generation-coverage-score">${Math.round(Number(coverage.score)||0)}%</div>
+        <div><strong>${title}</strong><span>${subtitle}</span></div>
+        <div class="generation-coverage-score">${score}</div>
       </div>
       <div class="generation-coverage-meta">
-        <span>${coverage.coveredCount||0}/${coverage.totalRequirements||0} mandatory requirements covered</span>
+        ${requirementMeta}
         <span>${coverage.executableTestCaseCount||0} executable test${Number(coverage.executableTestCaseCount)===1?'':'s'}</span>
         ${coverage.plannedTestCaseCount?`<span>${coverage.generatedTestCaseCount||0}/${coverage.plannedTestCaseCount} planned generated</span>`:''}
         ${coverage.maxTestCases?`<span>Maximum ${coverage.maxTestCases}</span>`:''}
         ${coverage.generationFailureCount?`<span>${coverage.generationFailureCount} generation rejected</span>`:''}
       </div>
-      <div class="generation-coverage-summary">${esc(coverage.summary||'')}</div>
+      <div class="generation-coverage-summary">${exploratory?'Test generation is constrained by the rendered public application surface and the selected testing categories.':esc(coverage.summary||'')}</div>
       <details class="generation-coverage-details" open>
-        <summary>Requirement traceability</summary>
-        <div><b>Covered:</b> ${coveredHtml}</div>
-        <div><b>Uncovered mandatory:</b> ${uncoveredHtml}</div>
+        <summary>${exploratory?'Grounding details':'Requirement traceability'}</summary>
+        ${traceability}
         ${redundant.length?`<div><b>Potential redundancy:</b> ${redundant.map(esc).join(' · ')}</div>`:''}
         ${failureHtml?`<div><b>Generation failures:</b><br>${failureHtml}</div>`:''}
       </details>`;
