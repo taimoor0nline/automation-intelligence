@@ -5,9 +5,12 @@
   function classify(text){
     const t=String(text||'');
     if(/accessibility|axe|a11y|violation/i.test(t))return{code:'ACCESSIBILITY_VIOLATION',label:'Accessibility violation',cls:'accessibility'};
-    if(/support file|webpack|cypress|automation engine|browser.*(?:crash|closed|failed)|runtime login|invalid automation command|failed before test execution|could not verify that this server is running/i.test(t))return{code:'AUTOMATION_RUNTIME_FAILURE',label:'Automation runtime failure',cls:'automation'};
+    // Assertion failures often contain Cypress/webpack stack text. Classify the
+    // observable assertion first so a normal application mismatch is never mislabeled
+    // as a framework/runtime failure merely because Cypress appears in the stack trace.
+    if(/expected.*(?:visible|hidden|exist|contain|equal|include|empty|checked|enabled|disabled)|assertionerror|timed out retrying/i.test(t))return{code:'ASSERTION_FAILURE',label:'Assertion failure',cls:'application'};
+    if(/runtime login credentials are not configured|runtime credentials are not configured|invalid automation command|failed before test execution|could not verify that this server is running|browser.*(?:crash|closed unexpectedly|failed to start)|support file.*(?:error|failed)|returned a promise from a command/i.test(t))return{code:'AUTOMATION_RUNTIME_FAILURE',label:'Automation runtime failure',cls:'automation'};
     if(/(?:response|request|status code|http status|header|json path|api)/i.test(t))return{code:'API_RESPONSE_MISMATCH',label:'API response mismatch',cls:'api'};
-    if(/expected.*(?:visible|hidden|exist|contain|equal|include|empty|checked|enabled|disabled)|assertionerror|timed out retrying/i.test(t))return{code:'APPLICATION_BEHAVIOR_MISMATCH',label:'Application behavior mismatch',cls:'application'};
     if(/element|selector|detached|not found/i.test(t))return{code:'UI_ELEMENT_MISMATCH',label:'UI element mismatch',cls:'ui'};
     return{code:'REVIEW_REQUIRED',label:'Review required',cls:'review'};
   }
