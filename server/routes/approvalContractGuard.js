@@ -23,8 +23,26 @@ function normalizedSelector(value) {
   return String(value || '').replace(/'/g, '"').replace(/\s+/g, '').toLowerCase();
 }
 
+function normalizedExpectation(value) {
+  return String(value || '').trim().replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').replace(/[.]$/, '').toLowerCase();
+}
+
 function visibleContractMismatch(testCase) {
   if (!testCase?.canonicalIr || testCase?.automationReadiness?.status !== 'READY') return null;
+  const visible = (testCase.expectedResults || []).map(normalizedExpectation).filter(Boolean);
+  const details = testCase.automationReadiness?.expectationCoverage?.details || testCase.automationReadiness?.automationPlan?.expectationCoverage?.details || [];
+  const compiled = details.map((item) => normalizedExpectation(item?.expectation)).filter(Boolean);
+  if (compiled.length) {
+    const visibleSet = new Set(visible);
+    const compiledSet = new Set(compiled);
+    const onlyVisible = visible.filter((item) => !compiledSet.has(item));
+    const onlyCompiled = compiled.filter((item) => !visibleSet.has(item));
+    if (onlyVisible.length || onlyCompiled.length || visible.length !== compiled.length) {
+      return `The reviewed expected results and compiled canonical assertions differ. Reviewed-only: ${onlyVisible.join(' | ') || 'none'}. Compiled-only: ${onlyCompiled.join(' | ') || 'none'}.`;
+    }
+    return null;
+  }
+
   const visibleSelectors = selectorTokens((testCase.expectedResults || []).join('\n')).map(normalizedSelector);
   if (!visibleSelectors.length) return null;
   const compiledSelectors = new Set((testCase.automationReadiness?.automationPlan?.assertions || [])
