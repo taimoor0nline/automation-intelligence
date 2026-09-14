@@ -70,16 +70,33 @@ function seal(testCase) {
   };
 }
 
-router.use((req, res, next) => {
-  if (req.method !== 'POST' || req.path !== '/api/chat') return next();
+function requestPath(req) {
+  return String(req.originalUrl || req.url || req.path || '').split('?')[0];
+}
+
+function isExecutionApprovalRequest(req) {
+  if (req.method !== 'POST') return false;
+  const path = requestPath(req);
   const body = req.body || {};
-  const isRunRequest = body.message === 'approve reviewed cases' || Array.isArray(body.approvedIds);
-  if (!isRunRequest) return next();
+  if (path === '/api/chat') {
+    return body.message === 'approve reviewed cases' || Array.isArray(body.approvedIds);
+  }
+  if (path === '/api/test-runs/start') {
+    return Array.isArray(body.approvedIds);
+  }
+  return false;
+}
+
+router.use((req, res, next) => {
+  if (!isExecutionApprovalRequest(req)) return next();
 
   try {
+    const body = req.body || {};
     const sessionId = body.sessionId || 'default';
     const session = getSession(sessionId);
-    const source = Array.isArray(body.reviewedTestCases) ? body.reviewedTestCases : session.testCases;
+    const source = Array.isArray(body.reviewedTestCases) && body.reviewedTestCases.length
+      ? body.reviewedTestCases
+      : session.testCases;
     if (!Array.isArray(source) || !source.length) return next();
 
     const assessed = assessTestCases(source, {
@@ -103,7 +120,16 @@ router.use((req, res, next) => {
       }
     }
 
-    const sealed = assessed.map(seal);
+    // Clicking Run/Re-run is the explicit human approval event. Seal the selected
+    // Automation Ready canonical contracts immediately before execution. This also
+    // repairs sessions generated before contract sealing was introduced without
+    // weakening the immutability check: visible and compiled expectations are still
+    // validated above before any seal is written.
+    const sealed = assessed.map((testCase) => {
+      const selected = !approved.size || approved.has(String(testCase.id || '').toUpperCase());
+      return selected ? seal(testCase) : testCase;
+    });
+
     req.body.reviewedTestCases = sealed;
     session.testCases = sealed;
     session.approvedContractSeals = Object.fromEntries(sealed
