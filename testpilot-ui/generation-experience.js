@@ -2,6 +2,33 @@
   if (window.__aiTestPilotGenerationExperience) return;
   window.__aiTestPilotGenerationExperience = true;
 
+  // Behavior-rule discovery sync is intentionally idempotent, but the Rules UI uses
+  // both a MutationObserver and a timer. During a render burst those two triggers can
+  // overlap before the first sync finishes. Coalesce identical in-flight POSTs so only
+  // one network request reaches the server for a given session at a time.
+  if (!window.__testNexusBehaviorRuleSyncFetchGuard) {
+    window.__testNexusBehaviorRuleSyncFetchGuard = true;
+    const baseFetch = window.fetch.bind(window);
+    const inFlightSync = new Map();
+    window.fetch = function testNexusCoalescedFetch(input, init) {
+      const rawUrl = typeof input === 'string' ? input : input?.url;
+      const method = String(init?.method || (typeof input === 'object' ? input?.method : '') || 'GET').toUpperCase();
+      let pathname = '';
+      try { pathname = new URL(rawUrl, window.location.origin).pathname; } catch {}
+      const isRuleSync = method === 'POST' && /^\/api\/test-rules\/[^/]+\/sync-discovery$/.test(pathname);
+      if (!isRuleSync) return baseFetch(input, init);
+
+      const key = pathname;
+      const existing = inFlightSync.get(key);
+      if (existing) return existing.then((response) => response.clone());
+
+      const request = baseFetch(input, init)
+        .finally(() => inFlightSync.delete(key));
+      inFlightSync.set(key, request);
+      return request.then((response) => response.clone());
+    };
+  }
+
   if (!window.__aiTestPilotNativeFetch) window.__aiTestPilotNativeFetch = window.fetch.bind(window);
 
   const INTERNAL_READINESS_BATCH_SIZE = 5;
