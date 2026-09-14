@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { validateCypressContract } = require('./cypressContractValidator');
+const { validateWebScenarioPolicy } = require('./webScenarioPolicy');
 const rawGenerator = require('./deterministicAutomationGeneratorV6');
 const { contractSnapshot } = require('./startupIntegrityGuards');
 
@@ -9,7 +10,7 @@ function scriptHash(script) {
   return crypto.createHash('sha256').update(String(script || '')).digest('hex');
 }
 
-function strictFailure(testCase, strict) {
+function strictFailure(testCase, strict, extra = {}) {
   const messages = (strict?.errors || []).map((item) => item?.message || String(item)).filter(Boolean);
   const reason = strict?.reason || messages[0] || 'The exact Cypress execution contract failed strict deterministic validation.';
   return {
@@ -18,22 +19,33 @@ function strictFailure(testCase, strict) {
       ...(testCase.automationReadiness || {}),
       status: 'INVALID_TEST_CASE',
       automatable: false,
-      reasonCode: strict?.reasonCode || 'STRICT_CYPRESS_CONTRACT_INVALID',
+      reasonCode: strict?.reasonCode || strict?.errors?.[0]?.code || 'STRICT_CYPRESS_CONTRACT_INVALID',
       reason,
       reasons: messages.length ? messages : [reason],
       resolutionType: 'AI_REPAIRABLE',
       repairable: true,
       canSuggestAssertion: false,
-      cypressContract: strict || null,
-      validationSource: 'deterministic+cypress-contract',
+      cypressContract: extra.cypressContract ?? strict?.cypressContract ?? testCase?.automationReadiness?.cypressContract ?? null,
+      webScenarioPolicy: extra.webScenarioPolicy ?? testCase?.automationReadiness?.webScenarioPolicy ?? null,
+      validationSource: 'deterministic+web-scenario-policy+cypress-contract',
     },
   };
 }
 
 function attachStrictContract(testCase, context) {
   if (!testCase?.canonicalIr || testCase?.automationReadiness?.status !== 'READY') return testCase;
+
+  const scenarioPolicy = validateWebScenarioPolicy(testCase, context);
+  if (!scenarioPolicy.ok) {
+    return strictFailure(testCase, {
+      reasonCode: scenarioPolicy.errors?.[0]?.code || 'WEB_SCENARIO_POLICY_BLOCKED',
+      reason: scenarioPolicy.errors?.[0]?.message || 'The generated scenario is not supported by the strict generic web-testing policy.',
+      errors: scenarioPolicy.errors || [],
+    }, { webScenarioPolicy: scenarioPolicy });
+  }
+
   const strict = validateCypressContract(testCase, context);
-  if (!strict.ok) return strictFailure(testCase, strict);
+  if (!strict.ok) return strictFailure(testCase, strict, { webScenarioPolicy: scenarioPolicy, cypressContract: strict });
 
   const approvedHash = testCase?.canonicalValidation?.approvedCypressArtifactHash || null;
   if (approvedHash && approvedHash !== strict.scriptHash) {
@@ -43,7 +55,7 @@ function attachStrictContract(testCase, context) {
       reasonCode: 'APPROVED_CYPRESS_ARTIFACT_CHANGED',
       reason: 'The exact Cypress artifact changed after human approval. Revalidate the case before execution.',
       errors: [{ code: 'APPROVED_CYPRESS_ARTIFACT_CHANGED', message: 'The exact Cypress artifact changed after human approval. Revalidate the case before execution.' }],
-    });
+    }, { webScenarioPolicy: scenarioPolicy, cypressContract: strict });
   }
 
   return {
@@ -51,12 +63,13 @@ function attachStrictContract(testCase, context) {
     automationReadiness: {
       ...testCase.automationReadiness,
       cypressContract: strict,
+      webScenarioPolicy: scenarioPolicy,
       contractIntegrity: {
         ...(testCase.automationReadiness?.contractIntegrity || {}),
         cypressArtifactHash: strict.scriptHash,
         cypressValidatorVersion: strict.version,
       },
-      validationSource: 'deterministic+cypress-contract',
+      validationSource: 'deterministic+web-scenario-policy+cypress-contract',
     },
   };
 }
@@ -131,10 +144,9 @@ function patchGenerator() {
       verifyCypressSeal(testCase);
     }
 
-    // IMPORTANT: canonical execution bypasses all legacy late-source rewrite layers.
-    // The same deterministic V6 emitter used to validate/seal each test is the only
-    // source of executable Cypress code. Multi-test suites simply concatenate those
-    // same deterministic test bodies under one describe() block.
+    // Canonical execution bypasses all legacy late-source rewrite layers. The same
+    // deterministic V6 emitter used to validate/seal each test is the only source of
+    // executable Cypress code. Multi-test suites concatenate those same test bodies.
     return rawGenerator.generateDeterministicAutomation(canonical);
   };
   generator.__strictCypressContractPatched = true;
