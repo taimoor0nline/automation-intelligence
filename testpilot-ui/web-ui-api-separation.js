@@ -2,31 +2,42 @@
   if (window.__testNexusWebUiApiSeparation) return;
   window.__testNexusWebUiApiSeparation = true;
 
-  const WEB_EXCLUDED_CATEGORY = 'API';
-  const WEB_EXCLUDED_SECURITY_AREA = 'API_SECURITY';
+  const WEB_EXCLUDED_CATEGORIES = new Set(['API', 'CUSTOM']);
+  const WEB_EXCLUDED_SECURITY_AREAS = new Set(['API_SECURITY', 'CUSTOM']);
 
   function pretty(value) { return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
-  function sanitizeStoredArray(key, excludedValue) {
+  function sanitizeStoredArray(key, excludedValues) {
     try {
       const parsed = JSON.parse(sessionStorage.getItem(key) || 'null');
       if (!Array.isArray(parsed)) return;
-      const cleaned = parsed.filter((value) => String(value).toUpperCase() !== excludedValue);
+      const cleaned = parsed.filter((value) => !excludedValues.has(String(value).toUpperCase()));
       if (cleaned.length !== parsed.length) sessionStorage.setItem(key, JSON.stringify(cleaned));
     } catch {}
   }
 
-  function hideGenerationApiOptions() {
-    const apiInput = document.querySelector(`#generationCategoryMenu input[data-test-category][value="${WEB_EXCLUDED_CATEGORY}"]`);
-    if (apiInput) { apiInput.checked = false; const option = apiInput.closest('.generation-category-option'); if (option) option.remove(); }
-    const apiSecurityInput = document.querySelector(`#securitySubcategoryMenu input[data-security-subcategory][value="${WEB_EXCLUDED_SECURITY_AREA}"]`);
-    if (apiSecurityInput) { apiSecurityInput.checked = false; const option = apiSecurityInput.closest('.generation-category-option'); if (option) option.remove(); }
+  function hideGenerationExcludedOptions() {
+    document.querySelectorAll('#generationCategoryMenu input[data-test-category]').forEach((input) => {
+      if (!WEB_EXCLUDED_CATEGORIES.has(String(input.value).toUpperCase())) return;
+      input.checked = false;
+      input.closest('.generation-category-option')?.remove();
+    });
+    document.querySelectorAll('#securitySubcategoryMenu input[data-security-subcategory]').forEach((input) => {
+      if (!WEB_EXCLUDED_SECURITY_AREAS.has(String(input.value).toUpperCase())) return;
+      input.checked = false;
+      input.closest('.generation-category-option')?.remove();
+    });
+    document.getElementById('generationCustomCategories')?.remove();
   }
 
-  function removeReviewApiOptions() {
-    document.querySelector('#reviewCategory option[value="API"]')?.remove();
-    document.querySelector('#reviewSecuritySubcategory option[value="API_SECURITY"]')?.remove();
-    document.querySelector('#editTestCategory option[value="API"]')?.remove();
-    document.querySelector('#editSecuritySubcategory option[value="API_SECURITY"]')?.remove();
+  function removeReviewExcludedOptions() {
+    for (const value of WEB_EXCLUDED_CATEGORIES) {
+      document.querySelector(`#reviewCategory option[value="${value}"]`)?.remove();
+      document.querySelector(`#editTestCategory option[value="${value}"]`)?.remove();
+    }
+    for (const value of WEB_EXCLUDED_SECURITY_AREAS) {
+      document.querySelector(`#reviewSecuritySubcategory option[value="${value}"]`)?.remove();
+      document.querySelector(`#editSecuritySubcategory option[value="${value}"]`)?.remove();
+    }
     // Defensive cleanup for any stale navigation/button injected by older cached scripts.
     document.querySelectorAll('a[href="/rest.html"],button[data-mode="api"],button[data-test-mode="api"]').forEach((node) => node.remove());
     const mode = document.getElementById('testModeSwitch'); if (mode) mode.remove();
@@ -38,7 +49,8 @@
     const count = document.getElementById('generationCategoryCount');
     const selectAll = document.getElementById('generationCategorySelectAll');
     if (!menu || !button || !selectAll) return;
-    const visibleInputs = [...menu.querySelectorAll('input[data-test-category]:not(:disabled)')].filter((input) => String(input.value).toUpperCase() !== WEB_EXCLUDED_CATEGORY);
+    const visibleInputs = [...menu.querySelectorAll('input[data-test-category]:not(:disabled)')]
+      .filter((input) => !WEB_EXCLUDED_CATEGORIES.has(String(input.value).toUpperCase()));
     const selected = visibleInputs.filter((input) => input.checked);
     const all = visibleInputs.length > 0 && selected.length === visibleInputs.length;
     selectAll.checked = all; selectAll.indeterminate = !all && selected.length > 0;
@@ -53,7 +65,8 @@
     const button = document.getElementById('securitySubcategoryButton');
     const selectAll = document.getElementById('securitySubcategorySelectAll');
     if (!menu || !button || !selectAll) return;
-    const visibleInputs = [...menu.querySelectorAll('input[data-security-subcategory]')].filter((input) => String(input.value).toUpperCase() !== WEB_EXCLUDED_SECURITY_AREA);
+    const visibleInputs = [...menu.querySelectorAll('input[data-security-subcategory]')]
+      .filter((input) => !WEB_EXCLUDED_SECURITY_AREAS.has(String(input.value).toUpperCase()));
     const selected = visibleInputs.filter((input) => input.checked);
     const all = visibleInputs.length > 0 && selected.length === visibleInputs.length;
     selectAll.checked = all; selectAll.indeterminate = !all && selected.length > 0;
@@ -62,10 +75,11 @@
     button.title = selected.map((input) => pretty(input.value)).join(', ');
   }
 
-  function enforceWebOnlyUi() { hideGenerationApiOptions(); removeReviewApiOptions(); syncCategorySummary(); syncSecuritySummary(); }
+  function enforceWebOnlyUi() { hideGenerationExcludedOptions(); removeReviewExcludedOptions(); syncCategorySummary(); syncSecuritySummary(); }
 
-  sanitizeStoredArray('aiTestPilotGenerationCategories', WEB_EXCLUDED_CATEGORY);
-  sanitizeStoredArray('aiTestPilotSecuritySubcategories', WEB_EXCLUDED_SECURITY_AREA);
+  sanitizeStoredArray('aiTestPilotGenerationCategories', WEB_EXCLUDED_CATEGORIES);
+  sanitizeStoredArray('aiTestPilotSecuritySubcategories', WEB_EXCLUDED_SECURITY_AREAS);
+  try { sessionStorage.removeItem('testNexusCustomCategories'); } catch {}
 
   const previousFetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
@@ -75,8 +89,14 @@
       const isGenerationRequest = method === 'POST' && (/\/api\/generation\/start(?:\?|$)/.test(url) || /\/api\/chat(?:\?|$)/.test(url));
       if (isGenerationRequest && typeof init?.body === 'string') {
         const body = JSON.parse(init.body);
-        if (Array.isArray(body.selectedTestCategories)) body.selectedTestCategories = body.selectedTestCategories.filter((value) => String(value).toUpperCase() !== WEB_EXCLUDED_CATEGORY);
-        if (Array.isArray(body.selectedSecuritySubcategories)) body.selectedSecuritySubcategories = body.selectedSecuritySubcategories.filter((value) => String(value).toUpperCase() !== WEB_EXCLUDED_SECURITY_AREA);
+        if (Array.isArray(body.selectedTestCategories)) {
+          body.selectedTestCategories = body.selectedTestCategories.filter((value) => !WEB_EXCLUDED_CATEGORIES.has(String(value).toUpperCase()));
+        }
+        if (Array.isArray(body.selectedSecuritySubcategories)) {
+          body.selectedSecuritySubcategories = body.selectedSecuritySubcategories.filter((value) => !WEB_EXCLUDED_SECURITY_AREAS.has(String(value).toUpperCase()));
+        }
+        body.customTestCategories = [];
+        body.customScenarioTypes = [];
         init = { ...init, body: JSON.stringify(body) };
       }
     } catch {}
