@@ -56,6 +56,7 @@ function visibleContractMismatch(testCase) {
 function seal(testCase) {
   if (!testCase?.canonicalIr || testCase?.automationReadiness?.status !== 'READY') return testCase;
   const plan = testCase.automationReadiness.automationPlan || {};
+  const cypressContract = testCase.automationReadiness.cypressContract || {};
   return {
     ...testCase,
     canonicalValidation: {
@@ -63,9 +64,11 @@ function seal(testCase) {
       approvedCanonicalHash: stableHash(testCase.canonicalIr),
       approvedCompiledHash: stableHash(executionPlanShape(plan)),
       approvedDisplayExpectationHash: stableHash(displayExpectationShape(testCase)),
+      approvedCypressArtifactHash: cypressContract.scriptHash || null,
+      approvedCypressValidatorVersion: cypressContract.version || null,
       approvedAt: new Date().toISOString(),
-      approvalContractVersion: 1,
-      approvalMode: 'HUMAN_REVIEWED_DETERMINISTIC_CONTRACT',
+      approvalContractVersion: 2,
+      approvalMode: 'HUMAN_REVIEWED_DETERMINISTIC_CYPRESS_CONTRACT',
     },
   };
 }
@@ -101,6 +104,8 @@ router.use((req, res, next) => {
 
     const assessed = assessTestCases(source, {
       pageDiscoveries: session.pageDiscoveries || [],
+      canonicalElementRegistry: session.canonicalElementRegistry || null,
+      story: session.story || '',
       hasCredentials: Boolean(session.credentials?.username && session.credentials?.password),
       actorCatalog: session.testActors || [],
       actorCredentialRefs: configuredActorRefs(session),
@@ -108,7 +113,28 @@ router.use((req, res, next) => {
     const approved = new Set((Array.isArray(body.approvedIds) ? body.approvedIds : []).map((id) => String(id || '').toUpperCase()));
 
     for (const testCase of assessed) {
-      if (!testCase?.canonicalIr || (approved.size && !approved.has(String(testCase.id || '').toUpperCase()))) continue;
+      const selected = !approved.size || approved.has(String(testCase.id || '').toUpperCase());
+      if (!selected || !testCase?.canonicalIr) continue;
+
+      if (testCase?.automationReadiness?.status !== 'READY') {
+        return res.status(422).json({
+          reply: `Execution blocked for ${testCase.id}: ${testCase?.automationReadiness?.reason || 'the test is not Automation Ready under the strict Cypress contract.'}`,
+          code: 'EXECUTION_CONTRACT_NOT_READY',
+          testCaseId: testCase.id,
+          automationReadiness: testCase.automationReadiness,
+        });
+      }
+
+      const cypressContract = testCase?.automationReadiness?.cypressContract;
+      if (!cypressContract?.ok || !cypressContract?.scriptHash) {
+        return res.status(422).json({
+          reply: `Execution blocked for ${testCase.id}: the exact Cypress artifact has not passed strict deterministic validation. Revalidate the test before execution.`,
+          code: 'CYPRESS_CONTRACT_NOT_VALIDATED',
+          testCaseId: testCase.id,
+          automationReadiness: testCase.automationReadiness,
+        });
+      }
+
       const mismatch = visibleContractMismatch(testCase);
       if (mismatch) {
         return res.status(422).json({
@@ -121,10 +147,8 @@ router.use((req, res, next) => {
     }
 
     // Clicking Run/Re-run is the explicit human approval event. Seal the selected
-    // Automation Ready canonical contracts immediately before execution. This also
-    // repairs sessions generated before contract sealing was introduced without
-    // weakening the immutability check: visible and compiled expectations are still
-    // validated above before any seal is written.
+    // deterministic contract AND the exact validated Cypress artifact. Any later
+    // canonical/compiled/display/script drift requires human revalidation.
     const sealed = assessed.map((testCase) => {
       const selected = !approved.size || approved.has(String(testCase.id || '').toUpperCase());
       return selected ? seal(testCase) : testCase;
@@ -138,6 +162,8 @@ router.use((req, res, next) => {
         canonicalHash: testCase.canonicalValidation.approvedCanonicalHash,
         compiledHash: testCase.canonicalValidation.approvedCompiledHash,
         displayExpectationHash: testCase.canonicalValidation.approvedDisplayExpectationHash,
+        cypressArtifactHash: testCase.canonicalValidation.approvedCypressArtifactHash,
+        cypressValidatorVersion: testCase.canonicalValidation.approvedCypressValidatorVersion,
         approvedAt: testCase.canonicalValidation.approvedAt,
       }]));
     return next();
