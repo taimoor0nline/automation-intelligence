@@ -113,6 +113,44 @@
     try { if (typeof clearError === 'function') clearError(); } catch {}
   }
 
+  function ensureControls() {
+    ensureStyles();
+    const runBtn = document.getElementById('runBtn');
+    const runbar = runBtn?.closest('.runbar');
+    if (!runBtn || !runbar) return;
+
+    let actions = document.getElementById('executionRunActions');
+    if (!actions) {
+      actions = document.createElement('div');
+      actions.id = 'executionRunActions';
+      actions.className = 'execution-run-actions';
+      runbar.appendChild(actions);
+    }
+
+    if (!document.getElementById('stopExecutionBtn')) {
+      const stop = document.createElement('button');
+      stop.id = 'stopExecutionBtn';
+      stop.type = 'button';
+      stop.className = 'btn ghost';
+      stop.textContent = 'Stop Execution';
+      stop.addEventListener('click', stopExecution);
+      actions.appendChild(stop);
+    }
+
+    if (!document.getElementById('resetExecutionBtn')) {
+      const reset = document.createElement('button');
+      reset.id = 'resetExecutionBtn';
+      reset.type = 'button';
+      reset.className = 'btn ghost';
+      reset.textContent = 'Reset Execution';
+      reset.addEventListener('click', resetExecution);
+      actions.appendChild(reset);
+    }
+
+    if (runBtn.parentElement !== actions) actions.appendChild(runBtn);
+    refreshControls();
+  }
+
   function ensureCaseRerunButtons() {
     for (const card of document.querySelectorAll('#cases .case')) {
       const checkbox = card.querySelector('.case-check');
@@ -165,9 +203,6 @@
     window.dispatchEvent(new CustomEvent('testnexus:individual-rerun-requested', { detail: { testCaseId: id } }));
     runBtn.click();
 
-    // The base execution handler reads the checkbox selection synchronously before
-    // its first await/fetch. Restore the tester's selection immediately afterwards so
-    // an individual re-run does not change the approved selection in the review list.
     setTimeout(() => {
       if (individualLaunch?.id === id) {
         setCheckedIds(previousSelection);
@@ -349,10 +384,6 @@
     document.addEventListener('click', (event) => {
       const runBtn = event.target.closest('#runBtn');
       if (!runBtn) return;
-
-      // Always honor the CURRENT review selection. The previous implementation
-      // silently restored lastApprovedIds after a completed run, which made it
-      // impossible to re-run a newly selected subset.
       const approved = individualLaunch ? [individualLaunch.id] : checkedIds();
       if (approved.length && !individualLaunch) lastApprovedIds = [...approved];
       cancellationRequested = false;
