@@ -12,6 +12,7 @@ function compactElement(item) {
   const out = {
     tag: item?.tag || null,
     type: item?.type || null,
+    role: item?.role || null,
     id: item?.id || null,
     name: item?.name || null,
     testId: item?.testId || null,
@@ -21,6 +22,10 @@ function compactElement(item) {
     label: item?.label || item?.text || null,
     ariaLabel: item?.ariaLabel || null,
     placeholder: item?.placeholder || null,
+    autocomplete: item?.autocomplete || null,
+    contenteditable: Boolean(item?.contenteditable),
+    tabIndex: Number.isFinite(Number(item?.tabIndex)) ? Number(item.tabIndex) : null,
+    checked: typeof item?.checked === 'boolean' ? item.checked : null,
     required: Boolean(item?.required),
     disabled: Boolean(item?.disabled),
     readonly: Boolean(item?.readonly),
@@ -59,7 +64,18 @@ function compactNetworkHint(hint) {
   return {
     method: hint?.method || null,
     url: hint?.url || null,
+    status: Number.isFinite(Number(hint?.status ?? hint?.statusCode)) ? Number(hint.status ?? hint.statusCode) : null,
+    responseHeaders: hint?.responseHeaders && typeof hint.responseHeaders === 'object' ? hint.responseHeaders : {},
     source: hint?.source || null,
+  };
+}
+
+function compactBrowserState(state) {
+  if (!state || typeof state !== 'object') return null;
+  return {
+    cookieNames: Array.isArray(state.cookieNames) ? state.cookieNames.slice(0, 100) : [],
+    localStorageKeys: Array.isArray(state.localStorageKeys) ? state.localStorageKeys.slice(0, 100) : [],
+    sessionStorageKeys: Array.isArray(state.sessionStorageKeys) ? state.sessionStorageKeys.slice(0, 100) : [],
   };
 }
 
@@ -74,7 +90,8 @@ function compactDiscoveriesForModel(pageDiscoveries = []) {
     elements: (page?.elements || []).map(compactElement),
     messages: (page?.messages || []).map(compactMessage),
     routeHints: Array.isArray(page?.routeHints) ? page.routeHints.slice(0, 20) : [],
-    networkHints: Array.isArray(page?.networkHints) ? page.networkHints.slice(0, 20).map(compactNetworkHint) : [],
+    networkHints: Array.isArray(page?.networkHints) ? page.networkHints.slice(0, 30).map(compactNetworkHint) : [],
+    browserState: compactBrowserState(page?.browserState),
     meta: Array.isArray(page?.meta) ? page.meta.slice(0, 20).map((item) => ({ name: item?.name || null, content: item?.content || '' })) : [],
   }));
 }
