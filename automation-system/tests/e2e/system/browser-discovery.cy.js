@@ -286,8 +286,15 @@ describe('TestNexus internal rendered page discovery', () => {
     const seeds = parseSeeds();
     const outputFile = String(Cypress.env('DISCOVERY_OUTPUT_FILE') || '').trim();
     const pageScope = String(Cypress.env('DISCOVERY_PAGE_SCOPE') || 'ALL_DISCOVERED_PAGES').toUpperCase();
-    expect(seeds.length, 'discovery seed URL').to.be.greaterThan(0);
-    expect(outputFile, 'discovery output file').to.not.equal('');
+
+    // This framework-owned spec lives under the normal Cypress spec tree so the
+    // server can invoke it explicitly. In an ordinary full suite run, discovery
+    // inputs are absent; keep the internal spec a harmless no-op rather than
+    // contaminating user-test results.
+    if (!seeds.length || !outputFile) {
+      expect(true).to.equal(true);
+      return;
+    }
 
     const queue = pageScope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : [...seeds];
     const queued = new Set(queue);
