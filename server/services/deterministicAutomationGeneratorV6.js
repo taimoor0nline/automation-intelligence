@@ -22,6 +22,13 @@ function emitAction(action) {
     // only accepts <form>, so choose the correct browser interaction at runtime.
     return `    cy.get(${js(action.selector)}).then(($el) => { if ($el.is('form')) cy.wrap($el).submit(); else cy.wrap($el).click(); });`;
   }
+  if (action?.operation === 'UNCHECK') {
+    if (!action.selector) throw new Error('UNCHECK requires a grounded selector.');
+    // Cypress .uncheck() is checkbox-only. A required radio-group negative scenario
+    // can still need the deterministic precondition "no radio selected". Keep that
+    // setup inside the Cypress command chain instead of emitting an invalid command.
+    return `    cy.get(${js(action.selector)}).then(($el) => { if ($el.is(':radio')) { const name=$el.attr('name'); const $form=$el.closest('form'); const $root=$form.length?$form:Cypress.$($el[0].ownerDocument); const $group=name?$root.find('input[type="radio"]').filter((_, el) => el.name === name):$el; $group.prop('checked', false).trigger('change'); } else { cy.wrap($el).uncheck(); } });`;
+  }
   return v5.emitAction(action);
 }
 
