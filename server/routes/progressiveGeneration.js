@@ -9,6 +9,10 @@ const activeGenerationRouter = canonicalEnabled
   ? require('./progressiveGenerationCanonical')
   : require('./progressiveGenerationScalable');
 
+// Block new Custom test generation before either generation architecture sees the
+// request. Historical Custom cases remain readable in existing sessions/reports.
+router.use(require('./customTestDisableGuard'));
+
 // Keep generation first, then add deterministic coverage and approval-contract
 // guards to the same platform route stack. The approval guard calls next() for
 // ordinary requests and only seals canonical contracts on explicit run approval.
