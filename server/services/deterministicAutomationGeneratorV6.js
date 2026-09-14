@@ -19,16 +19,13 @@ function emitAction(action) {
     if (!action.selector) throw new Error('SUBMIT requires a grounded selector.');
     // Canonical SUBMIT represents user form submission intent. Discovery may ground
     // that intent to either the form itself or its submit button. Cypress .submit()
-    // only accepts <form>, so choose the correct browser interaction at runtime.
+    // only accepts <form>, so choose the correct real browser interaction.
     return `    cy.get(${js(action.selector)}).then(($el) => { if ($el.is('form')) cy.wrap($el).submit(); else cy.wrap($el).click(); });`;
   }
-  if (action?.operation === 'UNCHECK') {
-    if (!action.selector) throw new Error('UNCHECK requires a grounded selector.');
-    // Cypress .uncheck() is checkbox-only. A required radio-group negative scenario
-    // can still need the deterministic precondition "no radio selected". Keep that
-    // setup inside the Cypress command chain instead of emitting an invalid command.
-    return `    cy.get(${js(action.selector)}).then(($el) => { if ($el.is(':radio')) { const name=$el.attr('name'); const $form=$el.closest('form'); const $root=$form.length?$form:Cypress.$($el[0].ownerDocument); const $group=name?$root.find('input[type="radio"]').filter((_, el) => el.name === name):$el; $group.prop('checked', false).trigger('change'); } else { cy.wrap($el).uncheck(); } });`;
-  }
+  // UNCHECK deliberately delegates to Cypress .uncheck(). The strict contract
+  // validator permits it only for checkbox inputs. Radio buttons are never force-
+  // cleared through direct DOM mutation because that creates a state a user may not
+  // be able to produce through the application UI.
   return v5.emitAction(action);
 }
 
