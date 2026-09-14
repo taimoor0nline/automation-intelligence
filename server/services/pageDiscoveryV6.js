@@ -41,6 +41,26 @@ function uniqueBy(items, keyFn) {
   });
 }
 
+function normalizeRenderedElement(item = {}) {
+  const tag = String(item.tag || '').toLowerCase();
+  const visibleText = String(item.text || '').replace(/\s+/g, ' ').trim();
+  return {
+    ...item,
+    // Generic applications often expose buttons/links only through rendered text.
+    // Preserve that text as semantic discovery evidence while keeping the exact
+    // Cypress-grounded selector as execution truth.
+    label: item.label || item.ariaLabel || item.placeholder || item.name || ((tag === 'button' || tag === 'a' || item.role) ? visibleText || null : null),
+  };
+}
+
+function normalizeRenderedPage(page = {}) {
+  return {
+    ...page,
+    elements: (page.elements || []).map(normalizeRenderedElement),
+    messages: (page.messages || []).map(normalizeRenderedElement),
+  };
+}
+
 function mergePage(rendered, source) {
   if (!source) return rendered;
   const networkHints = uniqueBy([...(rendered.networkHints || []), ...(source.networkHints || [])], (item) => `${item.method || '*'} ${item.url || ''}`);
@@ -120,7 +140,7 @@ async function discoverPages(urls, options = {}) {
   const requireRendered = boolEnv(process.env.CYPRESS_RENDERED_DISCOVERY_REQUIRED, true);
   let rendered = [];
   try {
-    rendered = await discoverRenderedPages(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds, options);
+    rendered = (await discoverRenderedPages(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds, options)).map(normalizeRenderedPage);
   } catch (err) {
     if (requireRendered) {
       err.message = `Rendered browser discovery failed. TestNexus will not invent selectors or downgrade to brittle static DOM assumptions. ${err.message}`;
@@ -157,4 +177,6 @@ module.exports = {
   discoverPages,
   isNavigablePage,
   mergePage,
+  normalizeRenderedElement,
+  normalizeRenderedPage,
 };
