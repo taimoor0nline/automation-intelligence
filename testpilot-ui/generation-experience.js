@@ -24,9 +24,10 @@
 
       const request = baseFetch(input, init);
       inFlightSync.set(key, request);
-      request.finally(() => setTimeout(() => {
+      const release = () => setTimeout(() => {
         if (inFlightSync.get(key) === request) inFlightSync.delete(key);
-      }, 1500));
+      }, 1500);
+      request.then(release, release);
       return request.then((response) => response.clone());
     };
   }
