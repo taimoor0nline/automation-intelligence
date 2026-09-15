@@ -84,6 +84,7 @@ function aliasesFor(item = {}, selector = '') {
     item.text,
     item.groupLabel,
     item.role,
+    item.href,
   ].map((value) => clean(value, 300)).filter(Boolean))];
 }
 
@@ -99,6 +100,27 @@ function sameErrorIdentity(control, error) {
     .map(identityToken)
     .filter(Boolean);
   return bases.some((base) => errors.some((candidate) => candidate === `${base}error` || candidate.endsWith(`${base}error`)));
+}
+
+function linkMetadata(item = {}, page = {}) {
+  const href = clean(item.href, 1200) || null;
+  if (!href) return { href: null, destinationUrl: null, destinationPath: null, destinationOrigin: null, target: clean(item.target, 80) || null };
+  try {
+    const base = page.url || 'http://testnexus.local/';
+    const url = new URL(href, base);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return { href, destinationUrl: null, destinationPath: null, destinationOrigin: null, target: clean(item.target, 80) || null };
+    }
+    return {
+      href,
+      destinationUrl: url.toString(),
+      destinationPath: `${url.pathname}${url.search}` || '/',
+      destinationOrigin: url.origin,
+      target: clean(item.target, 80) || null,
+    };
+  } catch {
+    return { href, destinationUrl: null, destinationPath: null, destinationOrigin: null, target: clean(item.target, 80) || null };
+  }
 }
 
 function linkValidationErrors(elements) {
@@ -146,7 +168,10 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
     if (!item || typeof item !== 'object') return null;
     const selector = selectorFor(item);
     if (!selector) return null;
-    if (selectorToRef.has(selector)) return selectorToRef.get(selector);
+    // The same selector can legitimately exist on several pages. Registry identity
+    // is page-scoped so one page can never silently borrow another page's element.
+    const selectorKey = `${page.pageRef}|${selector}`;
+    if (selectorToRef.has(selectorKey)) return selectorToRef.get(selectorKey);
     const elementRef = uniqueRef(preferredIdentity(item, selector, kind), preferredPrefix);
     const entry = {
       elementRef,
@@ -184,12 +209,13 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
       formMethod: clean(item.formMethod, 20).toUpperCase() || null,
       groupName: clean(item.groupName, 180) || null,
       groupLabel: clean(item.groupLabel, 300) || null,
+      ...linkMetadata(item, page),
       options: optionList(item),
       aliases: aliasesFor(item, selector),
       capabilities: capabilitiesFor(item),
     };
     elements.push(entry);
-    selectorToRef.set(selector, elementRef);
+    selectorToRef.set(selectorKey, elementRef);
     return elementRef;
   }
 
@@ -197,10 +223,12 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
     const rawPage = pageDiscoveries[index] || {};
     const path = pagePath(rawPage);
     const pageRef = uniqueRef(path === '/' ? 'root' : path, 'page');
+    const pageUrl = clean(rawPage.finalUrl || rawPage.url, 1200) || null;
     const page = {
       pageRef,
       path,
-      url: clean(rawPage.finalUrl || rawPage.url, 1200) || null,
+      url: pageUrl,
+      origin: (() => { try { return pageUrl ? new URL(pageUrl).origin : null; } catch { return null; } })(),
       title: clean(rawPage.title || rawPage.pageTitle, 300) || null,
     };
     pages.push(page);
@@ -228,9 +256,14 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
 }
 
 function registryIndex(registry = {}) {
+  const bySelector = new Map();
+  for (const entry of registry.elements || []) {
+    const key = `${entry.pageRef || ''}|${entry.selector || ''}`;
+    bySelector.set(key, entry);
+  }
   return {
     byRef: new Map((registry.elements || []).map((entry) => [entry.elementRef, entry])),
-    bySelector: new Map((registry.elements || []).map((entry) => [entry.selector, entry])),
+    bySelector,
     paths: new Set((registry.pages || []).map((page) => page.path)),
   };
 }
@@ -268,6 +301,10 @@ function registryForModel(registry = {}) {
       formName: entry.formName,
       groupName: entry.groupName,
       groupLabel: entry.groupLabel,
+      href: entry.href,
+      destinationPath: entry.destinationPath,
+      destinationOrigin: entry.destinationOrigin,
+      target: entry.target,
       options: entry.options,
       capabilities: entry.capabilities,
       selectorStrategy: entry.selectorStrategy,
@@ -284,5 +321,6 @@ module.exports = {
   selectorFor,
   pagePath,
   capabilitiesFor,
+  linkMetadata,
   linkValidationErrors,
 };
