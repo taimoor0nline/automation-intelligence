@@ -4,31 +4,27 @@ const EXTRA_ACTIONS = new Set([
   'SET_RANGE_VALUE','SET_COLOR_VALUE','DROP_FILE','SELECT_FILES','DROP_FILES','SELECT_MULTIPLE',
   'OPEN_COMBOBOX','CLOSE_COMBOBOX','SEARCH_SUGGESTIONS','CLEAR_SUGGESTION_SEARCH','SELECT_SUGGESTION','SELECT_SUGGESTIONS',
 ]);
+const SUGGESTION_ASSERTIONS = new Set([
+  'ASSERT_COMBOBOX_EXPANDED','ASSERT_COMBOBOX_COLLAPSED','ASSERT_SUGGESTION_VISIBLE','ASSERT_SUGGESTION_NOT_VISIBLE',
+  'ASSERT_NO_SUGGESTIONS','ASSERT_SUGGESTION_SELECTED','ASSERT_SELECTED_SUGGESTIONS_EQUALS','ASSERT_SEARCH_SUGGESTIONS_CONTAIN',
+]);
 
 function hasValidLoginHelper(ir = {}) {
-  return (Array.isArray(ir.actions) ? ir.actions : []).some((action) =>
-    String(action?.operation || '').trim().toUpperCase() === 'LOGIN_VALID'
-  );
+  return (Array.isArray(ir.actions) ? ir.actions : []).some((action) => String(action?.operation || '').trim().toUpperCase() === 'LOGIN_VALID');
 }
-
 function loginFocusedPlannedUnit(plannedUnit = {}) {
   if (!plannedUnit || typeof plannedUnit !== 'object') return plannedUnit;
   const objective = String(plannedUnit.objective || plannedUnit.rationale || '');
   if (!/\b(login|log\s*in|sign\s*in|authentication|username|password|credential)\b/i.test(objective)) return plannedUnit;
   return { ...plannedUnit, objective: 'login authentication' };
 }
-
 function clean(value, max = 1000) { return String(value ?? '').trim().slice(0, max); }
-function uniqueValues(values, max = 100) {
-  return [...new Set((Array.isArray(values) ? values : []).map((value) => clean(value, 500)).filter(Boolean))].slice(0, max);
-}
+function uniqueValues(values, max = 100) { return [...new Set((Array.isArray(values) ? values : []).map((value) => clean(value, 500)).filter(Boolean))].slice(0, max); }
 function fileNames(action = {}) {
   const values = Array.isArray(action.fileNames) ? action.fileNames : action.fileName ? [action.fileName] : [];
   return uniqueValues(values, 10).map((value) => clean(value, 300));
 }
-function registryElement(registry = {}, elementRef) {
-  return (registry.elements || []).find((entry) => String(entry.elementRef || '') === String(elementRef || '')) || null;
-}
+function registryElement(registry = {}, elementRef) { return (registry.elements || []).find((entry) => String(entry.elementRef || '') === String(elementRef || '')) || null; }
 function suggestionMetadata(registry = {}, elementRef) {
   const element = registryElement(registry, elementRef) || {};
   return {
@@ -54,31 +50,29 @@ function preprocessExtendedIr(ir) {
 function restoreExtendedAction(original, grounded, registry) {
   const operation = String(original?.operation || '').trim().toUpperCase();
   if (!EXTRA_ACTIONS.has(operation)) return grounded;
-  if (operation === 'SET_RANGE_VALUE' || operation === 'SET_COLOR_VALUE') {
-    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, value: clean(original.value, 120) };
-  }
-  if (operation === 'SELECT_MULTIPLE') {
-    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, values: uniqueValues(original.values, 100) };
-  }
+  if (operation === 'SET_RANGE_VALUE' || operation === 'SET_COLOR_VALUE') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, value: clean(original.value, 120) };
+  if (operation === 'SELECT_MULTIPLE') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, values: uniqueValues(original.values, 100) };
   if (operation === 'DROP_FILE') {
     const names = fileNames(original);
     return { operation, selector: grounded.selector, elementRef: grounded.elementRef, fileName: names[0] || '' };
   }
-  if (operation === 'SELECT_FILES' || operation === 'DROP_FILES') {
-    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, fileNames: fileNames(original) };
-  }
+  if (operation === 'SELECT_FILES' || operation === 'DROP_FILES') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, fileNames: fileNames(original) };
 
   const semantic = suggestionMetadata(registry, grounded.elementRef);
-  if (operation === 'SEARCH_SUGGESTIONS') {
-    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, query: clean(original.query ?? original.value, 500), ...semantic };
-  }
-  if (operation === 'SELECT_SUGGESTION') {
-    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, value: clean(original.value ?? original.text, 500), ...semantic };
-  }
-  if (operation === 'SELECT_SUGGESTIONS') {
-    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, values: uniqueValues(original.values, 50), ...semantic };
-  }
+  if (operation === 'SEARCH_SUGGESTIONS') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, query: clean(original.query ?? original.value, 500), ...semantic };
+  if (operation === 'SELECT_SUGGESTION') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, value: clean(original.value ?? original.text, 500), ...semantic };
+  if (operation === 'SELECT_SUGGESTIONS') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, values: uniqueValues(original.values, 50), ...semantic };
   return { operation, selector: grounded.selector, elementRef: grounded.elementRef, ...semantic };
+}
+
+function restoreExtendedAssertion(original, grounded, registry) {
+  const operation = String(original?.operation || grounded?.operation || '').trim().toUpperCase();
+  if (!SUGGESTION_ASSERTIONS.has(operation)) return grounded;
+  const semantic = suggestionMetadata(registry, grounded.elementRef || original?.elementRef);
+  const out = { ...grounded, operation, ...semantic };
+  if (operation === 'ASSERT_SELECTED_SUGGESTIONS_EQUALS') out.values = uniqueValues(original?.values, 50);
+  else if (!['ASSERT_COMBOBOX_EXPANDED','ASSERT_COMBOBOX_COLLAPSED','ASSERT_NO_SUGGESTIONS'].includes(operation)) out.value = clean(original?.value ?? original?.text, 500);
+  return out;
 }
 
 function extendedStep(original, action) {
@@ -112,21 +106,22 @@ function extendedAssertionText(assertion) {
 }
 
 function validateCanonicalIr(ir, context = {}) {
-  const adjustedContext = hasValidLoginHelper(ir)
-    ? { ...context, plannedUnit: loginFocusedPlannedUnit(context.plannedUnit) }
-    : context;
+  const adjustedContext = hasValidLoginHelper(ir) ? { ...context, plannedUnit: loginFocusedPlannedUnit(context.plannedUnit) } : context;
   const originalActions = Array.isArray(ir?.actions) ? ir.actions : [];
+  const originalAssertions = Array.isArray(ir?.assertions) ? ir.assertions : [];
   const prepared = preprocessExtendedIr(ir);
   const validated = base.validateCanonicalIr(prepared, adjustedContext);
   if (!validated.ok) return validated;
 
-  const actions = validated.plan.actions.map((action, index) => restoreExtendedAction(originalActions[index], action, context.registry || {}));
+  const registry = context.registry || {};
+  const actions = validated.plan.actions.map((action, index) => restoreExtendedAction(originalActions[index], action, registry));
+  const assertions = validated.plan.assertions.map((assertion, index) => restoreExtendedAssertion(originalAssertions[index], assertion, registry));
   const steps = validated.display.steps.map((step, index) => extendedStep(originalActions[index], actions[index]) || step);
-  const expectedResults = validated.display.expectedResults.map((text, index) => extendedAssertionText(ir?.assertions?.[index]) || text);
+  const expectedResults = validated.display.expectedResults.map((text, index) => extendedAssertionText(originalAssertions[index]) || text);
   return {
     ...validated,
     canonicalIr: { ...ir, version: base.IR_VERSION },
-    plan: { ...validated.plan, actions },
+    plan: { ...validated.plan, actions, assertions },
     display: { ...validated.display, steps, expectedResults },
   };
 }
@@ -149,10 +144,4 @@ function canonicalActionCatalog() {
   ];
 }
 
-module.exports = {
-  ...base,
-  validateCanonicalIr,
-  canonicalActionCatalog,
-  hasValidLoginHelper,
-  EXTRA_ACTIONS,
-};
+module.exports = { ...base, validateCanonicalIr, canonicalActionCatalog, hasValidLoginHelper, EXTRA_ACTIONS, SUGGESTION_ASSERTIONS };
