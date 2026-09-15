@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { validateCypressContract } = require('./cypressContractValidator');
 const { validateWebScenarioPolicy } = require('./webScenarioPolicy');
 const { validateNavigationContract } = require('./navigationContract');
+const { validateDeterministicStateContract } = require('./deterministicStateContract');
 const { buildCanonicalElementRegistry } = require('./canonicalElementRegistry');
 const {
   validateStrictGeneratedArtifact,
@@ -36,7 +37,8 @@ function strictFailure(testCase, strict, extra = {}) {
       generatedArtifactContract: extra.generatedArtifactContract ?? testCase?.automationReadiness?.generatedArtifactContract ?? null,
       webScenarioPolicy: extra.webScenarioPolicy ?? testCase?.automationReadiness?.webScenarioPolicy ?? null,
       navigationContract: extra.navigationContract ?? testCase?.automationReadiness?.navigationContract ?? null,
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+strict-artifact-contract',
+      stateContract: extra.stateContract ?? testCase?.automationReadiness?.stateContract ?? null,
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+strict-artifact-contract',
     },
   };
 }
@@ -69,11 +71,21 @@ function attachStrictContract(testCase, context) {
     });
   }
 
+  const stateContract = validateDeterministicStateContract(testCase.canonicalIr, registry);
+  if (!stateContract.ok) {
+    return strictFailure(testCase, stateContract, {
+      webScenarioPolicy: scenarioPolicy,
+      navigationContract,
+      stateContract,
+    });
+  }
+
   const strict = validateCypressContract(testCase, { ...context, canonicalElementRegistry: registry });
   if (!strict.ok) {
     return strictFailure(testCase, strict, {
       webScenarioPolicy: scenarioPolicy,
       navigationContract,
+      stateContract,
       cypressContract: strict,
     });
   }
@@ -83,6 +95,7 @@ function attachStrictContract(testCase, context) {
     return strictFailure(testCase, generatedArtifactContract, {
       webScenarioPolicy: scenarioPolicy,
       navigationContract,
+      stateContract,
       cypressContract: strict,
       generatedArtifactContract,
     });
@@ -96,7 +109,7 @@ function attachStrictContract(testCase, context) {
       reasonCode: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED',
       reason: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.',
       errors: [{ code: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED', message: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.' }],
-    }, { webScenarioPolicy: scenarioPolicy, navigationContract, cypressContract: strict, generatedArtifactContract });
+    }, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract, cypressContract: strict, generatedArtifactContract });
   }
 
   return {
@@ -107,14 +120,16 @@ function attachStrictContract(testCase, context) {
       generatedArtifactContract,
       webScenarioPolicy: scenarioPolicy,
       navigationContract,
+      stateContract,
       contractIntegrity: {
         ...(testCase.automationReadiness?.contractIntegrity || {}),
         cypressArtifactHash: strict.scriptHash,
         cypressValidatorVersion: strict.version,
         generatedArtifactValidatorVersion: generatedArtifactContract.version,
         navigationValidatorVersion: navigationContract.version,
+        stateValidatorVersion: stateContract.version,
       },
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+strict-artifact-contract',
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+strict-artifact-contract',
     },
   };
 }
