@@ -12,6 +12,7 @@
     "db:migrate": "node server/db/migrate.js",
     "test:server-syntax": "node scripts/server-syntax-smoke.js",
     "test:automation-config": "node scripts/automation-config-smoke.js",
+    "test:rendered-discovery": "node scripts/rendered-discovery-smoke.js",
     "test:platform": "node scripts/platform-smoke.js",
     "test:rest": "node scripts/rest-smoke.js",
     "test:canonical-architecture": "node scripts/canonical-architecture-smoke.js",
