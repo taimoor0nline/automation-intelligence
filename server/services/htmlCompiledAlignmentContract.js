@@ -1,4 +1,4 @@
-const VERSION = 'HTML_COMPILED_ALIGNMENT_V1';
+const VERSION = 'HTML_COMPILED_ALIGNMENT_V2';
 
 function clean(value) { return String(value ?? '').trim(); }
 function op(value) { return clean(value).toUpperCase(); }
@@ -8,7 +8,9 @@ function normalizeFiles(action = {}) {
   const single = clean(action.fileName);
   return single ? [single] : [];
 }
-
+function normalizeValues(action = {}) {
+  return Array.isArray(action.values) ? action.values.map((value) => clean(value)).filter(Boolean) : [];
+}
 function sameJson(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
 
 function validateHtmlCompiledAlignment(testCase = {}) {
@@ -20,15 +22,27 @@ function validateHtmlCompiledAlignment(testCase = {}) {
     const expected = source[index] || {};
     const actual = compiled[index] || {};
     const operation = op(expected.operation);
-    if (!['SELECT_FILES','DROP_FILES'].includes(operation)) continue;
-    const expectedFiles = normalizeFiles(expected);
-    const actualFiles = normalizeFiles(actual);
-    if (!sameJson(expectedFiles, actualFiles)) {
-      problems.push(issue(
-        'HTML_COMPILED_FILE_ARRAY_DRIFT',
-        `${operation} fileNames changed while compiling the executable plan. The exact reviewed file list and order must be preserved.`,
-        { actionIndex: index, expectedFiles, actualFiles }
-      ));
+    if (['SELECT_FILES','DROP_FILES'].includes(operation)) {
+      const expectedFiles = normalizeFiles(expected);
+      const actualFiles = normalizeFiles(actual);
+      if (!sameJson(expectedFiles, actualFiles)) {
+        problems.push(issue(
+          'HTML_COMPILED_FILE_ARRAY_DRIFT',
+          `${operation} fileNames changed while compiling the executable plan. The exact reviewed file list and order must be preserved.`,
+          { actionIndex: index, expectedFiles, actualFiles }
+        ));
+      }
+    }
+    if (operation === 'SELECT_MULTIPLE') {
+      const expectedValues = normalizeValues(expected);
+      const actualValues = normalizeValues(actual);
+      if (!sameJson(expectedValues, actualValues)) {
+        problems.push(issue(
+          'HTML_COMPILED_SELECT_ARRAY_DRIFT',
+          'SELECT_MULTIPLE values changed while compiling the executable plan. The exact reviewed option list and order must be preserved.',
+          { actionIndex: index, expectedValues, actualValues }
+        ));
+      }
     }
   }
 
@@ -41,4 +55,4 @@ function validateHtmlCompiledAlignment(testCase = {}) {
   };
 }
 
-module.exports = { VERSION, validateHtmlCompiledAlignment, normalizeFiles };
+module.exports = { VERSION, validateHtmlCompiledAlignment, normalizeFiles, normalizeValues };
