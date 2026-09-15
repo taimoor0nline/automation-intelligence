@@ -13,6 +13,7 @@ const UNIQUE_ELEMENT_ACTIONS = new Set([
   'CLEAR_SUGGESTION_SEARCH','SELECT_SUGGESTION','SELECT_SUGGESTIONS','SCROLL_SUGGESTIONS_TO_VALUE',
   'SELECT_SUGGESTION_BY_TRAVERSAL','REMOVE_SELECTED_TAG','CLEAR_SELECTED_TAGS',
 ]);
+const ENTERPRISE_ADAPTER_CAPABILITIES = new Set(['MFA_OTP','WEBAUTHN_TEST_ADAPTER']);
 
 function runtimeItem(testCaseId, kind, index, operation) {
   return {
@@ -53,6 +54,9 @@ function emitEnterpriseAction(action) {
     if (!key) throw new Error('PRESS_NATIVE_KEY requires a configured key.');
     return `    cy.pressNativeKey(${js(key)});`;
   }
+  if (operation === 'EXTERNAL_ADAPTER_ACTION' && ENTERPRISE_ADAPTER_CAPABILITIES.has(String(action.capability || '').toUpperCase())) {
+    return `    cy.task('testNexusEnterpriseAdapter', ${js({ capability: String(action.capability || '').toUpperCase(), action: action.action || 'execute', payload: action.payload || {} })}, { log:false }).then((result) => { expect(result && result.ok, JSON.stringify(result || {})).to.eq(true); });`;
+  }
   return null;
 }
 
@@ -61,6 +65,10 @@ function emitAction(action) {
 }
 
 function emitAssertion(assertion) {
+  const operation = op(assertion?.operation);
+  if (operation === 'ASSERT_EXTERNAL_ADAPTER' && ENTERPRISE_ADAPTER_CAPABILITIES.has(String(assertion.capability || '').toUpperCase())) {
+    return `    cy.task('testNexusEnterpriseAdapter', ${js({ capability: String(assertion.capability || '').toUpperCase(), action: 'assert', payload: assertion.payload || { expectation: assertion.description || '' } })}, { log:false }).then((result) => { expect(result && result.ok, JSON.stringify(result || {})).to.eq(true); });`;
+  }
   return v6.emitAssertion(assertion);
 }
 
