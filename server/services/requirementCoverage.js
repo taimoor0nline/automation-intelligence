@@ -137,11 +137,30 @@ function calculateRequirementCoverage(session = {}) {
   const proposal = session.coverageProposal || {};
   const failures = Array.isArray(proposal.generationFailures) ? proposal.generationFailures : [];
   const readiness = session.automationReadiness || {};
-  const max = Number(proposal.maxTestCases || session.canonicalGenerationPlan?.units?.length || 0) || 0;
+  const configuredMax = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 6) || 6, 250));
+  const max = Number(proposal.maxTestCases || session.maxTestCases || session.canonicalGenerationPlan?.units?.length || configuredMax) || configuredMax;
   const planned = Number(proposal.proposedTestCaseCount || session.canonicalGenerationPlan?.units?.length || 0) || 0;
+  const discovery = session.discoveryStatus || {};
+  const terminalFailure = session.lastGenerationFailure || discovery.failure || null;
+  const discoveryGaps = [
+    ...(Array.isArray(proposal.knownGaps) ? proposal.knownGaps : []),
+    ...(Array.isArray(discovery.warnings) ? discovery.warnings : []),
+    terminalFailure?.message || null,
+  ].map(clean).filter(Boolean);
+
+  let summary;
+  if (rows.length) {
+    summary = `${covered.length} of ${rows.length} explicit story requirements are mapped to Automation Ready canonical assertions.`;
+  } else if (terminalFailure) {
+    summary = `Exploratory generation was blocked before test planning: ${clean(terminalFailure.message)}`;
+  } else if (cases.length) {
+    summary = `${cases.length} exploratory test case${cases.length === 1 ? '' : 's'} generated from rendered application evidence. No explicit requirement clauses were supplied, so a requirement percentage is not applicable.`;
+  } else {
+    summary = 'Exploratory scope: no explicit requirement clauses were supplied. Coverage will be reported from generated, evidence-grounded test cases after planning completes.';
+  }
 
   return {
-    mode: 'DETERMINISTIC_EXPLICIT_REQUIREMENT_COVERAGE',
+    mode: rows.length ? 'DETERMINISTIC_EXPLICIT_REQUIREMENT_COVERAGE' : 'EXPLORATORY_SCOPE_STATUS',
     score,
     coveredCount: covered.length,
     totalRequirements: rows.length,
@@ -153,24 +172,31 @@ function calculateRequirementCoverage(session = {}) {
     generatedTestCaseCount: cases.length,
     plannedTestCaseCount: planned,
     maxTestCases: max,
-    generationFailureCount: failures.length,
-    generationFailures: failures.map((item) => ({
-      plannedId: item.plannedId || null,
-      message: item.message || 'Planned case was not generated.',
-      category: item.category || null,
-      scenarioType: item.scenarioType || null,
-    })),
+    generationFailureCount: failures.length + (terminalFailure ? 1 : 0),
+    generationFailures: [
+      ...failures.map((item) => ({
+        plannedId: item.plannedId || null,
+        message: item.message || 'Planned case was not generated.',
+        category: item.category || null,
+        scenarioType: item.scenarioType || null,
+      })),
+      ...(terminalFailure ? [{ plannedId: null, message: clean(terminalFailure.message), category: null, scenarioType: null, stage: terminalFailure.stage || 'DISCOVERY', code: terminalFailure.code || null }] : []),
+    ],
     redundantTestCases,
-    knownDiscoveryGaps: uniq(Array.isArray(proposal.knownGaps) ? proposal.knownGaps.map(clean) : []),
+    knownDiscoveryGaps: uniq(discoveryGaps),
+    discovery: {
+      complete: discovery.complete === true,
+      partial: discovery.partial === true,
+      pageCount: Number(discovery.pageCount || 0),
+      failureCode: terminalFailure?.code || null,
+    },
     generationComplete: proposal.generationComplete !== null && proposal.generationComplete !== undefined ? Boolean(proposal.generationComplete) : session.state === 'AWAITING_APPROVAL' || session.state === 'DONE',
     readinessValidated: Boolean(session.readinessValidated),
     readiness: {
       ready: Number(readiness.ready || 0),
       total: Number(readiness.total || cases.length || 0),
     },
-    summary: rows.length
-      ? `${covered.length} of ${rows.length} explicit story requirements are mapped to Automation Ready canonical assertions.`
-      : 'No explicit requirement clauses could be extracted deterministically from the story.',
+    summary,
   };
 }
 
