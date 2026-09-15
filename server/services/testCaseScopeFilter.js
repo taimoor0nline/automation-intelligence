@@ -1,5 +1,6 @@
 require('./startupIntegrityGuards').install();
 require('./runtimeHardeningPatches').install();
+require('./enterpriseAutomationCapabilities').install();
 require('./strictPlannerGuard').install();
 require('./strictCypressIntegration').install();
 
