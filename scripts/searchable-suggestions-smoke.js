@@ -19,8 +19,13 @@ const pageDiscoveries = [{
     { tag: 'li', type: 'li', id: 'country-qatar', selector: '#country-qatar', role: 'option', text: 'Qatar', listboxOwnerId: 'country-list', ariaSelected: 'false' },
     { tag: 'input', type: 'text', id: 'skills', selector: '#skills', role: 'combobox', ariaLabel: 'Skills', ariaAutocomplete: 'list', ariaControls: 'skills-list', ariaExpanded: 'false' },
     { tag: 'ul', type: 'ul', id: 'skills-list', selector: '#skills-list', role: 'listbox', ariaMultiselectable: 'true' },
-    { tag: 'li', type: 'li', id: 'skill-laravel', selector: '#skill-laravel', role: 'option', text: 'Laravel', listboxOwnerId: 'skills-list', ariaSelected: 'false' },
+    { tag: 'li', type: 'li', id: 'skill-laravel', selector: '#skill-laravel', role: 'option', text: 'Laravel', listboxOwnerId: 'skills-list', ariaSelected: 'true' },
     { tag: 'li', type: 'li', id: 'skill-vue', selector: '#skill-vue', role: 'option', text: 'Vue', listboxOwnerId: 'skills-list', ariaSelected: 'false' },
+    { tag: 'button', type: 'button', id: 'remove-laravel', selector: '#remove-laravel', ariaLabel: 'Remove Laravel', ariaControls: 'skills-list', text: '×' },
+    { tag: 'button', type: 'button', id: 'clear-skills', selector: '#clear-skills', ariaLabel: 'Clear all selected tags', ariaControls: 'skills-list', text: 'Clear all' },
+    { tag: 'input', type: 'text', id: 'virtual-combo', selector: '#virtual-combo', role: 'combobox', ariaLabel: 'Virtual item', ariaControls: 'virtual-list', ariaExpanded: 'true' },
+    { tag: 'div', type: 'div', id: 'virtual-list', selector: '#virtual-list', role: 'listbox' },
+    { tag: 'div', type: 'div', id: 'virtual-one', selector: '#virtual-one', role: 'option', text: 'Item 1', listboxOwnerId: 'virtual-list', ariaSelected: 'false' },
     { tag: 'input', type: 'text', id: 'city', selector: '#city', list: 'city-list', suggestions: [{ value: 'Muscat', text: 'Muscat' }, { value: 'Sohar', text: 'Sohar' }], suggestionSource: 'datalist' },
     { tag: 'datalist', type: 'datalist', id: 'city-list', selector: '#city-list', options: [{ value: 'Muscat', label: 'Muscat' }, { value: 'Sohar', label: 'Sohar' }] },
   ],
@@ -29,20 +34,30 @@ const pageDiscoveries = [{
 
 const registry = buildCanonicalElementRegistry(pageDiscoveries);
 const model = registryForModel(registry);
-assert.equal(registry.version, 7);
+assert.equal(registry.version, 8);
 assert.equal(model.capabilityContract.authoritative, true);
 const byId = new Map(registry.elements.filter((element) => element.id).map((element) => [element.id, element]));
 const site = byId.get('site-search');
 const country = byId.get('country');
 const skills = byId.get('skills');
+const virtual = byId.get('virtual-combo');
 const city = byId.get('city');
 assert(site.capabilities.includes('SEARCH_SUGGESTIONS'));
 assert(site.capabilities.includes('SELECT_SUGGESTION'));
+assert(site.capabilities.includes('TRAVERSE_SUGGESTIONS'));
 assert(country.capabilities.includes('OPEN_COMBOBOX'));
 assert(country.capabilities.includes('SELECT_SUGGESTION'));
 assert.deepEqual(country.suggestions.map((item) => item.text), ['Oman', 'Qatar']);
 assert(skills.capabilities.includes('SELECT_SUGGESTIONS'));
+assert(skills.capabilities.includes('REMOVE_SELECTED_TAG'));
+assert(skills.capabilities.includes('CLEAR_SELECTED_TAGS'));
+assert(skills.capabilities.includes('ASSERT_SELECTED_TAGS'));
+assert.equal(skills.removeTagPattern.prefix, 'Remove ');
+assert.equal(skills.clearTagsSelector, '#clear-skills');
 assert.equal(skills.suggestionMultiselect, true);
+assert(virtual.capabilities.includes('TRAVERSE_SUGGESTIONS'));
+assert(virtual.capabilities.includes('SELECT_SUGGESTION_BY_TRAVERSAL'));
+assert.equal(virtual.suggestionTraversalMaxAttempts, 24);
 assert(city.capabilities.includes('SEARCH_SUGGESTIONS'));
 assert(city.capabilities.includes('NATIVE_DATALIST_SUGGESTIONS'));
 assert(!city.capabilities.includes('SELECT_SUGGESTION'), 'native datalist popup must not be treated as a custom listbox click surface');
@@ -91,6 +106,46 @@ assert(generated.script.includes('Documents'), generated.script);
 assert(generated.script.includes('Laravel'), generated.script);
 assert(generated.script.includes('Vue'), generated.script);
 
+const advancedStory = 'Traverse the virtualized results and select Item 42. Select Vue, remove the selected Vue tag, and then clear all selected tags.';
+const advancedIr = {
+  version: 1,
+  plannedId: 'P-ADVANCED-SUGGEST',
+  actions: [
+    { operation: 'SCROLL_SUGGESTIONS_TO_VALUE', elementRef: virtual.elementRef, value: 'Item 42' },
+    { operation: 'SELECT_SUGGESTION_BY_TRAVERSAL', elementRef: virtual.elementRef, value: 'Item 42' },
+    { operation: 'SELECT_SUGGESTIONS', elementRef: skills.elementRef, values: ['Vue'] },
+    { operation: 'REMOVE_SELECTED_TAG', elementRef: skills.elementRef, value: 'Vue' },
+    { operation: 'CLEAR_SELECTED_TAGS', elementRef: skills.elementRef },
+  ],
+  assertions: [
+    { operation: 'ASSERT_SELECTED_TAG_ABSENT', elementRef: skills.elementRef, value: 'Vue' },
+    { operation: 'ASSERT_NO_SELECTED_TAGS', elementRef: skills.elementRef },
+  ],
+};
+const advancedCompiled = validateCanonicalIr(advancedIr, { registry, story: advancedStory, hasCredentials: false });
+assert.equal(advancedCompiled.ok, true, advancedCompiled.errors?.join('\n'));
+assert.equal(advancedCompiled.plan.actions[0].suggestionTraversalMaxAttempts, 24);
+assert.equal(advancedCompiled.plan.actions[3].removeTagPattern.prefix, 'Remove ');
+assert.equal(advancedCompiled.plan.actions[4].clearTagsSelector, '#clear-skills');
+const advancedCase = {
+  id: 'TC-ADVANCED-SUGGEST',
+  title: 'Traverse virtualized list and manage selected tags',
+  generationStory: advancedStory,
+  testData: { virtualItem: 'Item 42', removeSkill: 'Vue' },
+  preconditions: [],
+  expectedResults: advancedCompiled.display.expectedResults,
+  canonicalIr: advancedIr,
+  automationReadiness: { status: 'READY', automationPlan: advancedCompiled.plan },
+};
+const advancedContract = validateSuggestionCapabilityContract(advancedCase, registry, { story: advancedStory });
+assert.equal(advancedContract.ok, true, JSON.stringify(advancedContract.errors));
+const advancedGenerated = generator.generateDeterministicAutomation([advancedCase]);
+assert(advancedGenerated.script.includes('.scrollTo('), advancedGenerated.script);
+assert(advancedGenerated.script.includes('Item 42'), advancedGenerated.script);
+assert(advancedGenerated.script.includes('Remove Vue'), advancedGenerated.script);
+assert(advancedGenerated.script.includes('#clear-skills'), advancedGenerated.script);
+assert(advancedGenerated.script.includes('attempt>=24'), advancedGenerated.script);
+
 const inventedIr = {
   version: 1,
   plannedId: 'P-INVENTED',
@@ -118,6 +173,7 @@ const dynamicRegistry = buildCanonicalElementRegistry(dynamicPage);
 const employee = dynamicRegistry.elements.find((element) => element.id === 'employee');
 assert(employee.capabilities.includes('SEARCH_SUGGESTIONS'));
 assert(employee.capabilities.includes('SELECT_SUGGESTION'));
+assert(employee.capabilities.includes('TRAVERSE_SUGGESTIONS'));
 assert.equal(employee.suggestions.length, 0);
 const dynamicIr = { version: 1, plannedId: 'P-ASYNC', actions: [
   { operation: 'SEARCH_SUGGESTIONS', elementRef: employee.elementRef, query: 'Sara' },
