@@ -2,6 +2,7 @@ const v5 = require('./deterministicAutomationGeneratorV5');
 const v4 = require('./deterministicAutomationGeneratorV4');
 
 function js(value) { return JSON.stringify(value); }
+function cssAttr(value) { return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
 
 function emitResolvedFiles(selector, fileNames, { dragDrop = false } = {}) {
   const names = Array.isArray(fileNames) ? fileNames : [];
@@ -21,6 +22,21 @@ function emitResolvedFiles(selector, fileNames, { dragDrop = false } = {}) {
 function emitNativeInputValue(selector, value, inputType) {
   if (!selector) throw new Error(`${inputType} interaction requires a grounded selector.`);
   return `    cy.get(${js(selector)}).then(($input) => { const el=$input[0]; const win=el.ownerDocument.defaultView; const setter=Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype,'value')?.set; if(typeof setter!=='function') throw new Error(${js(`Native ${inputType} value setter is unavailable.`)}); setter.call(el, ${js(String(value))}); }).trigger('input').trigger('change');`;
+}
+
+function suggestionListSelector(contract = {}) {
+  if (contract.suggestionListSelector) return String(contract.suggestionListSelector);
+  if (contract.suggestionListId) return `[id="${cssAttr(contract.suggestionListId)}"]`;
+  throw new Error('Searchable suggestion interaction requires a grounded listbox relationship.');
+}
+
+function optionMatchBody(expected) {
+  return `const text=String(el.textContent||'').trim().replace(/\\s+/g,' '); const value=String(el.getAttribute('data-value')||el.getAttribute('value')||el.getAttribute('aria-label')||'').trim(); return text===${js(String(expected))}||value===${js(String(expected))};`;
+}
+
+function emitSuggestionClick(contract, expected) {
+  const listSelector = suggestionListSelector(contract);
+  return `cy.get(${js(listSelector)}).should('be.visible').find('[role="option"]').filter((_,el)=>{ ${optionMatchBody(expected)} }).first().should('be.visible').and('not.have.attr','aria-disabled','true').click()`;
 }
 
 function emitAction(action) {
@@ -54,14 +70,36 @@ function emitAction(action) {
     if (!Array.isArray(action.values) || !action.values.length) throw new Error('SELECT_MULTIPLE requires at least one selected value.');
     return `    cy.get(${js(action.selector)}).select(${js(action.values)});`;
   }
-  if (action?.operation === 'DROP_FILE') {
-    return emitResolvedFiles(action.selector, [action.fileName], { dragDrop: true });
+  if (action?.operation === 'DROP_FILE') return emitResolvedFiles(action.selector, [action.fileName], { dragDrop: true });
+  if (action?.operation === 'SELECT_FILES') return emitResolvedFiles(action.selector, action.fileNames, { dragDrop: false });
+  if (action?.operation === 'DROP_FILES') return emitResolvedFiles(action.selector, action.fileNames, { dragDrop: true });
+
+  if (action?.operation === 'OPEN_COMBOBOX') {
+    if (!action.selector) throw new Error('OPEN_COMBOBOX requires a grounded selector.');
+    return `    cy.get(${js(action.selector)}).then(($el)=>{ if(String($el.attr('aria-expanded')||'').toLowerCase()!=='true') cy.wrap($el).click(); });`;
   }
-  if (action?.operation === 'SELECT_FILES') {
-    return emitResolvedFiles(action.selector, action.fileNames, { dragDrop: false });
+  if (action?.operation === 'CLOSE_COMBOBOX') {
+    if (!action.selector) throw new Error('CLOSE_COMBOBOX requires a grounded selector.');
+    return `    cy.get(${js(action.selector)}).then(($el)=>{ if(String($el.attr('aria-expanded')||'').toLowerCase()==='true') cy.wrap($el).trigger('keydown',{key:'Escape',code:'Escape',keyCode:27,which:27}); });`;
   }
-  if (action?.operation === 'DROP_FILES') {
-    return emitResolvedFiles(action.selector, action.fileNames, { dragDrop: true });
+  if (action?.operation === 'SEARCH_SUGGESTIONS') {
+    if (!action.selector || !String(action.query || '').trim()) throw new Error('SEARCH_SUGGESTIONS requires a grounded editable selector and non-empty query.');
+    return `    cy.get(${js(action.selector)}).clear().type(${js(String(action.query))});`;
+  }
+  if (action?.operation === 'CLEAR_SUGGESTION_SEARCH') {
+    if (!action.selector) throw new Error('CLEAR_SUGGESTION_SEARCH requires a grounded editable selector.');
+    return `    cy.get(${js(action.selector)}).clear();`;
+  }
+  if (action?.operation === 'SELECT_SUGGESTION') {
+    if (!action.selector || !String(action.value || '').trim()) throw new Error('SELECT_SUGGESTION requires a grounded control and evidenced suggestion value.');
+    const click = emitSuggestionClick(action, String(action.value));
+    return `    cy.get(${js(action.selector)}).then(($el)=>{ if(String($el.attr('aria-expanded')||'').toLowerCase()!=='true') cy.wrap($el).click(); }).then(()=>${click});`;
+  }
+  if (action?.operation === 'SELECT_SUGGESTIONS') {
+    const values = Array.isArray(action.values) ? action.values.map(String).filter(Boolean) : [];
+    if (!action.selector || !values.length) throw new Error('SELECT_SUGGESTIONS requires a grounded searchable control and one or more evidenced options.');
+    const listSelector = suggestionListSelector(action);
+    return `    cy.wrap(${js(values)},{log:false}).each((expected)=>{ cy.get(${js(action.selector)}).then(($el)=>{ if(String($el.attr('aria-expanded')||'').toLowerCase()!=='true') cy.wrap($el).click(); }).then(()=>{ cy.get(${js(action.selector)}).clear().type(String(expected)); cy.get(${js(listSelector)}).should('be.visible').find('[role="option"]').filter((_,el)=>{ const text=String(el.textContent||'').trim().replace(/\\s+/g,' '); const value=String(el.getAttribute('data-value')||el.getAttribute('value')||el.getAttribute('aria-label')||'').trim(); return text===String(expected)||value===String(expected); }).first().should('be.visible').and('not.have.attr','aria-disabled','true').click(); }); });`;
   }
   return v5.emitAction(action);
 }
@@ -71,6 +109,29 @@ function emitAssertion(assertion) {
     if (!assertion.selector) throw new Error('ASSERT_SELECTED_VALUES_EQUALS requires a grounded selector.');
     const values = Array.isArray(assertion.values) ? assertion.values.map(String) : [];
     return `    cy.get(${js(assertion.selector)}).should(($select) => { const actual=Array.from($select[0].selectedOptions||[]).map((option)=>String(option.value)); expect(actual).to.deep.eq(${js(values)}); });`;
+  }
+  if (assertion?.operation === 'ASSERT_COMBOBOX_EXPANDED') return `    cy.get(${js(assertion.selector)}).should('have.attr','aria-expanded','true');`;
+  if (assertion?.operation === 'ASSERT_COMBOBOX_COLLAPSED') return `    cy.get(${js(assertion.selector)}).should(($el)=>{ expect(String($el.attr('aria-expanded')||'false').toLowerCase()).to.eq('false'); });`;
+  if (['ASSERT_SUGGESTION_VISIBLE','ASSERT_SEARCH_SUGGESTIONS_CONTAIN','ASSERT_SUGGESTION_NOT_VISIBLE','ASSERT_SUGGESTION_SELECTED'].includes(assertion?.operation)) {
+    const expected = String(assertion.value ?? assertion.text ?? '');
+    if (!expected) throw new Error(`${assertion.operation} requires a grounded suggestion value.`);
+    const listSelector = suggestionListSelector(assertion);
+    if (assertion.operation === 'ASSERT_SUGGESTION_NOT_VISIBLE') {
+      return `    cy.get(${js(listSelector)}).find('[role="option"]').filter((_,el)=>{ ${optionMatchBody(expected)} }).should('have.length',0);`;
+    }
+    if (assertion.operation === 'ASSERT_SUGGESTION_SELECTED') {
+      return `    cy.get(${js(listSelector)}).find('[role="option"]').filter((_,el)=>{ ${optionMatchBody(expected)} }).first().should('have.attr','aria-selected','true');`;
+    }
+    return `    cy.get(${js(listSelector)}).should('be.visible').find('[role="option"]').filter((_,el)=>{ ${optionMatchBody(expected)} }).first().should('be.visible');`;
+  }
+  if (assertion?.operation === 'ASSERT_NO_SUGGESTIONS') {
+    const listSelector = suggestionListSelector(assertion);
+    return `    cy.get('body').then(($body)=>{ const $list=$body.find(${js(listSelector)}); if(!$list.length||!$list.is(':visible')) return; expect($list.find('[role="option"]:visible').length).to.eq(0); });`;
+  }
+  if (assertion?.operation === 'ASSERT_SELECTED_SUGGESTIONS_EQUALS') {
+    const values = Array.isArray(assertion.values) ? assertion.values.map(String) : [];
+    const listSelector = suggestionListSelector(assertion);
+    return `    cy.get(${js(listSelector)}).find('[role="option"][aria-selected="true"]').then(($options)=>{ const actual=Array.from($options).map((el)=>String(el.getAttribute('data-value')||el.getAttribute('value')||el.getAttribute('aria-label')||el.textContent||'').trim()); expect(actual).to.deep.eq(${js(values)}); });`;
   }
   return v4.emitAssertion(assertion);
 }
@@ -111,10 +172,4 @@ function generateDeterministicAutomation(approvedTestCases = []) {
   };
 }
 
-module.exports = {
-  ...v5,
-  emitAction,
-  emitAssertion,
-  generateCypressPreviewFromPlan,
-  generateDeterministicAutomation,
-};
+module.exports = { ...v5, emitAction, emitAssertion, generateCypressPreviewFromPlan, generateDeterministicAutomation };
