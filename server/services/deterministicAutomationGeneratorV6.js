@@ -18,6 +18,11 @@ function emitResolvedFiles(selector, fileNames, { dragDrop = false } = {}) {
   return `    ${expression};`;
 }
 
+function emitNativeInputValue(selector, value, inputType) {
+  if (!selector) throw new Error(`${inputType} interaction requires a grounded selector.`);
+  return `    cy.get(${js(selector)}).then(($input) => { const el=$input[0]; const win=el.ownerDocument.defaultView; const setter=Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype,'value')?.set; if(typeof setter!=='function') throw new Error(${js(`Native ${inputType} value setter is unavailable.`)}); setter.call(el, ${js(String(value))}); }).trigger('input').trigger('change');`;
+}
+
 function emitAction(action) {
   if (action?.operation === 'TYPE_RUNTIME_CREDENTIAL') {
     const credential = String(action.credential || '').trim().toLowerCase();
@@ -35,10 +40,19 @@ function emitAction(action) {
     return `    cy.get(${js(action.selector)}).then(($el) => { if ($el.is('form')) cy.wrap($el).submit(); else cy.wrap($el).click(); });`;
   }
   if (action?.operation === 'SET_RANGE_VALUE') {
-    if (!action.selector) throw new Error('SET_RANGE_VALUE requires a grounded selector.');
     const value = String(action.value ?? '');
     if (!value) throw new Error('SET_RANGE_VALUE requires a numeric value.');
-    return `    cy.get(${js(action.selector)}).then(($range) => { const el=$range[0]; const win=el.ownerDocument.defaultView; const setter=Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype,'value')?.set; if(typeof setter!=='function') throw new Error('Native range value setter is unavailable.'); setter.call(el, ${js(value)}); }).trigger('input').trigger('change');`;
+    return emitNativeInputValue(action.selector, value, 'range');
+  }
+  if (action?.operation === 'SET_COLOR_VALUE') {
+    const value = String(action.value ?? '').toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(value)) throw new Error('SET_COLOR_VALUE requires #RRGGBB.');
+    return emitNativeInputValue(action.selector, value, 'color');
+  }
+  if (action?.operation === 'SELECT_MULTIPLE') {
+    if (!action.selector) throw new Error('SELECT_MULTIPLE requires a grounded selector.');
+    if (!Array.isArray(action.values) || !action.values.length) throw new Error('SELECT_MULTIPLE requires at least one selected value.');
+    return `    cy.get(${js(action.selector)}).select(${js(action.values)});`;
   }
   if (action?.operation === 'DROP_FILE') {
     return emitResolvedFiles(action.selector, [action.fileName], { dragDrop: true });
@@ -52,6 +66,15 @@ function emitAction(action) {
   return v5.emitAction(action);
 }
 
+function emitAssertion(assertion) {
+  if (assertion?.operation === 'ASSERT_SELECTED_VALUES_EQUALS') {
+    if (!assertion.selector) throw new Error('ASSERT_SELECTED_VALUES_EQUALS requires a grounded selector.');
+    const values = Array.isArray(assertion.values) ? assertion.values.map(String) : [];
+    return `    cy.get(${js(assertion.selector)}).should(($select) => { const actual=Array.from($select[0].selectedOptions||[]).map((option)=>String(option.value)); expect(actual).to.deep.eq(${js(values)}); });`;
+  }
+  return v4.emitAssertion(assertion);
+}
+
 function generateCypressPreviewFromPlan(plan, { id = 'TC', title = 'Canonical test' } = {}) {
   if (!plan) throw new Error('A compiled automation plan is required for Cypress preview.');
   const lines = [`it(${js(`${id} - ${title}`)}, () => {`];
@@ -59,7 +82,7 @@ function generateCypressPreviewFromPlan(plan, { id = 'TC', title = 'Canonical te
   if (setup.length) lines.push(...setup.map((line) => String(line).replace(/^\s{4}/, '  ')), '');
   for (const action of plan.actions || []) lines.push(String(emitAction(action)).replace(/^\s{4}/, '  '));
   if ((plan.actions || []).length && (plan.assertions || []).length) lines.push('');
-  for (const assertion of plan.assertions || []) lines.push(String(v4.emitAssertion(assertion)).replace(/^\s{4}/, '  '));
+  for (const assertion of plan.assertions || []) lines.push(String(emitAssertion(assertion)).replace(/^\s{4}/, '  '));
   lines.push('});');
   return lines.join('\n');
 }
@@ -75,7 +98,7 @@ function generateDeterministicAutomation(approvedTestCases = []) {
     if (setup.length) lines.push(...setup, '');
     for (const action of plan.actions || []) lines.push(emitAction(action));
     lines.push('');
-    for (const assertion of plan.assertions || []) lines.push(v4.emitAssertion(assertion));
+    for (const assertion of plan.assertions || []) lines.push(emitAssertion(assertion));
     lines.push('  });', '');
   }
   lines.push('});', '');
@@ -91,6 +114,7 @@ function generateDeterministicAutomation(approvedTestCases = []) {
 module.exports = {
   ...v5,
   emitAction,
+  emitAssertion,
   generateCypressPreviewFromPlan,
   generateDeterministicAutomation,
 };
