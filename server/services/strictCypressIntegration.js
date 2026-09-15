@@ -5,6 +5,7 @@ const { validateNavigationContract } = require('./navigationContract');
 const { validateDeterministicStateContract } = require('./deterministicStateContract');
 const { validateStaticExpectationContract } = require('./staticExpectationContract');
 const { validateHtmlCapabilityContract, assertHtmlRuntimePrerequisites } = require('./htmlCapabilityContract');
+const { validateHtmlCompiledAlignment } = require('./htmlCompiledAlignmentContract');
 const { buildCanonicalElementRegistry } = require('./canonicalElementRegistry');
 const {
   validateStrictGeneratedArtifact,
@@ -42,7 +43,8 @@ function strictFailure(testCase, strict, extra = {}) {
       stateContract: extra.stateContract ?? testCase?.automationReadiness?.stateContract ?? null,
       staticExpectationContract: extra.staticExpectationContract ?? testCase?.automationReadiness?.staticExpectationContract ?? null,
       htmlCapabilityContract: extra.htmlCapabilityContract ?? testCase?.automationReadiness?.htmlCapabilityContract ?? null,
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+html-capability-contract+strict-artifact-contract',
+      htmlCompiledAlignmentContract: extra.htmlCompiledAlignmentContract ?? testCase?.automationReadiness?.htmlCompiledAlignmentContract ?? null,
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+html-capability-contract+html-compiled-alignment+strict-artifact-contract',
     },
   };
 }
@@ -98,6 +100,18 @@ function attachStrictContract(testCase, context) {
     });
   }
 
+  const htmlCompiledAlignmentContract = validateHtmlCompiledAlignment(testCase);
+  if (!htmlCompiledAlignmentContract.ok) {
+    return strictFailure(testCase, htmlCompiledAlignmentContract, {
+      webScenarioPolicy: scenarioPolicy,
+      navigationContract,
+      stateContract,
+      staticExpectationContract,
+      htmlCapabilityContract,
+      htmlCompiledAlignmentContract,
+    });
+  }
+
   const strict = validateCypressContract(testCase, { ...context, canonicalElementRegistry: registry });
   if (!strict.ok) {
     return strictFailure(testCase, strict, {
@@ -106,6 +120,7 @@ function attachStrictContract(testCase, context) {
       stateContract,
       staticExpectationContract,
       htmlCapabilityContract,
+      htmlCompiledAlignmentContract,
       cypressContract: strict,
     });
   }
@@ -118,6 +133,7 @@ function attachStrictContract(testCase, context) {
       stateContract,
       staticExpectationContract,
       htmlCapabilityContract,
+      htmlCompiledAlignmentContract,
       cypressContract: strict,
       generatedArtifactContract,
     });
@@ -131,7 +147,7 @@ function attachStrictContract(testCase, context) {
       reasonCode: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED',
       reason: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.',
       errors: [{ code: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED', message: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.' }],
-    }, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract, staticExpectationContract, htmlCapabilityContract, cypressContract: strict, generatedArtifactContract });
+    }, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract, staticExpectationContract, htmlCapabilityContract, htmlCompiledAlignmentContract, cypressContract: strict, generatedArtifactContract });
   }
 
   return {
@@ -145,6 +161,7 @@ function attachStrictContract(testCase, context) {
       stateContract,
       staticExpectationContract,
       htmlCapabilityContract,
+      htmlCompiledAlignmentContract,
       contractIntegrity: {
         ...(testCase.automationReadiness?.contractIntegrity || {}),
         cypressArtifactHash: strict.scriptHash,
@@ -154,8 +171,9 @@ function attachStrictContract(testCase, context) {
         stateValidatorVersion: stateContract.version,
         staticExpectationValidatorVersion: staticExpectationContract.version,
         htmlCapabilityValidatorVersion: htmlCapabilityContract.version,
+        htmlCompiledAlignmentValidatorVersion: htmlCompiledAlignmentContract.version,
       },
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+html-capability-contract+strict-artifact-contract',
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+html-capability-contract+html-compiled-alignment+strict-artifact-contract',
     },
   };
 }
