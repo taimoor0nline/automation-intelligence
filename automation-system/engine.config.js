@@ -115,6 +115,14 @@ module.exports = defineConfig({
       REST_AUTH_USERNAME: process.env.REST_AUTH_USERNAME || "",
       REST_AUTH_SECRET: process.env.REST_AUTH_SECRET || "",
       REST_AUTH_HEADER: process.env.REST_AUTH_HEADER || "",
+      // Rendered discovery runs in an isolated browser process. Map its process-level
+      // inputs explicitly into Cypress.env() instead of relying on implicit CYPRESS_*
+      // promotion, because this config owns a strict env object for deterministic runs.
+      DISCOVERY_ENABLED: boolEnv(process.env.CYPRESS_DISCOVERY_ENABLED, false),
+      DISCOVERY_TARGET_URLS_JSON: process.env.CYPRESS_DISCOVERY_TARGET_URLS_JSON || "[]",
+      DISCOVERY_OUTPUT_FILE: process.env.CYPRESS_DISCOVERY_OUTPUT_FILE || "",
+      DISCOVERY_PAGE_SCOPE: process.env.CYPRESS_DISCOVERY_PAGE_SCOPE || "ALL_DISCOVERED_PAGES",
+      DISCOVERY_MAX_PAGES: Math.max(1, Math.min(numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6), 12)),
       DEMO_STEP_DELAY_MS: Math.max(0, Math.min(numberEnv(process.env.DEMO_STEP_DELAY_MS, 0), 3000)),
       SCREENSHOT_EACH_TEST: boolEnv(process.env.AUTOMATION_SCREENSHOT_EACH_TEST, true),
       TEST_COMPLETION_PAUSE_MS: Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS, 5000), 30000)),
