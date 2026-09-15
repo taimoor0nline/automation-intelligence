@@ -6,6 +6,7 @@ require('../server/services/runtimeHardeningPatches').install();
 const { buildCanonicalElementRegistry } = require('../server/services/canonicalElementRegistry');
 const { validateCanonicalIr } = require('../server/services/canonicalTestIrV3');
 const { validateCypressContract } = require('../server/services/cypressContractValidator');
+const { validateNavigationContract } = require('../server/services/navigationContract');
 
 const pageDiscoveries = [{
   url: 'https://example.test/form',
@@ -83,7 +84,7 @@ assert.equal(validResultA.ok, true, JSON.stringify(validResultA.errors));
 assert.equal(validResultA.scriptHash, validResultB.scriptHash, 'same reviewed contract must generate the same Cypress artifact hash');
 
 // Canonical compilation still understands CHECK/UNCHECK generically, but the strict
-// Cypress semantic gate must reject .uncheck() against a radio before Automation Ready.
+// semantic gate must reject .uncheck() against a radio before Automation Ready.
 const radioCase = compileCase({
   id: 'TC002',
   title: 'Force radio group to no selection',
@@ -121,5 +122,74 @@ const integrationCase = compileCase({
 const integrationResult = strict(integrationCase);
 assert.equal(integrationResult.ok, false);
 assert.equal(integrationResult.reasonCode, 'CYPRESS_CATEGORY_CONTRACT_MISMATCH');
+
+// Navigation contracts are page and link specific. A Help link must never be
+// combined with the Forgot Password destination simply because both paths exist.
+const navigationPages = [
+  {
+    url: 'https://example.test/login', finalUrl: 'https://example.test/login', pageTitle: 'Login',
+    elements: [
+      { tag: 'a', type: 'a', selector: 'a.nav-link', text: 'Help', label: 'Help', href: '/help' },
+      { tag: 'a', type: 'a', selector: 'a[href="/forgot-password"]', text: 'Forgot password', label: 'Forgot password', href: '/forgot-password' },
+    ], messages: [], networkHints: [], browserState: { cookieNames: [], localStorageKeys: [], sessionStorageKeys: [] },
+  },
+  {
+    url: 'https://example.test/help', finalUrl: 'https://example.test/help', pageTitle: 'Help',
+    elements: [{ tag: 'a', type: 'a', selector: 'a.nav-link', text: 'Login', label: 'Login', href: '/login' }],
+    messages: [], networkHints: [], browserState: { cookieNames: [], localStorageKeys: [], sessionStorageKeys: [] },
+  },
+  {
+    url: 'https://example.test/forgot-password', finalUrl: 'https://example.test/forgot-password', pageTitle: 'Forgot Password',
+    elements: [], messages: [], networkHints: [], browserState: { cookieNames: [], localStorageKeys: [], sessionStorageKeys: [] },
+  },
+];
+const navigationRegistry = buildCanonicalElementRegistry(navigationPages);
+const loginHelp = navigationRegistry.elements.find((item) => item.path === '/login' && item.text === 'Help');
+const helpLogin = navigationRegistry.elements.find((item) => item.path === '/help' && item.text === 'Login');
+assert(loginHelp, 'login Help link must be in registry');
+assert(helpLogin, 'help Login link must be in registry');
+assert.equal(loginHelp.destinationPath, '/help');
+assert.equal(helpLogin.destinationPath, '/login');
+assert.notEqual(loginHelp.elementRef, helpLogin.elementRef, 'same selector on different pages must remain distinct registry elements');
+
+const wrongDestination = validateNavigationContract({
+  actions: [
+    { operation: 'NAVIGATE', path: '/login' },
+    { operation: 'CLICK', elementRef: loginHelp.elementRef },
+  ],
+  assertions: [{ operation: 'ASSERT_PATH_EQUALS', path: '/forgot-password' }],
+}, navigationRegistry);
+assert.equal(wrongDestination.some((item) => item.code === 'AUTOMATION_NAVIGATION_EXPECTATION_MISMATCH'), true, JSON.stringify(wrongDestination));
+
+const correctDestination = validateNavigationContract({
+  actions: [
+    { operation: 'NAVIGATE', path: '/login' },
+    { operation: 'CLICK', elementRef: loginHelp.elementRef },
+  ],
+  assertions: [{ operation: 'ASSERT_PATH_EQUALS', path: '/help' }],
+}, navigationRegistry);
+assert.equal(correctDestination.length, 0, JSON.stringify(correctDestination));
+
+const wrongPageElement = validateNavigationContract({
+  actions: [
+    { operation: 'NAVIGATE', path: '/login' },
+    { operation: 'CLICK', elementRef: loginHelp.elementRef },
+    { operation: 'CLICK', elementRef: loginHelp.elementRef },
+  ],
+  assertions: [{ operation: 'ASSERT_PATH_EQUALS', path: '/help' }],
+}, navigationRegistry);
+assert.equal(wrongPageElement.some((item) => item.code === 'AUTOMATION_ACTION_PAGE_CONTEXT_MISMATCH'), true, JSON.stringify(wrongPageElement));
+
+const conflictingFinalPaths = validateNavigationContract({
+  actions: [
+    { operation: 'NAVIGATE', path: '/login' },
+    { operation: 'CLICK', elementRef: loginHelp.elementRef },
+  ],
+  assertions: [
+    { operation: 'ASSERT_PATH_EQUALS', path: '/help' },
+    { operation: 'ASSERT_PATH_EQUALS', path: '/forgot-password' },
+  ],
+}, navigationRegistry);
+assert.equal(conflictingFinalPaths.some((item) => item.code === 'AUTOMATION_CONFLICTING_FINAL_LOCATION_ASSERTIONS'), true, JSON.stringify(conflictingFinalPaths));
 
 console.log('strict-cypress-contract-smoke: PASS');
