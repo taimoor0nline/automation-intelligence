@@ -1,6 +1,7 @@
 const assert = require('assert');
 
 const { buildCanonicalElementRegistry, registryForModel } = require('../server/services/canonicalElementRegistry');
+const { validateCanonicalIr } = require('../server/services/canonicalTestIrV3');
 const { validateHtmlCapabilityContract } = require('../server/services/htmlCapabilityContract');
 const { validateHtmlCompiledAlignment } = require('../server/services/htmlCompiledAlignmentContract');
 const generator = require('../server/services/deterministicAutomationGeneratorV6');
@@ -103,6 +104,24 @@ function validate(actions, assertions = []) {
 }
 function assertOk(result) { assert.equal(result.ok, true, JSON.stringify(result.errors)); }
 function assertCode(result, code) { assert.equal(result.ok, false, 'expected contract rejection'); assert(result.errors.some((item) => item.code === code), JSON.stringify(result.errors)); }
+function compile(action, plannedId, objective) {
+  const validation = validateCanonicalIr({
+    version: 1,
+    plannedId,
+    objective,
+    actions: [{ operation: 'NAVIGATE', path: '/capabilities' }, action],
+    assertions: [{ operation: 'ASSERT_VISIBLE', elementRef: action.elementRef }],
+  }, {
+    registry,
+    plannedUnit: { plannedId, objective },
+    story: objective,
+    hasCredentials: false,
+    actorCatalog: [],
+    actorCredentialRefs: [],
+  });
+  assert.equal(validation.ok, true, validation.reason || JSON.stringify(validation.errors));
+  return validation.plan.actions[1];
+}
 
 assertOk(validate([{ operation: 'TYPE', elementRef: element('default-input').elementRef, value: 'hello' }]));
 assertOk(validate([{ operation: 'TYPE', elementRef: element('date').elementRef, value: '2026-09-15' }]));
@@ -130,6 +149,17 @@ assertCode(validate([{ operation: 'TYPE', elementRef: element('content').element
 assertOk(validate([], [{ operation: 'ASSERT_TEXT_CONTAINS', elementRef: element('heading').elementRef, text: 'Capability' }]));
 assertOk(validate([], [{ operation: 'ASSERT_IMAGE_LOADED', elementRef: element('image').elementRef }]));
 assertCode(validate([], [{ operation: 'ASSERT_IMAGE_LOADED', elementRef: element('content').elementRef }]), 'HTML_ASSERTION_CAPABILITY_MISMATCH');
+
+const compiledRange = compile({ operation: 'SET_RANGE_VALUE', elementRef: element('range').elementRef, value: '50' }, 'P901', 'Set the discovered range control value');
+assert.equal(compiledRange.operation, 'SET_RANGE_VALUE');
+assert.equal(compiledRange.selector, '#range');
+assert.equal(compiledRange.value, '50');
+const compiledDrop = compile({ operation: 'DROP_FILE', elementRef: element('file-drop').elementRef, fileName: 'sample.svg' }, 'P902', 'Drop an approved image file on the discovered file drop area');
+assert.equal(compiledDrop.operation, 'DROP_FILE');
+assert.equal(compiledDrop.fileName, 'sample.svg');
+const compiledMulti = compile({ operation: 'SELECT_FILES', elementRef: element('multi-file').elementRef, fileNames: ['sample.txt', 'sample.svg'] }, 'P903', 'Select multiple approved files on the discovered multi file input');
+assert.equal(compiledMulti.operation, 'SELECT_FILES');
+assert.deepEqual(compiledMulti.fileNames, ['sample.txt', 'sample.svg']);
 
 const alignedFiles = validateHtmlCompiledAlignment({
   canonicalIr: { actions: [{ operation: 'SELECT_FILES', elementRef: element('multi-file').elementRef, fileNames: ['sample.txt', 'sample.svg'] }] },
