@@ -18,6 +18,31 @@ const LIVE_INFO_FILE = process.env.AUTOMATION_CDP_INFO_FILE || path.join(__dirna
 const LIVE_STATE_FILE = process.env.AUTOMATION_LIVE_STATE_FILE || path.join(__dirname, "artifacts", "live-browser-state.json");
 const AUTOMATION_RUN_ID = String(process.env.AUTOMATION_RUN_ID || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
 
+function runtimeEnv(existing = {}) {
+  return {
+    ...(existing || {}),
+    TEST_USERNAME: process.env.TEST_USERNAME || existing.TEST_USERNAME || "",
+    TEST_PASSWORD: process.env.TEST_PASSWORD || existing.TEST_PASSWORD || "",
+    TEST_ACTORS_JSON: process.env.TEST_ACTORS_JSON || existing.TEST_ACTORS_JSON || "{}",
+    LOGIN_PATH: process.env.LOGIN_PATH || existing.LOGIN_PATH || "/",
+    LOGIN_USERNAME_SELECTOR: process.env.LOGIN_USERNAME_SELECTOR || existing.LOGIN_USERNAME_SELECTOR || "",
+    LOGIN_PASSWORD_SELECTOR: process.env.LOGIN_PASSWORD_SELECTOR || existing.LOGIN_PASSWORD_SELECTOR || "",
+    LOGIN_SUBMIT_SELECTOR: process.env.LOGIN_SUBMIT_SELECTOR || existing.LOGIN_SUBMIT_SELECTOR || "",
+    REST_AUTH_TYPE: process.env.REST_AUTH_TYPE || existing.REST_AUTH_TYPE || "NONE",
+    REST_AUTH_USERNAME: process.env.REST_AUTH_USERNAME || existing.REST_AUTH_USERNAME || "",
+    REST_AUTH_SECRET: process.env.REST_AUTH_SECRET || existing.REST_AUTH_SECRET || "",
+    REST_AUTH_HEADER: process.env.REST_AUTH_HEADER || existing.REST_AUTH_HEADER || "",
+    DISCOVERY_ENABLED: boolEnv(process.env.CYPRESS_DISCOVERY_ENABLED, Boolean(existing.DISCOVERY_ENABLED)),
+    DISCOVERY_TARGET_URLS_JSON: process.env.CYPRESS_DISCOVERY_TARGET_URLS_JSON || existing.DISCOVERY_TARGET_URLS_JSON || "[]",
+    DISCOVERY_OUTPUT_FILE: process.env.CYPRESS_DISCOVERY_OUTPUT_FILE || existing.DISCOVERY_OUTPUT_FILE || "",
+    DISCOVERY_PAGE_SCOPE: process.env.CYPRESS_DISCOVERY_PAGE_SCOPE || existing.DISCOVERY_PAGE_SCOPE || "ALL_DISCOVERED_PAGES",
+    DISCOVERY_MAX_PAGES: Math.max(1, Math.min(numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, Number(existing.DISCOVERY_MAX_PAGES) || 6), 12)),
+    DEMO_STEP_DELAY_MS: Math.max(0, Math.min(numberEnv(process.env.DEMO_STEP_DELAY_MS, Number(existing.DEMO_STEP_DELAY_MS) || 0), 3000)),
+    SCREENSHOT_EACH_TEST: boolEnv(process.env.AUTOMATION_SCREENSHOT_EACH_TEST, existing.SCREENSHOT_EACH_TEST ?? true),
+    TEST_COMPLETION_PAUSE_MS: Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS, Number(existing.TEST_COMPLETION_PAUSE_MS) || 5000), 30000)),
+  };
+}
+
 function writeJsonAtomic(filePath, payload) {
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -103,31 +128,13 @@ module.exports = defineConfig({
     downloadsFolder: "artifacts/downloads",
     video: boolEnv(process.env.AUTOMATION_VIDEO, false),
     screenshotOnRunFailure: boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true),
-    env: {
-      TEST_USERNAME: process.env.TEST_USERNAME || "",
-      TEST_PASSWORD: process.env.TEST_PASSWORD || "",
-      TEST_ACTORS_JSON: process.env.TEST_ACTORS_JSON || "{}",
-      LOGIN_PATH: process.env.LOGIN_PATH || "/",
-      LOGIN_USERNAME_SELECTOR: process.env.LOGIN_USERNAME_SELECTOR || "",
-      LOGIN_PASSWORD_SELECTOR: process.env.LOGIN_PASSWORD_SELECTOR || "",
-      LOGIN_SUBMIT_SELECTOR: process.env.LOGIN_SUBMIT_SELECTOR || "",
-      REST_AUTH_TYPE: process.env.REST_AUTH_TYPE || "NONE",
-      REST_AUTH_USERNAME: process.env.REST_AUTH_USERNAME || "",
-      REST_AUTH_SECRET: process.env.REST_AUTH_SECRET || "",
-      REST_AUTH_HEADER: process.env.REST_AUTH_HEADER || "",
-      // Rendered discovery runs in an isolated browser process. Map its process-level
-      // inputs explicitly into Cypress.env() instead of relying on implicit CYPRESS_*
-      // promotion, because this config owns a strict env object for deterministic runs.
-      DISCOVERY_ENABLED: boolEnv(process.env.CYPRESS_DISCOVERY_ENABLED, false),
-      DISCOVERY_TARGET_URLS_JSON: process.env.CYPRESS_DISCOVERY_TARGET_URLS_JSON || "[]",
-      DISCOVERY_OUTPUT_FILE: process.env.CYPRESS_DISCOVERY_OUTPUT_FILE || "",
-      DISCOVERY_PAGE_SCOPE: process.env.CYPRESS_DISCOVERY_PAGE_SCOPE || "ALL_DISCOVERED_PAGES",
-      DISCOVERY_MAX_PAGES: Math.max(1, Math.min(numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6), 12)),
-      DEMO_STEP_DELAY_MS: Math.max(0, Math.min(numberEnv(process.env.DEMO_STEP_DELAY_MS, 0), 3000)),
-      SCREENSHOT_EACH_TEST: boolEnv(process.env.AUTOMATION_SCREENSHOT_EACH_TEST, true),
-      TEST_COMPLETION_PAUSE_MS: Math.max(0, Math.min(numberEnv(process.env.AUTOMATION_TEST_COMPLETION_PAUSE_MS, 5000), 30000)),
-    },
+    env: runtimeEnv(),
     setupNodeEvents(on, config) {
+      // setupNodeEvents is the authoritative env bridge for browser specs. This
+      // avoids relying on implicit CYPRESS_* promotion and keeps discovery inputs
+      // deterministic even when the project config owns an explicit env object.
+      config.env = runtimeEnv(config.env || {});
+
       on("task", {
         markTestStarted(details = {}) {
           publishLiveState("running", {
