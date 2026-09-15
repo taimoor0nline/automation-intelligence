@@ -85,8 +85,8 @@ const contract = validateSuggestionCapabilityContract(testCase, registry, { stor
 assert.equal(contract.ok, true, JSON.stringify(contract.errors));
 
 const generated = generator.generateDeterministicAutomation([testCase]);
-assert(generated.script.includes("#site-results"), generated.script);
-assert(generated.script.includes("[role=\"option\"]") || generated.script.includes("[role=\\\"option\\\"]") || generated.script.includes('[role="option"]'), generated.script);
+assert(generated.script.includes('#site-results'), generated.script);
+assert(generated.script.includes('[role="option"]') || generated.script.includes('[role=\\"option\\"]'), generated.script);
 assert(generated.script.includes('Documents'), generated.script);
 assert(generated.script.includes('Laravel'), generated.script);
 assert(generated.script.includes('Vue'), generated.script);
@@ -95,13 +95,13 @@ const inventedIr = {
   version: 1,
   plannedId: 'P-INVENTED',
   actions: [{ operation: 'SELECT_SUGGESTION', elementRef: country.elementRef, value: 'Atlantis' }],
-  assertions: [],
+  assertions: [{ operation: 'ASSERT_EXISTS', elementRef: country.elementRef }],
 };
 const inventedCompiled = validateCanonicalIr(inventedIr, { registry, story: 'Select a country', hasCredentials: false });
 assert.equal(inventedCompiled.ok, true, inventedCompiled.errors?.join('\n'));
 const inventedCase = {
   id: 'TC-INVENTED', title: 'Invented option must be blocked', generationStory: 'Select a country', canonicalIr: inventedIr,
-  automationReadiness: { status: 'READY', automationPlan: inventedCompiled.plan }, expectedResults: [], preconditions: [], testData: {},
+  automationReadiness: { status: 'READY', automationPlan: inventedCompiled.plan }, expectedResults: inventedCompiled.display.expectedResults, preconditions: [], testData: {},
 };
 const inventedContract = validateSuggestionCapabilityContract(inventedCase, registry, { story: 'Select a country' });
 assert.equal(inventedContract.ok, false);
@@ -122,11 +122,11 @@ assert.equal(employee.suggestions.length, 0);
 const dynamicIr = { version: 1, plannedId: 'P-ASYNC', actions: [
   { operation: 'SEARCH_SUGGESTIONS', elementRef: employee.elementRef, query: 'Sara' },
   { operation: 'SELECT_SUGGESTION', elementRef: employee.elementRef, value: 'Sara Khan' },
-], assertions: [] };
+], assertions: [{ operation: 'ASSERT_VALUE_EQUALS', elementRef: employee.elementRef, value: 'Sara Khan' }] };
 const dynamicStory = 'Search employee Sara and select Sara Khan.';
 const dynamicCompiled = validateCanonicalIr(dynamicIr, { registry: dynamicRegistry, story: dynamicStory, hasCredentials: false });
 assert.equal(dynamicCompiled.ok, true, dynamicCompiled.errors?.join('\n'));
-const dynamicCase = { id: 'TC-ASYNC', title: 'Async suggestion from approved story data', generationStory: dynamicStory, canonicalIr: dynamicIr, expectedResults: [], preconditions: [], testData: { employee: 'Sara Khan' }, automationReadiness: { status: 'READY', automationPlan: dynamicCompiled.plan } };
+const dynamicCase = { id: 'TC-ASYNC', title: 'Async suggestion from approved story data', generationStory: dynamicStory, canonicalIr: dynamicIr, expectedResults: dynamicCompiled.display.expectedResults, preconditions: [], testData: { employee: 'Sara Khan' }, automationReadiness: { status: 'READY', automationPlan: dynamicCompiled.plan } };
 assert.equal(validateSuggestionCapabilityContract(dynamicCase, dynamicRegistry, { story: dynamicStory }).ok, true);
 
 console.log('searchable-suggestions-smoke: PASS');
