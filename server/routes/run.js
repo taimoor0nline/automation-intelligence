@@ -15,6 +15,7 @@ const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional",
 const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
 const LOGIN_SCOPE_FORBIDDEN_ANALYSIS = /\b(feedback|website|url|age|rating|consent|product|category|checkout|payment|cart|profile)\b/i;
 const RUNNABLE_STATES = new Set(["AWAITING_APPROVAL", "DONE"]);
+const RUNTIME_ITEM_MARKER = /\[TN_ITEM=(TC(?:\d{3}|-H\d{3})-(ACT|ASRT)-(\d{3});KIND=(ACTION|ASSERTION);OP=([A-Z0-9_]+)\]/i;
 
 function cleanString(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
@@ -81,7 +82,22 @@ function configuredActorRefs(session) {
     .map(([actorRef]) => actorRef);
 }
 
+function runtimeItemFor(test) {
+  const message = String(test?.err?.message || "");
+  const match = message.match(RUNTIME_ITEM_MARKER);
+  if (!match) return null;
+  return {
+    itemId: match[1].toUpperCase(),
+    family: match[2].toUpperCase(),
+    index: Math.max(0, Number(match[3]) - 1),
+    kind: match[4].toUpperCase(),
+    operation: match[5].toUpperCase(),
+  };
+}
+
 function isPreExecutionAutomationFailure(test) {
+  const runtimeItem = runtimeItemFor(test);
+  if (runtimeItem?.kind === "ACTION") return true;
   const message = String(test?.err?.message || "");
   return /runtime login credentials are not configured|runtime credentials are not configured for test actor|runtime login controls were not grounded|allowCypressEnv|returned a promise from a command|invalid automation command|command usage|script.*(?:syntax|validation)|failed before test execution|could not verify that this server is running|browser.*(?:failed|closed|crashed)|support file.*(?:error|failed)/i.test(message);
 }
@@ -91,11 +107,12 @@ function automationFailureAnalysis(tc, test) {
   const actual = test.err?.message || "The automation runtime failed before meaningful application validation completed.";
   return {
     testCase: tc.id,
-    summary: "The test case was Automation Ready, but the automation runtime failed before meaningful application validation completed.",
+    summary: "The approved browser test encountered an action/runtime failure before a deterministic application assertion completed.",
     classification: "AUTOMATION_DEFECT",
     expected,
     actual,
-    probableCause: "A runtime or framework implementation problem prevented the approved test from reaching meaningful application validation.",
+    failedRuntimeItem: runtimeItemFor(test),
+    probableCause: "A runtime action, live selector contract, configured capability or framework implementation prevented the approved test from reaching meaningful application validation.",
     severity: "medium",
     confidence: 0.99,
   };
@@ -103,19 +120,21 @@ function automationFailureAnalysis(tc, test) {
 
 function failedAssertionFor(tc, test) {
   const assertions = tc?.automationReadiness?.automationPlan?.assertions || [];
+  const runtimeItem = runtimeItemFor(test);
+  if (runtimeItem) {
+    if (runtimeItem.kind !== "ASSERTION") return null;
+    const exact = assertions[runtimeItem.index] || null;
+    if (!exact) return null;
+    return String(exact.operation || "").toUpperCase() === runtimeItem.operation ? exact : null;
+  }
+
+  // Legacy-run compatibility only. Execution Contract V2 emits an exact runtime
+  // assertion marker, so new runs do not depend on English error-message guessing.
   const message = String(test?.err?.message || "");
-  if (/not to be empty|to not be empty|expected '' not to be empty/i.test(message)) {
-    return assertions.find((item) => item.operation === "ASSERT_TEXT_NOT_EMPTY") || null;
-  }
-  if (/be visible|to be visible/i.test(message)) {
-    return assertions.find((item) => item.operation === "ASSERT_VISIBLE") || null;
-  }
-  if (/url/i.test(message)) {
-    return assertions.find((item) => item.operation === "ASSERT_URL_INCLUDES" || item.operation === "ASSERT_URL_NOT_INCLUDES") || null;
-  }
-  if (/hidden|not exist|not be visible/i.test(message)) {
-    return assertions.find((item) => item.operation === "ASSERT_HIDDEN_OR_ABSENT") || null;
-  }
+  if (/not to be empty|to not be empty|expected '' not to be empty/i.test(message)) return assertions.find((item) => item.operation === "ASSERT_TEXT_NOT_EMPTY") || null;
+  if (/be visible|to be visible/i.test(message)) return assertions.find((item) => item.operation === "ASSERT_VISIBLE") || null;
+  if (/url/i.test(message)) return assertions.find((item) => item.operation === "ASSERT_URL_INCLUDES" || item.operation === "ASSERT_URL_NOT_INCLUDES") || null;
+  if (/hidden|not exist|not be visible/i.test(message)) return assertions.find((item) => item.operation === "ASSERT_HIDDEN_OR_ABSENT") || null;
   return assertions.length === 1 ? assertions[0] : null;
 }
 
@@ -127,15 +146,15 @@ function describeObservedFailure(tc, test) {
 
   switch (assertion.operation) {
     case "ASSERT_TEXT_NOT_EMPTY":
-      return `The deterministic test reached its assertion phase. Expected ${target} to contain non-empty validation text, but it remained empty until the assertion timed out. Runtime message: ${raw}`;
+      return `The deterministic test reached its exact assertion item. Expected ${target} to contain non-empty validation text, but it remained empty until the assertion timed out. Runtime message: ${raw}`;
     case "ASSERT_VISIBLE":
-      return `The deterministic test reached its assertion phase. Expected ${target} to be visible, but the visibility assertion failed. Runtime message: ${raw}`;
+      return `The deterministic test reached its exact assertion item. Expected ${target} to be visible, but the visibility assertion failed. Runtime message: ${raw}`;
     case "ASSERT_HIDDEN_OR_ABSENT":
-      return `The deterministic test reached its assertion phase. Expected ${target} to remain hidden or absent, but that assertion failed. Runtime message: ${raw}`;
+      return `The deterministic test reached its exact assertion item. Expected ${target} to remain hidden or absent, but that assertion failed. Runtime message: ${raw}`;
     case "ASSERT_URL_INCLUDES":
-      return `The deterministic test reached its assertion phase. Expected the current URL to include ${target}, but the URL assertion failed. Runtime message: ${raw}`;
+      return `The deterministic test reached its exact assertion item. Expected the current URL to include ${target}, but the URL assertion failed. Runtime message: ${raw}`;
     case "ASSERT_URL_NOT_INCLUDES":
-      return `The deterministic test reached its assertion phase. Expected the current URL not to include ${target}, but the URL assertion failed. Runtime message: ${raw}`;
+      return `The deterministic test reached its exact assertion item. Expected the current URL not to include ${target}, but the URL assertion failed. Runtime message: ${raw}`;
     default:
       return raw;
   }
@@ -143,12 +162,14 @@ function describeObservedFailure(tc, test) {
 
 function deterministicFinding(tc, test) {
   if (!test?.fail) return null;
+  const runtimeItem = runtimeItemFor(test);
   if (isPreExecutionAutomationFailure(test)) {
     return {
       testCase: tc.id,
       category: "AUTOMATION_RUNTIME_FAILURE",
       expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
       observed: test.err?.message || "Automation runtime failed before application validation.",
+      failedRuntimeItem: runtimeItem,
       aiRecommended: false,
     };
   }
@@ -160,6 +181,7 @@ function deterministicFinding(tc, test) {
     category: assertion ? "APPLICATION_BEHAVIOR_MISMATCH" : "ASSERTION_FAILURE",
     expected: Array.isArray(tc.expectedResults) ? tc.expectedResults.join("; ") : "",
     observed,
+    failedRuntimeItem: runtimeItem,
     failedAssertion: assertion || null,
     aiRecommended: !assertion,
   };
@@ -312,9 +334,7 @@ router.post("/api/test-results/analyze", async (req, res) => {
     if (session.state === "RUNNING") return res.status(409).json({ reply: "Automation is still running. AI analysis is available only after browser execution completes." });
 
     const failedCount = Number(session.lastResults.summary.failed || 0);
-    if (!failedCount) {
-      return res.json({ ok: true, failureAnalyses: [], summary: session.lastResults.summary, analysisNeeded: false });
-    }
+    if (!failedCount) return res.json({ ok: true, failureAnalyses: [], summary: session.lastResults.summary, analysisNeeded: false });
 
     const modelTier = session.aiModelTier || "strong";
     console.log(`[result-analysis] Starting on-demand AI analysis for ${failedCount} failed test(s) using profile=${modelTier}.`);
@@ -458,7 +478,7 @@ router.post("/api/chat", async (req, res, next) => {
     console.log(`[readiness] ${approvedTestCases.length}/${approvedTestCases.length} approved case(s) compiled and are Automation Ready.`);
     console.log(`[runtime-preflight] Grounded login path: ${executionContext.loginPath}`);
     console.log(`[runtime-preflight] Configured role actors: ${actorRefs.length}`);
-    console.log(`[automation-contract] Building deterministic runtime from ${approvedTestCases.length} compiled test plan(s).`);
+    console.log(`[automation-contract] Loading ${approvedTestCases.length} human-approved deterministic execution artifact(s).`);
 
     const generated = generateDeterministicAutomation(approvedTestCases);
     const validation = validateGroundedScript(generated.script, {
@@ -470,15 +490,15 @@ router.post("/api/chat", async (req, res, next) => {
       frameworkOwnedSelectors: ["body"],
     });
     if (!validation.valid) {
-      console.error(`[automation-contract] Deterministic generator produced an invalid script: ${validation.errors.join(" | ")}`);
+      console.error(`[automation-contract] Approved execution artifact failed source validation: ${validation.errors.join(" | ")}`);
       return res.status(500).json({
-        reply: "The deterministic automation compiler produced an invalid runtime script. Execution was not started.",
+        reply: "The approved deterministic automation artifact failed source validation. Execution was not started.",
         validationErrors: validation.errors,
         automationReadiness: session.automationReadiness,
       });
     }
 
-    console.log("[automation-contract] Deterministic runtime script validated successfully; no AI code-generation step was required.");
+    console.log(`[automation-contract] Exact approved runtime source validated successfully (mode=${generated.generationMode}).`);
     console.log("[execution] Browser execution is deterministic. No AI calls will be made until execution is complete and the user explicitly requests result analysis.");
 
     const runNumber = (session.runHistory?.length || 0) + 1;
@@ -593,7 +613,7 @@ router.post("/api/chat", async (req, res, next) => {
       analysisPending: summary.failed > 0,
       analysisUrl: summary.failed > 0 ? "/api/test-results/analyze" : null,
       automationReadiness: session.automationReadiness,
-      runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath, actorCount: actorRefs.length, generationMode: "deterministic-dsl-v6-canonical-actors" },
+      runtimePreflight: { status: "PASSED", loginPath: executionContext.loginPath, actorCount: actorRefs.length, generationMode: generated.generationMode },
       aiModelTier: modelTier,
       reportUrl: `/api/reports/${encodeURIComponent(sessionId)}`,
       generatedFile: generated.fileName,
