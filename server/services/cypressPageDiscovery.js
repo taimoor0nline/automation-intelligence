@@ -1,9 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
+const { promisify } = require('util');
 const requestContext = require('./requestContext');
+const { cleanupAutomationBrowsers } = require('./browserProcessCleanup');
 
+const execFileAsync = promisify(execFile);
 const AUTOMATION_DIR = path.join(__dirname, '..', '..', 'automation-system');
 const CYPRESS_BIN = path.join(AUTOMATION_DIR, 'node_modules', 'cypress', 'bin', 'cypress');
 const ENGINE_CONFIG = path.join(AUTOMATION_DIR, 'engine.config.js');
@@ -39,7 +42,18 @@ function normalizeSeeds(urls = []) {
   return output;
 }
 
-function runProcess(args, env, timeoutMs) {
+async function terminateProcessTree(child) {
+  if (!child?.pid) return;
+  if (process.platform === 'win32') {
+    try {
+      await execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 10000 });
+      return;
+    } catch {}
+  }
+  try { child.kill('SIGTERM'); } catch {}
+}
+
+function runProcess(args, env, timeoutMs, runId) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       cwd: AUTOMATION_DIR,
@@ -50,24 +64,31 @@ function runProcess(args, env, timeoutMs) {
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { child.kill('SIGTERM'); } catch {}
-      const error = new Error(`Rendered browser discovery timed out after ${Math.round(timeoutMs / 1000)}s.`);
-      error.code = 'BROWSER_DISCOVERY_TIMEOUT';
-      reject(error);
-    }, timeoutMs);
-    timer.unref?.();
 
-    child.stdout.on('data', (chunk) => { stdout += String(chunk); if (stdout.length > 12000) stdout = stdout.slice(-12000); });
-    child.stderr.on('data', (chunk) => { stderr += String(chunk); if (stderr.length > 12000) stderr = stderr.slice(-12000); });
-    child.on('error', (err) => {
+    const finishError = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      reject(err);
-    });
+      error.stdout = stdout;
+      error.stderr = stderr;
+      reject(error);
+    };
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      const error = new Error(`Rendered browser discovery exceeded its ${Math.round(timeoutMs / 1000)} second overall budget.`);
+      error.code = 'BROWSER_DISCOVERY_TIMEOUT';
+      void (async () => {
+        await terminateProcessTree(child);
+        await cleanupAutomationBrowsers({ runId, reason: 'rendered discovery timeout', log: false, attempts: 3, verifyDelayMs: 250 }).catch(() => {});
+        finishError(error);
+      })();
+    }, timeoutMs);
+    timer.unref?.();
+
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); if (stdout.length > 16000) stdout = stdout.slice(-16000); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); if (stderr.length > 16000) stderr = stderr.slice(-16000); });
+    child.on('error', (err) => finishError(err));
     child.on('close', (code) => {
       if (settled) return;
       settled = true;
@@ -77,13 +98,28 @@ function runProcess(args, env, timeoutMs) {
   });
 }
 
+function readSnapshot(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!payload || !Array.isArray(payload.pages)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function resultTail(resultOrError) {
+  return String(resultOrError?.stderr || resultOrError?.stdout || '').trim().slice(-1800);
+}
+
 async function discoverRenderedPages(urls = [], options = {}) {
   const seeds = normalizeSeeds(urls);
   if (!seeds.length) return [];
   const enabled = boolEnv(process.env.CYPRESS_RENDERED_DISCOVERY, true);
   if (!enabled) return [];
   if (!fs.existsSync(CYPRESS_BIN)) {
-    const error = new Error('Cypress runtime is not installed in automation-system; rendered web discovery is unavailable.');
+    const error = new Error('The browser automation runtime is not installed; rendered web discovery is unavailable.');
     error.code = 'BROWSER_DISCOVERY_RUNTIME_MISSING';
     throw error;
   }
@@ -96,14 +132,18 @@ async function discoverRenderedPages(urls = [], options = {}) {
   const resultFile = path.join(DISCOVERY_DIR, `${token}-runner-result.json`);
   const browser = String(options.browser || process.env.AUTOMATION_BROWSER || 'chrome');
   const pageScope = context.pageScope === 'STARTING_PAGE_ONLY' ? 'STARTING_PAGE_ONLY' : 'ALL_DISCOVERED_PAGES';
-  const timeoutMs = Math.max(30000, Math.min(numberEnv(process.env.CYPRESS_DISCOVERY_TIMEOUT_MS, 60000), 180000));
-  const maxPages = Math.max(1, Math.min(numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6), 12));
+  const maxPages = Math.max(1, Math.min(Number(options.maxPages || numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6)) || 6, 12));
+  const pageLoadTimeoutMs = Math.max(10000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_PAGE_LOAD_TIMEOUT_MS, 30000), 60000));
+  const commandTimeoutMs = Math.max(3000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_COMMAND_TIMEOUT_MS, 8000), 30000));
+  const configuredOverall = numberEnv(process.env.BROWSER_DISCOVERY_TIMEOUT_MS || process.env.CYPRESS_DISCOVERY_TIMEOUT_MS, 90000);
+  const timeoutMs = Math.max(pageLoadTimeoutMs + 30000, Math.min(configuredOverall, 180000));
+  const discoveryRunId = `discovery-${token}`;
 
   const seedJson = JSON.stringify(seeds);
   const outputForCypress = outputRelative.replace(/\\/g, '/');
   const env = {
     ...process.env,
-    AUTOMATION_RUN_ID: `discovery-${token}`,
+    AUTOMATION_RUN_ID: discoveryRunId,
     AUTOMATION_RESULT_FILE: resultFile,
     AUTOMATION_BASE_URL: new URL(seeds[0]).origin,
     AUTOMATION_VIDEO: 'false',
@@ -111,52 +151,75 @@ async function discoverRenderedPages(urls = [], options = {}) {
     AUTOMATION_SCREENSHOT_EACH_TEST: 'false',
     AUTOMATION_TEST_COMPLETION_PAUSE_MS: '0',
     DEMO_STEP_DELAY_MS: '0',
-    // Cypress only automatically imports process environment variables prefixed
-    // with CYPRESS_ into Cypress.env(). Keep discovery inputs framework-owned.
     CYPRESS_DISCOVERY_TARGET_URLS_JSON: seedJson,
     CYPRESS_DISCOVERY_OUTPUT_FILE: outputForCypress,
     CYPRESS_DISCOVERY_PAGE_SCOPE: pageScope,
     CYPRESS_DISCOVERY_MAX_PAGES: String(maxPages),
   };
 
+  const configOverride = [
+    'supportFile=false',
+    `pageLoadTimeout=${pageLoadTimeoutMs}`,
+    `defaultCommandTimeout=${commandTimeoutMs}`,
+    `requestTimeout=${commandTimeoutMs}`,
+    `responseTimeout=${Math.max(commandTimeoutMs, 10000)}`,
+    'retries=0',
+  ].join(',');
+
   const args = [
     CYPRESS_BIN,
     'run',
     '--project', AUTOMATION_DIR,
     '--config-file', ENGINE_CONFIG,
+    '--config', configOverride,
     '--spec', SPEC_RELATIVE,
     '--browser', browser,
     '--headless',
   ];
 
+  let processResult = null;
+  let processError = null;
   try {
     fs.rmSync(outputAbsolute, { force: true });
     fs.rmSync(resultFile, { force: true });
-    const result = await runProcess(args, env, timeoutMs);
-    if (!fs.existsSync(outputAbsolute)) {
-      const tail = String(result.stderr || result.stdout || '').trim().slice(-1800);
-      const error = new Error(`Rendered browser discovery did not produce a DOM snapshot${tail ? `: ${tail}` : '.'}`);
-      error.code = 'BROWSER_DISCOVERY_FAILED';
-      error.exitCode = result.code;
-      throw error;
+    try {
+      processResult = await runProcess(args, env, timeoutMs, discoveryRunId);
+    } catch (err) {
+      processError = err;
     }
-    const payload = JSON.parse(fs.readFileSync(outputAbsolute, 'utf8'));
+
+    const payload = readSnapshot(outputAbsolute);
     const pages = Array.isArray(payload?.pages) ? payload.pages : [];
+
     if (!pages.length) {
-      const error = new Error('Rendered browser discovery completed without any HTML pages.');
-      error.code = 'BROWSER_DISCOVERY_EMPTY';
+      if (processError) throw processError;
+      const tail = resultTail(processResult);
+      const error = new Error(`Rendered browser discovery did not produce a grounded page snapshot${tail ? `: ${tail}` : '.'}`);
+      error.code = 'BROWSER_DISCOVERY_FAILED';
+      error.exitCode = processResult?.code;
       throw error;
     }
+
+    const complete = payload?.complete === true && !processError && Number(processResult?.code || 0) === 0;
+    const warnings = [...new Set([
+      ...(Array.isArray(payload?.warnings) ? payload.warnings.map(String) : []),
+      processError ? `Discovery stopped after ${pages.length} grounded page${pages.length === 1 ? '' : 's'}: ${processError.message}` : null,
+      !processError && Number(processResult?.code || 0) !== 0 ? `Discovery runner exited after ${pages.length} grounded page${pages.length === 1 ? '' : 's'}; remaining public routes were not used for generation.` : null,
+    ].filter(Boolean))];
+
     return pages.map((page, index) => ({
       ...page,
-      discoveryEngine: 'CYPRESS_RENDERED_DOM',
+      discoveryEngine: 'BROWSER_RENDERED_DOM',
       discoveryScope: pageScope,
+      discoveryComplete: complete,
+      discoveryWarnings: warnings,
       isStartingPage: index === 0,
     }));
   } finally {
+    await cleanupAutomationBrowsers({ runId: discoveryRunId, reason: 'rendered discovery completion', log: false, attempts: 3, verifyDelayMs: 200 }).catch(() => {});
     try { fs.rmSync(outputAbsolute, { force: true }); } catch {}
     try { fs.rmSync(resultFile, { force: true }); } catch {}
   }
 }
 
-module.exports = { discoverRenderedPages, normalizeSeeds };
+module.exports = { discoverRenderedPages, normalizeSeeds, readSnapshot };
