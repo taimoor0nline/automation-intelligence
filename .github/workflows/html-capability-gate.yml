@@ -1,0 +1,54 @@
+name: HTML capability gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, live-browser-streaming]
+
+jobs:
+  capability-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install platform and automation runtime
+        run: npm install
+
+      - name: Verify native HTML contracts
+        run: |
+          npm run test:html-native-controls
+          npm run test:html-capability-contract
+
+      - name: Run deterministic capability regression suite
+        run: npm run test:capabilities
+
+      - name: Start capability target
+        run: |
+          npm run start:demo-app > /tmp/testnexus-demo.log 2>&1 &
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4000/capabilities.html > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/testnexus-demo.log
+          exit 1
+
+      - name: Run one-by-one browser capability lab
+        run: npm run test:html-capability-lab
+
+      - name: Upload browser artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-capability-artifacts
+          path: |
+            automation-system/artifacts
+          if-no-files-found: ignore
