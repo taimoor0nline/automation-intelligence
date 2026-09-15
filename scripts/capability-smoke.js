@@ -38,7 +38,7 @@ assert(bySelector.get('[data-testid="success-panel"]').has('TEXT'));
 assert(!bySelector.get('[data-testid="success-panel"]').has('CHECKED'));
 
 const grounded = resolveExpectedResults([
-  'Consent is checked',
+  'Consent checkbox is checked',
   'Success panel with text "Thank you for your feedback." is visible',
 ], pageDiscoveries);
 assert.equal(grounded.records[0].selector, '[data-testid="consent"]');
@@ -99,9 +99,6 @@ const ungrounded = compileTestCase(ungroundedCase, { pageDiscoveries, hasCredent
 assert.equal(ungrounded.ok, false);
 assert.equal(ungrounded.reasonCode, "NETWORK_ENDPOINT_NOT_GROUNDED");
 
-// Regression: a valid cross-page journey must not execute AI-invented login values.
-// When runtime credentials are available and the discovered workflow crosses from
-// login controls to controls on another page, V6 collapses the login sequence to LOGIN_VALID.
 const crossPageDiscoveries = [
   annotatePageDiscovery({
     url: 'http://localhost:4000/',
