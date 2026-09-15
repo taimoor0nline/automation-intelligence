@@ -92,8 +92,8 @@ function runProcess(args, env, timeoutMs, runId) {
     }, timeoutMs);
     timer.unref?.();
 
-    child.stdout.on('data', (chunk) => { stdout += String(chunk); if (stdout.length > 16000) stdout = stdout.slice(-16000); });
-    child.stderr.on('data', (chunk) => { stderr += String(chunk); if (stderr.length > 16000) stderr = stderr.slice(-16000); });
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); if (stdout.length > 24000) stdout = stdout.slice(-24000); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); if (stderr.length > 24000) stderr = stderr.slice(-24000); });
     child.on('error', (err) => finishError(err));
     child.on('close', (code) => {
       if (settled) return;
@@ -126,7 +126,9 @@ function stripTerminalFormatting(value) {
 }
 
 function resultTail(resultOrError) {
-  return stripTerminalFormatting(resultOrError?.stderr || resultOrError?.stdout || '').slice(-1400);
+  const stderr = stripTerminalFormatting(resultOrError?.stderr || '');
+  const stdout = stripTerminalFormatting(resultOrError?.stdout || '');
+  return (stderr || stdout).slice(-1800);
 }
 
 function readRunnerFailure(resultFile) {
@@ -139,6 +141,26 @@ function readRunnerFailure(resultFile) {
   } catch {
     return null;
   }
+}
+
+function discoveryCliEnv(seed, outputForCypress, pageScope) {
+  // Duplicate the critical inputs through --env. The process environment remains
+  // the primary bridge, while this explicit Cypress input prevents a config-layer
+  // projection regression from silently turning discovery into a no-op.
+  return [
+    'DISCOVERY_ENABLED=true',
+    `DISCOVERY_TARGET_URLS_JSON=${JSON.stringify([seed])}`,
+    `DISCOVERY_OUTPUT_FILE=${outputForCypress}`,
+    `DISCOVERY_PAGE_SCOPE=${pageScope}`,
+    'DISCOVERY_MAX_PAGES=1',
+  ].join(',');
+}
+
+function writeFailureDiagnostic(filePath, payload) {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+  } catch {}
 }
 
 async function discoverOneRenderedPage(seed, options) {
@@ -154,6 +176,7 @@ async function discoverOneRenderedPage(seed, options) {
   const outputRelative = `artifacts/discovery/${token}.json`;
   const outputAbsolute = path.join(AUTOMATION_DIR, outputRelative);
   const resultFile = path.join(DISCOVERY_DIR, `${token}-runner-result.json`);
+  const failureFile = path.join(DISCOVERY_DIR, `${token}-failure.json`);
   const discoveryRunId = `discovery-${token}`;
   const outputForCypress = outputRelative.replace(/\\/g, '/');
 
@@ -167,13 +190,10 @@ async function discoverOneRenderedPage(seed, options) {
     AUTOMATION_SCREENSHOT_EACH_TEST: 'false',
     AUTOMATION_TEST_COMPLETION_PAUSE_MS: '0',
     DEMO_STEP_DELAY_MS: '0',
-    // These are explicitly projected by engine.config.js into Cypress.env().
     CYPRESS_DISCOVERY_ENABLED: 'true',
     CYPRESS_DISCOVERY_TARGET_URLS_JSON: JSON.stringify([seed]),
     CYPRESS_DISCOVERY_OUTPUT_FILE: outputForCypress,
     CYPRESS_DISCOVERY_PAGE_SCOPE: pageScope,
-    // One page per runtime process is intentional. A broken secondary public page
-    // must never erase a valid starting-page snapshot or poison the whole crawl.
     CYPRESS_DISCOVERY_MAX_PAGES: '1',
   };
 
@@ -191,14 +211,17 @@ async function discoverOneRenderedPage(seed, options) {
     '--project', AUTOMATION_DIR,
     '--config-file', ENGINE_CONFIG,
     '--config', configOverride,
+    '--env', discoveryCliEnv(seed, outputForCypress, pageScope),
     '--spec', SPEC_RELATIVE,
     '--browser', browser,
     '--headless',
   ];
 
+  let failed = false;
   try {
     fs.rmSync(outputAbsolute, { force: true });
     fs.rmSync(resultFile, { force: true });
+    fs.rmSync(failureFile, { force: true });
     let result = null;
     let processError = null;
     try { result = await runProcess(args, env, pageBudgetMs, discoveryRunId); }
@@ -207,18 +230,39 @@ async function discoverOneRenderedPage(seed, options) {
     const payload = readSnapshot(outputAbsolute);
     const page = payload?.pages?.[0] || null;
     if (!page) {
+      failed = true;
       const runnerFailure = readRunnerFailure(resultFile);
+      const exitCode = result?.code;
+      const tail = resultTail(processError || result);
       let error = processError;
       if (!error && runnerFailure) {
         error = new Error(runnerFailure);
         error.code = 'BROWSER_DISCOVERY_RUNNER_FAILED';
       }
+      if (!error && Number.isFinite(Number(exitCode)) && Number(exitCode) !== 0) {
+        error = new Error(`Rendered discovery process exited with code ${exitCode}${tail ? `: ${tail}` : '.'}`);
+        error.code = 'BROWSER_DISCOVERY_PROCESS_FAILED';
+      }
       if (!error) {
-        const tail = resultTail(result);
         error = new Error(`Rendered discovery runner finished without writing a grounded snapshot${tail ? ` (${tail})` : '.'}`);
         error.code = 'BROWSER_DISCOVERY_SNAPSHOT_MISSING';
       }
       error.targetUrl = seed;
+      writeFailureDiagnostic(failureFile, {
+        at: new Date().toISOString(),
+        code: error.code || null,
+        message: error.message,
+        targetUrl: seed,
+        browser,
+        pageScope,
+        runnerExitCode: exitCode ?? null,
+        runnerFailure: runnerFailure || null,
+        outputExpected: outputForCypress,
+        resultFilePresent: fs.existsSync(resultFile),
+        snapshotFilePresent: fs.existsSync(outputAbsolute),
+        terminalTail: tail || null,
+      });
+      error.diagnosticFile = failureFile;
       throw error;
     }
 
@@ -231,6 +275,9 @@ async function discoverOneRenderedPage(seed, options) {
     await cleanupAutomationBrowsers({ runId: discoveryRunId, reason: 'rendered page discovery completion', log: false, attempts: 3, verifyDelayMs: 200 }).catch(() => {});
     try { fs.rmSync(outputAbsolute, { force: true }); } catch {}
     try { fs.rmSync(resultFile, { force: true }); } catch {}
+    if (!failed) {
+      try { fs.rmSync(failureFile, { force: true }); } catch {}
+    }
   }
 }
 
@@ -325,4 +372,11 @@ async function discoverRenderedPages(urls = [], options = {}) {
   }));
 }
 
-module.exports = { discoverRenderedPages, normalizeSeeds, readSnapshot, readRunnerFailure, stripTerminalFormatting };
+module.exports = {
+  discoverRenderedPages,
+  normalizeSeeds,
+  readSnapshot,
+  readRunnerFailure,
+  stripTerminalFormatting,
+  discoveryCliEnv,
+};
