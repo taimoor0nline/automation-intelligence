@@ -27,17 +27,23 @@ function safeToken(value) {
   return String(value || 'discovery').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70) || 'discovery';
 }
 
+function normalizeUrl(raw, base = null) {
+  try {
+    const url = base ? new URL(String(raw || ''), base) : new URL(String(raw || ''));
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function normalizeSeeds(urls = []) {
   const output = [];
   const seen = new Set();
   for (const raw of urls || []) {
-    try {
-      const url = new URL(String(raw || ''));
-      if (!['http:', 'https:'].includes(url.protocol)) continue;
-      url.hash = '';
-      const value = url.toString();
-      if (!seen.has(value)) { seen.add(value); output.push(value); }
-    } catch {}
+    const value = normalizeUrl(raw);
+    if (value && !seen.has(value)) { seen.add(value); output.push(value); }
   }
   return output;
 }
@@ -76,8 +82,8 @@ function runProcess(args, env, timeoutMs, runId) {
 
     const timer = setTimeout(() => {
       if (settled) return;
-      const error = new Error(`Rendered browser discovery exceeded its ${Math.round(timeoutMs / 1000)} second overall budget.`);
-      error.code = 'BROWSER_DISCOVERY_TIMEOUT';
+      const error = new Error(`Rendered page discovery exceeded its ${Math.round(timeoutMs / 1000)} second page budget.`);
+      error.code = 'BROWSER_DISCOVERY_PAGE_TIMEOUT';
       void (async () => {
         await terminateProcessTree(child);
         await cleanupAutomationBrowsers({ runId, reason: 'rendered discovery timeout', log: false, attempts: 3, verifyDelayMs: 250 }).catch(() => {});
@@ -113,48 +119,38 @@ function resultTail(resultOrError) {
   return String(resultOrError?.stderr || resultOrError?.stdout || '').trim().slice(-1800);
 }
 
-async function discoverRenderedPages(urls = [], options = {}) {
-  const seeds = normalizeSeeds(urls);
-  if (!seeds.length) return [];
-  const enabled = boolEnv(process.env.CYPRESS_RENDERED_DISCOVERY, true);
-  if (!enabled) return [];
-  if (!fs.existsSync(CYPRESS_BIN)) {
-    const error = new Error('The browser automation runtime is not installed; rendered web discovery is unavailable.');
-    error.code = 'BROWSER_DISCOVERY_RUNTIME_MISSING';
-    throw error;
-  }
-
-  fs.mkdirSync(DISCOVERY_DIR, { recursive: true });
-  const context = requestContext.current();
+async function discoverOneRenderedPage(seed, options) {
+  const {
+    context,
+    browser,
+    pageScope,
+    pageLoadTimeoutMs,
+    commandTimeoutMs,
+    pageBudgetMs,
+  } = options;
   const token = `${safeToken(context.sessionId)}-${randomUUID().slice(0, 8)}`;
   const outputRelative = `artifacts/discovery/${token}.json`;
   const outputAbsolute = path.join(AUTOMATION_DIR, outputRelative);
   const resultFile = path.join(DISCOVERY_DIR, `${token}-runner-result.json`);
-  const browser = String(options.browser || process.env.AUTOMATION_BROWSER || 'chrome');
-  const pageScope = context.pageScope === 'STARTING_PAGE_ONLY' ? 'STARTING_PAGE_ONLY' : 'ALL_DISCOVERED_PAGES';
-  const maxPages = Math.max(1, Math.min(Number(options.maxPages || numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6)) || 6, 12));
-  const pageLoadTimeoutMs = Math.max(10000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_PAGE_LOAD_TIMEOUT_MS, 30000), 60000));
-  const commandTimeoutMs = Math.max(3000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_COMMAND_TIMEOUT_MS, 8000), 30000));
-  const configuredOverall = numberEnv(process.env.BROWSER_DISCOVERY_TIMEOUT_MS || process.env.CYPRESS_DISCOVERY_TIMEOUT_MS, 90000);
-  const timeoutMs = Math.max(pageLoadTimeoutMs + 30000, Math.min(configuredOverall, 180000));
   const discoveryRunId = `discovery-${token}`;
-
-  const seedJson = JSON.stringify(seeds);
   const outputForCypress = outputRelative.replace(/\\/g, '/');
+
   const env = {
     ...process.env,
     AUTOMATION_RUN_ID: discoveryRunId,
     AUTOMATION_RESULT_FILE: resultFile,
-    AUTOMATION_BASE_URL: new URL(seeds[0]).origin,
+    AUTOMATION_BASE_URL: new URL(seed).origin,
     AUTOMATION_VIDEO: 'false',
     AUTOMATION_SCREENSHOT_ON_FAILURE: 'false',
     AUTOMATION_SCREENSHOT_EACH_TEST: 'false',
     AUTOMATION_TEST_COMPLETION_PAUSE_MS: '0',
     DEMO_STEP_DELAY_MS: '0',
-    CYPRESS_DISCOVERY_TARGET_URLS_JSON: seedJson,
+    CYPRESS_DISCOVERY_TARGET_URLS_JSON: JSON.stringify([seed]),
     CYPRESS_DISCOVERY_OUTPUT_FILE: outputForCypress,
     CYPRESS_DISCOVERY_PAGE_SCOPE: pageScope,
-    CYPRESS_DISCOVERY_MAX_PAGES: String(maxPages),
+    // One page per runtime process is intentional. A broken secondary public page
+    // must never erase a valid starting-page snapshot or poison the whole crawl.
+    CYPRESS_DISCOVERY_MAX_PAGES: '1',
   };
 
   const configOverride = [
@@ -165,7 +161,6 @@ async function discoverRenderedPages(urls = [], options = {}) {
     `responseTimeout=${Math.max(commandTimeoutMs, 10000)}`,
     'retries=0',
   ].join(',');
-
   const args = [
     CYPRESS_BIN,
     'run',
@@ -177,49 +172,123 @@ async function discoverRenderedPages(urls = [], options = {}) {
     '--headless',
   ];
 
-  let processResult = null;
-  let processError = null;
   try {
     fs.rmSync(outputAbsolute, { force: true });
     fs.rmSync(resultFile, { force: true });
-    try {
-      processResult = await runProcess(args, env, timeoutMs, discoveryRunId);
-    } catch (err) {
-      processError = err;
-    }
+    let result = null;
+    let processError = null;
+    try { result = await runProcess(args, env, pageBudgetMs, discoveryRunId); }
+    catch (err) { processError = err; }
 
     const payload = readSnapshot(outputAbsolute);
-    const pages = Array.isArray(payload?.pages) ? payload.pages : [];
-
-    if (!pages.length) {
-      if (processError) throw processError;
-      const tail = resultTail(processResult);
-      const error = new Error(`Rendered browser discovery did not produce a grounded page snapshot${tail ? `: ${tail}` : '.'}`);
-      error.code = 'BROWSER_DISCOVERY_FAILED';
-      error.exitCode = processResult?.code;
+    const page = payload?.pages?.[0] || null;
+    if (!page) {
+      const error = processError || new Error(`Rendered page discovery produced no grounded snapshot${resultTail(result) ? `: ${resultTail(result)}` : '.'}`);
+      if (!error.code) error.code = 'BROWSER_DISCOVERY_PAGE_FAILED';
+      error.targetUrl = seed;
       throw error;
     }
 
-    const complete = payload?.complete === true && !processError && Number(processResult?.code || 0) === 0;
-    const warnings = [...new Set([
-      ...(Array.isArray(payload?.warnings) ? payload.warnings.map(String) : []),
-      processError ? `Discovery stopped after ${pages.length} grounded page${pages.length === 1 ? '' : 's'}: ${processError.message}` : null,
-      !processError && Number(processResult?.code || 0) !== 0 ? `Discovery runner exited after ${pages.length} grounded page${pages.length === 1 ? '' : 's'}; remaining public routes were not used for generation.` : null,
-    ].filter(Boolean))];
-
-    return pages.map((page, index) => ({
-      ...page,
-      discoveryEngine: 'BROWSER_RENDERED_DOM',
-      discoveryScope: pageScope,
-      discoveryComplete: complete,
-      discoveryWarnings: warnings,
-      isStartingPage: index === 0,
-    }));
+    return {
+      page,
+      runnerExitCode: result?.code ?? null,
+      runnerWarning: processError ? processError.message : Number(result?.code || 0) !== 0 ? resultTail(result) || 'The page runtime exited after producing a grounded snapshot.' : null,
+    };
   } finally {
-    await cleanupAutomationBrowsers({ runId: discoveryRunId, reason: 'rendered discovery completion', log: false, attempts: 3, verifyDelayMs: 200 }).catch(() => {});
+    await cleanupAutomationBrowsers({ runId: discoveryRunId, reason: 'rendered page discovery completion', log: false, attempts: 3, verifyDelayMs: 200 }).catch(() => {});
     try { fs.rmSync(outputAbsolute, { force: true }); } catch {}
     try { fs.rmSync(resultFile, { force: true }); } catch {}
   }
+}
+
+async function discoverRenderedPages(urls = [], options = {}) {
+  const seeds = normalizeSeeds(urls);
+  if (!seeds.length) return [];
+  if (!boolEnv(process.env.CYPRESS_RENDERED_DISCOVERY, true)) return [];
+  if (!fs.existsSync(CYPRESS_BIN)) {
+    const error = new Error('The browser automation runtime is not installed; rendered web discovery is unavailable.');
+    error.code = 'BROWSER_DISCOVERY_RUNTIME_MISSING';
+    throw error;
+  }
+
+  fs.mkdirSync(DISCOVERY_DIR, { recursive: true });
+  const context = requestContext.current();
+  const browser = String(options.browser || process.env.AUTOMATION_BROWSER || 'chrome');
+  const pageScope = context.pageScope === 'STARTING_PAGE_ONLY' ? 'STARTING_PAGE_ONLY' : 'ALL_DISCOVERED_PAGES';
+  const maxPages = Math.max(1, Math.min(Number(options.maxPages || numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6)) || 6, 12));
+  const pageLoadTimeoutMs = Math.max(10000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_PAGE_LOAD_TIMEOUT_MS, 30000), 60000));
+  const commandTimeoutMs = Math.max(3000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_COMMAND_TIMEOUT_MS, 8000), 30000));
+  const overallBudgetMs = Math.max(30000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_TIMEOUT_MS || process.env.CYPRESS_DISCOVERY_TIMEOUT_MS, 90000), 180000));
+  const pageBudgetDefault = Math.max(pageLoadTimeoutMs + 12000, 30000);
+  const deadline = Date.now() + overallBudgetMs;
+  const startingOrigin = new URL(seeds[0]).origin;
+  const queue = pageScope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : [...seeds];
+  const queued = new Set(queue);
+  const visited = new Set();
+  const pages = [];
+  const warnings = [];
+
+  while (queue.length && pages.length < maxPages) {
+    const seed = queue.shift();
+    if (!seed || visited.has(seed)) continue;
+    visited.add(seed);
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs < 5000) {
+      warnings.push(`Public-page discovery stopped after ${pages.length} grounded page${pages.length === 1 ? '' : 's'} because the overall discovery budget was reached.`);
+      break;
+    }
+
+    try {
+      const discovered = await discoverOneRenderedPage(seed, {
+        context,
+        browser,
+        pageScope,
+        pageLoadTimeoutMs,
+        commandTimeoutMs,
+        pageBudgetMs: Math.max(5000, Math.min(pageBudgetDefault, remainingMs)),
+      });
+      const page = discovered.page;
+      pages.push(page);
+      if (discovered.runnerWarning) warnings.push(`${seed}: ${discovered.runnerWarning}`);
+
+      if (pageScope !== 'STARTING_PAGE_ONLY') {
+        for (const rawHint of page.routeHints || []) {
+          const hint = normalizeUrl(rawHint, page.finalUrl || page.url || seed);
+          if (!hint) continue;
+          let sameOrigin = false;
+          try { sameOrigin = new URL(hint).origin === startingOrigin; } catch {}
+          if (!sameOrigin || visited.has(hint) || queued.has(hint)) continue;
+          queue.push(hint);
+          queued.add(hint);
+        }
+      }
+    } catch (err) {
+      if (!pages.length) {
+        err.code = err.code === 'BROWSER_DISCOVERY_PAGE_TIMEOUT' ? 'BROWSER_DISCOVERY_START_PAGE_TIMEOUT' : (err.code || 'BROWSER_DISCOVERY_START_PAGE_FAILED');
+        err.message = `Starting page could not be rendered into a grounded browser snapshot. ${err.message}`;
+        throw err;
+      }
+      warnings.push(`Skipped public page ${seed}: ${err.message}`);
+    }
+  }
+
+  if (!pages.length) {
+    const error = new Error('Rendered browser discovery completed without any grounded HTML pages.');
+    error.code = 'BROWSER_DISCOVERY_EMPTY';
+    throw error;
+  }
+  if (queue.length && pages.length >= maxPages) warnings.push(`Public-page discovery reached its ${maxPages}-page safety limit; additional discovered routes were not used for generation.`);
+
+  const complete = warnings.length === 0 && queue.length === 0;
+  return pages.map((page, index) => ({
+    ...page,
+    discoveryEngine: 'BROWSER_RENDERED_DOM',
+    discoveryScope: pageScope,
+    discoveryComplete: complete,
+    discoveryWarnings: warnings,
+    isStartingPage: index === 0,
+  }));
 }
 
 module.exports = { discoverRenderedPages, normalizeSeeds, readSnapshot };
