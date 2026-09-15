@@ -30,7 +30,7 @@ function emitRuntimeEvent(event, phase) {
 }
 
 function emitRuntimeContext(event) {
-  return `    cy.then({ log:false }, () => { Cypress.env('__TESTNEXUS_CURRENT_ITEM', ${js(event)}); });`;
+  return `    cy.testNexusSetCurrentItem(${js(event)});`;
 }
 
 function emitRuntimeUniqueness(action, event) {
@@ -114,7 +114,7 @@ function generateDeterministicAutomation(approvedTestCases = []) {
       lines.push(emitRuntimeEvent(event, 'PASSED'));
     });
 
-    lines.push(`    cy.then({ log:false }, () => { Cypress.env('__TESTNEXUS_CURRENT_ITEM', null); });`);
+    lines.push(`    cy.testNexusSetCurrentItem(null);`);
     lines.push('  });', '');
   }
   lines.push('});', '');
