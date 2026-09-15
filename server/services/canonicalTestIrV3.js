@@ -3,10 +3,12 @@ const base = require('./canonicalTestIrV3Base');
 const EXTRA_ACTIONS = new Set([
   'SET_RANGE_VALUE','SET_COLOR_VALUE','DROP_FILE','SELECT_FILES','DROP_FILES','SELECT_MULTIPLE',
   'OPEN_COMBOBOX','CLOSE_COMBOBOX','SEARCH_SUGGESTIONS','CLEAR_SUGGESTION_SEARCH','SELECT_SUGGESTION','SELECT_SUGGESTIONS',
+  'SCROLL_SUGGESTIONS_TO_VALUE','SELECT_SUGGESTION_BY_TRAVERSAL','REMOVE_SELECTED_TAG','CLEAR_SELECTED_TAGS',
 ]);
 const SUGGESTION_ASSERTIONS = new Set([
   'ASSERT_COMBOBOX_EXPANDED','ASSERT_COMBOBOX_COLLAPSED','ASSERT_SUGGESTION_VISIBLE','ASSERT_SUGGESTION_NOT_VISIBLE',
   'ASSERT_NO_SUGGESTIONS','ASSERT_SUGGESTION_SELECTED','ASSERT_SELECTED_SUGGESTIONS_EQUALS','ASSERT_SEARCH_SUGGESTIONS_CONTAIN',
+  'ASSERT_SELECTED_TAG_PRESENT','ASSERT_SELECTED_TAG_ABSENT','ASSERT_NO_SELECTED_TAGS',
 ]);
 
 function hasValidLoginHelper(ir = {}) {
@@ -32,6 +34,11 @@ function suggestionMetadata(registry = {}, elementRef) {
     suggestionListRef: element.suggestionListRef || null,
     suggestionListSelector: element.suggestionListSelector || null,
     suggestionMultiselect: element.suggestionMultiselect === true,
+    suggestionTraversalMaxAttempts: Number(element.suggestionTraversalMaxAttempts || 24),
+    removeTagTargets: Array.isArray(element.removeTagTargets) ? element.removeTagTargets.map((item) => ({ ...item })) : [],
+    removeTagPattern: element.removeTagPattern ? { ...element.removeTagPattern } : null,
+    clearTagsSelector: element.clearTagsSelector || null,
+    clearTagsRef: element.clearTagsRef || null,
   };
 }
 
@@ -60,7 +67,9 @@ function restoreExtendedAction(original, grounded, registry) {
 
   const semantic = suggestionMetadata(registry, grounded.elementRef);
   if (operation === 'SEARCH_SUGGESTIONS') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, query: clean(original.query ?? original.value, 500), ...semantic };
-  if (operation === 'SELECT_SUGGESTION') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, value: clean(original.value ?? original.text, 500), ...semantic };
+  if (['SELECT_SUGGESTION','SCROLL_SUGGESTIONS_TO_VALUE','SELECT_SUGGESTION_BY_TRAVERSAL','REMOVE_SELECTED_TAG'].includes(operation)) {
+    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, value: clean(original.value ?? original.text, 500), ...semantic };
+  }
   if (operation === 'SELECT_SUGGESTIONS') return { operation, selector: grounded.selector, elementRef: grounded.elementRef, values: uniqueValues(original.values, 50), ...semantic };
   return { operation, selector: grounded.selector, elementRef: grounded.elementRef, ...semantic };
 }
@@ -71,7 +80,7 @@ function restoreExtendedAssertion(original, grounded, registry) {
   const semantic = suggestionMetadata(registry, grounded.elementRef || original?.elementRef);
   const out = { ...grounded, operation, ...semantic };
   if (operation === 'ASSERT_SELECTED_SUGGESTIONS_EQUALS') out.values = uniqueValues(original?.values, 50);
-  else if (!['ASSERT_COMBOBOX_EXPANDED','ASSERT_COMBOBOX_COLLAPSED','ASSERT_NO_SUGGESTIONS'].includes(operation)) out.value = clean(original?.value ?? original?.text, 500);
+  else if (!['ASSERT_COMBOBOX_EXPANDED','ASSERT_COMBOBOX_COLLAPSED','ASSERT_NO_SUGGESTIONS','ASSERT_NO_SELECTED_TAGS'].includes(operation)) out.value = clean(original?.value ?? original?.text, 500);
   return out;
 }
 
@@ -89,6 +98,10 @@ function extendedStep(original, action) {
   if (operation === 'CLEAR_SUGGESTION_SEARCH') return { action: 'Clear suggestion search', target: action.selector || '', value: null };
   if (operation === 'SELECT_SUGGESTION') return { action: 'Select suggestion', target: action.selector || '', value: action.value };
   if (operation === 'SELECT_SUGGESTIONS') return { action: 'Select multiple suggestions', target: action.selector || '', value: (action.values || []).join(', ') };
+  if (operation === 'SCROLL_SUGGESTIONS_TO_VALUE') return { action: 'Scroll suggestions to exact value', target: action.selector || '', value: action.value };
+  if (operation === 'SELECT_SUGGESTION_BY_TRAVERSAL') return { action: 'Traverse list and select suggestion', target: action.selector || '', value: action.value };
+  if (operation === 'REMOVE_SELECTED_TAG') return { action: 'Remove selected tag', target: action.selector || '', value: action.value };
+  if (operation === 'CLEAR_SELECTED_TAGS') return { action: 'Clear all selected tags', target: action.selector || '', value: null };
   return null;
 }
 
@@ -102,6 +115,9 @@ function extendedAssertionText(assertion) {
   if (op === 'ASSERT_SUGGESTION_SELECTED') return `Suggestion ${JSON.stringify(assertion.value ?? assertion.text ?? '')} is selected`;
   if (op === 'ASSERT_SELECTED_SUGGESTIONS_EQUALS') return `Selected suggestions equal ${JSON.stringify(assertion.values || [])}`;
   if (op === 'ASSERT_SEARCH_SUGGESTIONS_CONTAIN') return `Search suggestions contain ${JSON.stringify(assertion.value ?? assertion.text ?? '')}`;
+  if (op === 'ASSERT_SELECTED_TAG_PRESENT') return `Selected tag ${JSON.stringify(assertion.value ?? assertion.text ?? '')} is present`;
+  if (op === 'ASSERT_SELECTED_TAG_ABSENT') return `Selected tag ${JSON.stringify(assertion.value ?? assertion.text ?? '')} is absent`;
+  if (op === 'ASSERT_NO_SELECTED_TAGS') return 'No selected tags remain';
   return null;
 }
 
@@ -141,6 +157,10 @@ function canonicalActionCatalog() {
     { operation: 'CLEAR_SUGGESTION_SEARCH', usesElementRef: true, fields: ['elementRef'], description: 'Clear the query from a discovered search/autocomplete control.' },
     { operation: 'SELECT_SUGGESTION', usesElementRef: true, fields: ['elementRef','value'], description: 'Select one evidenced option from the semantic listbox associated with a discovered searchable control.' },
     { operation: 'SELECT_SUGGESTIONS', usesElementRef: true, fields: ['elementRef','values'], description: 'Select multiple evidenced options from a searchable semantic listbox only when aria-multiselectable=true was discovered.' },
+    { operation: 'SCROLL_SUGGESTIONS_TO_VALUE', usesElementRef: true, fields: ['elementRef','value'], description: 'Boundedly traverse the associated semantic listbox until an exact evidenced option is rendered and visible; supports virtualized lists without guessing.' },
+    { operation: 'SELECT_SUGGESTION_BY_TRAVERSAL', usesElementRef: true, fields: ['elementRef','value'], description: 'Boundedly traverse a semantic listbox and click the exact evidenced option once rendered. Stops if the list cannot advance or the hard attempt bound is reached.' },
+    { operation: 'REMOVE_SELECTED_TAG', usesElementRef: true, fields: ['elementRef','value'], description: 'Remove one exact evidenced selected chip/tag using a discovered semantic remove/delete affordance tied to the same listbox.' },
+    { operation: 'CLEAR_SELECTED_TAGS', usesElementRef: true, fields: ['elementRef'], description: 'Clear all selected chips/tags using the single discovered semantic clear-all affordance tied to the same listbox.' },
   ];
 }
 
