@@ -97,6 +97,7 @@
     loadScript('/test-case-page-context.js', 'data-test-case-page-context');
     loadScript('/manual-cypress-authoring.js', 'data-manual-cypress-authoring');
     loadScript('/manual-cypress-authoring-ux.js', 'data-manual-cypress-authoring-ux');
+    loadScript('/test-case-repair-workbench.js', 'data-test-case-repair-workbench', true);
   }
 
   function loadSecondaryEnhancements() {
