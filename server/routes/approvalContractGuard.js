@@ -1,14 +1,21 @@
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 
 const { getSession } = require('../data/sessionStore');
 const { assessTestCases } = require('../services/testCaseFeasibility');
 const { stableHash, executionPlanShape, displayExpectationShape } = require('../services/startupIntegrityGuards');
+const executionGenerator = require('../services/deterministicAutomationGeneratorV7');
+const { validateGroundedScript } = require('../services/scriptValidator');
 
 function configuredActorRefs(session) {
   return Object.entries(session.actorCredentials || {})
     .filter(([, credentials]) => credentials?.username && credentials?.password)
     .map(([actorRef]) => actorRef);
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
 function selectorTokens(text) {
@@ -53,10 +60,36 @@ function visibleContractMismatch(testCase) {
   return `The reviewed expectation references ${missing.join(', ')}, but the compiled canonical assertions do not. The displayed expectation and executable contract must be identical before approval.`;
 }
 
-function seal(testCase) {
+function freezeExecutionSource(testCase, session) {
+  const generated = executionGenerator.generateDeterministicAutomation([testCase]);
+  const script = String(generated.script || '');
+  const actorCredentialRefs = configuredActorRefs(session);
+  const validation = validateGroundedScript(script, {
+    approvedTestCases: [testCase],
+    pageDiscoveries: session.pageDiscoveries || [],
+    hasCredentials: Boolean(session.credentials?.username && session.credentials?.password),
+    loginSelectors: testCase?.automationReadiness?.cypressContract?.loginRuntime?.selectors || undefined,
+    actorCredentialRefs,
+    frameworkOwnedSelectors: ['body'],
+  });
+  if (!validation.valid) {
+    const error = new Error(`The exact approved execution source failed deterministic source validation: ${(validation.errors || []).join(' | ')}`);
+    error.code = 'APPROVED_EXECUTION_SOURCE_INVALID';
+    throw error;
+  }
+  return {
+    script,
+    hash: sha256(script),
+    fileName: generated.fileName,
+    generationMode: generated.generationMode,
+  };
+}
+
+function seal(testCase, session) {
   if (!testCase?.canonicalIr || testCase?.automationReadiness?.status !== 'READY') return testCase;
   const plan = testCase.automationReadiness.automationPlan || {};
   const cypressContract = testCase.automationReadiness.cypressContract || {};
+  const frozen = freezeExecutionSource(testCase, session);
   return {
     ...testCase,
     canonicalValidation: {
@@ -66,9 +99,13 @@ function seal(testCase) {
       approvedDisplayExpectationHash: stableHash(displayExpectationShape(testCase)),
       approvedCypressArtifactHash: cypressContract.scriptHash || null,
       approvedCypressValidatorVersion: cypressContract.version || null,
+      approvedAutomationSource: frozen.script,
+      approvedAutomationSourceHash: frozen.hash,
+      approvedAutomationFileName: frozen.fileName,
+      approvedAutomationGenerationMode: frozen.generationMode,
       approvedAt: new Date().toISOString(),
-      approvalContractVersion: 2,
-      approvalMode: 'HUMAN_REVIEWED_DETERMINISTIC_CYPRESS_CONTRACT',
+      approvalContractVersion: 3,
+      approvalMode: 'HUMAN_REVIEWED_FROZEN_EXECUTION_CONTRACT',
     },
   };
 }
@@ -118,7 +155,7 @@ router.use((req, res, next) => {
 
       if (testCase?.automationReadiness?.status !== 'READY') {
         return res.status(422).json({
-          reply: `Execution blocked for ${testCase.id}: ${testCase?.automationReadiness?.reason || 'the test is not Automation Ready under the strict Cypress contract.'}`,
+          reply: `Execution blocked for ${testCase.id}: ${testCase?.automationReadiness?.reason || 'the test is not Automation Ready under the strict execution contract.'}`,
           code: 'EXECUTION_CONTRACT_NOT_READY',
           testCaseId: testCase.id,
           automationReadiness: testCase.automationReadiness,
@@ -128,8 +165,8 @@ router.use((req, res, next) => {
       const cypressContract = testCase?.automationReadiness?.cypressContract;
       if (!cypressContract?.ok || !cypressContract?.scriptHash) {
         return res.status(422).json({
-          reply: `Execution blocked for ${testCase.id}: the exact Cypress artifact has not passed strict deterministic validation. Revalidate the test before execution.`,
-          code: 'CYPRESS_CONTRACT_NOT_VALIDATED',
+          reply: `Execution blocked for ${testCase.id}: the exact automation artifact has not passed strict deterministic validation. Revalidate the test before execution.`,
+          code: 'EXECUTION_ARTIFACT_NOT_VALIDATED',
           testCaseId: testCase.id,
           automationReadiness: testCase.automationReadiness,
         });
@@ -146,12 +183,12 @@ router.use((req, res, next) => {
       }
     }
 
-    // Clicking Run/Re-run is the explicit human approval event. Seal the selected
-    // deterministic contract AND the exact validated Cypress artifact. Any later
-    // canonical/compiled/display/script drift requires human revalidation.
+    // Clicking Run/Re-run is the explicit human approval event. The exact generated
+    // source is frozen here and later executed byte-for-byte. Runtime execution may
+    // validate the hash, but it must never silently regenerate a different source.
     const sealed = assessed.map((testCase) => {
       const selected = !approved.size || approved.has(String(testCase.id || '').toUpperCase());
-      return selected ? seal(testCase) : testCase;
+      return selected ? seal(testCase, session) : testCase;
     });
 
     req.body.reviewedTestCases = sealed;
@@ -163,12 +200,14 @@ router.use((req, res, next) => {
         compiledHash: testCase.canonicalValidation.approvedCompiledHash,
         displayExpectationHash: testCase.canonicalValidation.approvedDisplayExpectationHash,
         cypressArtifactHash: testCase.canonicalValidation.approvedCypressArtifactHash,
+        frozenSourceHash: testCase.canonicalValidation.approvedAutomationSourceHash,
         cypressValidatorVersion: testCase.canonicalValidation.approvedCypressValidatorVersion,
+        approvalContractVersion: testCase.canonicalValidation.approvalContractVersion,
         approvedAt: testCase.canonicalValidation.approvedAt,
       }]));
     return next();
   } catch (err) {
-    return res.status(422).json({ reply: `Approval contract validation failed: ${err.message}`, code: 'APPROVAL_CONTRACT_VALIDATION_FAILED' });
+    return res.status(422).json({ reply: `Approval contract validation failed: ${err.message}`, code: err.code || 'APPROVAL_CONTRACT_VALIDATION_FAILED' });
   }
 });
 
