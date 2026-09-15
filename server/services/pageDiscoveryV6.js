@@ -46,9 +46,6 @@ function normalizeRenderedElement(item = {}) {
   const visibleText = String(item.text || '').replace(/\s+/g, ' ').trim();
   return {
     ...item,
-    // Generic applications often expose buttons/links only through rendered text.
-    // Preserve that text as semantic discovery evidence while keeping the exact
-    // Cypress-grounded selector as execution truth.
     label: item.label || item.ariaLabel || item.placeholder || item.name || ((tag === 'button' || tag === 'a' || item.role) ? visibleText || null : null),
   };
 }
@@ -68,16 +65,13 @@ function mergePage(rendered, source) {
   return {
     ...source,
     ...rendered,
-    // Rendered DOM is authoritative for controls and navigable routes. Static source
-    // may supplement passive metadata/network hints, but may not introduce script
-    // literals or form actions as extra browser pages.
     elements: rendered.elements || [],
     messages: rendered.messages || [],
     routeHints: rendered.routeHints || [],
     networkHints,
     meta,
     staticSourceSupplemented: true,
-    discoveryEngine: 'CYPRESS_RENDERED_DOM',
+    discoveryEngine: 'BROWSER_RENDERED_DOM',
   };
 }
 
@@ -96,13 +90,37 @@ function attachMatrix(pages, scope) {
   }));
 }
 
-function persistEffectiveScope(scope) {
+function currentSession() {
   const context = requestContext.current();
-  if (!context?.sessionId) return;
-  try {
-    const session = getSession(context.sessionId);
-    if (session) session.pageScope = scope;
-  } catch {}
+  if (!context?.sessionId) return null;
+  try { return getSession(context.sessionId); } catch { return null; }
+}
+
+function persistEffectiveScope(scope) {
+  const session = currentSession();
+  if (session) session.pageScope = scope;
+}
+
+function persistDiscoveryStatus({ complete = false, warnings = [], pages = [], failure = null } = {}) {
+  const session = currentSession();
+  if (!session) return;
+  const maxTestCases = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 6) || 6, 250));
+  session.maxTestCases = maxTestCases;
+  session.discoveryStatus = {
+    engine: 'BROWSER_RENDERED_DOM',
+    complete: Boolean(complete),
+    partial: pages.length > 0 && !complete,
+    pageCount: pages.length,
+    warnings: [...new Set((warnings || []).map(String).filter(Boolean))],
+    failure: failure ? { code: failure.code || 'BROWSER_DISCOVERY_FAILED', message: String(failure.message || 'Rendered browser discovery failed.') } : null,
+    updatedAt: new Date().toISOString(),
+  };
+  session.lastGenerationFailure = failure ? {
+    stage: 'DISCOVERY',
+    code: failure.code || 'BROWSER_DISCOVERY_FAILED',
+    message: String(failure.message || 'Rendered browser discovery failed.'),
+    at: new Date().toISOString(),
+  } : null;
 }
 
 async function staticFallback(urls) {
@@ -143,23 +161,29 @@ async function discoverPages(urls, options = {}) {
   try {
     rendered = (await discoverRenderedPages(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds, options)).map(normalizeRenderedPage);
   } catch (err) {
+    persistDiscoveryStatus({ failure: err });
     if (requireRendered) {
       err.message = `Rendered browser discovery failed. TestNexus will not invent selectors or downgrade to brittle static DOM assumptions. ${err.message}`;
+      persistDiscoveryStatus({ failure: err });
       throw err;
     }
     console.warn(`[discovery] Rendered browser discovery unavailable; using static fallback: ${err.message}`);
   }
 
   if (!rendered.length) {
-    return attachMatrix(await staticFallback(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds), scope);
+    const fallback = attachMatrix(await staticFallback(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds), scope);
+    persistDiscoveryStatus({ complete: false, pages: fallback, warnings: ['Rendered discovery was unavailable; static evidence was used only because strict rendered discovery was explicitly disabled.'] });
+    return fallback;
   }
 
-  // Supplement only the pages Cypress actually rendered. Do not ask the static
-  // source crawler to follow manifest/icon/script literals as if they were pages.
   const staticPages = await supplementRenderedPages(rendered);
   const staticByKey = new Map(staticPages.map((page) => [pageKey(page), page]));
   const merged = rendered.map((page) => mergePage(page, staticByKey.get(pageKey(page))));
-  return attachMatrix(merged, scope);
+  const finalPages = attachMatrix(merged, scope);
+  const warnings = [...new Set(finalPages.flatMap((page) => page.discoveryWarnings || []).map(String).filter(Boolean))];
+  const complete = finalPages.every((page) => page.discoveryComplete !== false) && warnings.length === 0;
+  persistDiscoveryStatus({ complete, warnings, pages: finalPages });
+  return finalPages;
 }
 
 async function discoverPage(url, options = {}) {
