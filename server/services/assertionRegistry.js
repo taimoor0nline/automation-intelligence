@@ -1,1 +1,1 @@
-module.exports = require("./assertionRegistryV4");
+module.exports = require("./assertionRegistryV5");
