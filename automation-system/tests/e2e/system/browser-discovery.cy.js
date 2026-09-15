@@ -13,7 +13,7 @@ const SAFE_RESPONSE_HEADERS = new Set([
   'cross-origin-resource-policy','cross-origin-embedder-policy',
 ]);
 const ALWAYS_DISCOVER_TAGS = new Set([
-  'input','textarea','select','option','button','form','a','label','fieldset','legend',
+  'input','textarea','select','option','datalist','button','form','a','label','fieldset','legend',
   'h1','h2','h3','h4','h5','h6','p','li','dt','dd','summary','details',
   'img','picture','video','audio','canvas','table','thead','tbody','tfoot','tr','th','td',
   'progress','meter','output','iframe','object','embed',
@@ -180,6 +180,7 @@ function isMeaningfulCandidate(element) {
   if (ALWAYS_DISCOVER_TAGS.has(tag)) return true;
   if (element.hasAttribute('data-testid') || element.hasAttribute('data-cy') || element.hasAttribute('data-test') || element.hasAttribute('data-qa')) return true;
   if (element.id || element.getAttribute('name') || element.getAttribute('role') || element.getAttribute('aria-label')) return true;
+  if (element.hasAttribute('aria-controls') || element.hasAttribute('aria-owns') || element.hasAttribute('aria-autocomplete') || element.hasAttribute('aria-multiselectable')) return true;
   if (element.hasAttribute('contenteditable') || element.hasAttribute('draggable') || element.hasAttribute('ondrop') || element.hasAttribute('dropzone') || element.hasAttribute('tabindex')) return true;
   if (element.hasAttribute('onclick') || typeof element.onclick === 'function') return true;
   if (['div','span','section','article','main','nav','header','footer','aside'].includes(tag)) {
@@ -217,9 +218,12 @@ function serializeElement(win, element, root, inShadow, shadowHostSelector) {
   if (inShadow && target.strategy === 'STRUCTURAL') return null;
   const doc = element.ownerDocument;
   const tag = element.tagName.toLowerCase();
-  const type = clean(element.getAttribute('type') || (tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : tag), 60).toLowerCase();
+  const browserType = (tag === 'input' || tag === 'button') ? element.type : null;
+  const type = clean(browserType || element.getAttribute('type') || (tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : tag), 60).toLowerCase();
   const role = element.getAttribute('role') || null;
   const text = semanticText(element);
+  const listboxOwner = element.closest?.('[role="listbox"]');
+  const listboxOwnerTarget = listboxOwner ? stableSelector(win, listboxOwner, listboxOwner.getRootNode()) : null;
   const result = {
     id: element.id || null,
     testId: element.getAttribute('data-testid') || element.getAttribute('data-cy') || element.getAttribute('data-test') || null,
@@ -235,6 +239,14 @@ function serializeElement(win, element, root, inShadow, shadowHostSelector) {
     ariaChecked: element.getAttribute('aria-checked'),
     ariaSelected: element.getAttribute('aria-selected'),
     ariaExpanded: element.getAttribute('aria-expanded'),
+    ariaControls: element.getAttribute('aria-controls'),
+    ariaOwns: element.getAttribute('aria-owns'),
+    ariaAutocomplete: element.getAttribute('aria-autocomplete'),
+    ariaActivedescendant: element.getAttribute('aria-activedescendant'),
+    ariaMultiselectable: element.getAttribute('aria-multiselectable'),
+    ariaHaspopup: element.getAttribute('aria-haspopup'),
+    listboxOwnerId: listboxOwner?.id || null,
+    listboxOwnerSelector: listboxOwnerTarget?.selector || null,
     className: typeof element.className === 'string' ? clean(element.className, 500) || null : null,
     hidden: Boolean(element.hidden),
     visible: visibleState(win, element),
@@ -276,9 +288,19 @@ function serializeElement(win, element, root, inShadow, shadowHostSelector) {
     result.options = Array.from(element.options || []).slice(0, 150).map((option) => ({
       value: option.value,
       label: clean(option.textContent, 300),
-      disabled: option.disabled === true,
+      disabled: option.disabled === true || option.closest?.('optgroup')?.disabled === true,
       selected: option.selected === true,
     }));
+  }
+  if (tag === 'datalist') {
+    result.options = Array.from(element.options || []).slice(0, 150).map((option) => ({ value: option.value, label: clean(option.label || option.textContent || option.value, 300), disabled: false, selected: false }));
+  }
+  if (tag === 'input' && element.getAttribute('list')) {
+    const datalist = doc.getElementById(element.getAttribute('list'));
+    if (datalist?.tagName?.toLowerCase() === 'datalist') {
+      result.suggestions = Array.from(datalist.options || []).slice(0, 150).map((option) => ({ value: option.value, text: clean(option.label || option.textContent || option.value, 300), disabled: false }));
+      result.suggestionSource = 'datalist';
+    }
   }
   if (type === 'radio' || type === 'checkbox') {
     result.controlValue = element.value || null;
@@ -332,13 +354,7 @@ function networkHint(request, pageUrl) {
     const stateChanging = ['POST','PUT','PATCH','DELETE'].includes(method);
     const apiLike = /^\/(?:api|graphql|rest)\b/i.test(path);
     if (!stateChanging && !apiLike) return null;
-    return {
-      method,
-      url: path,
-      status: Number.isFinite(Number(request?.status)) ? Number(request.status) : null,
-      responseHeaders: request?.responseHeaders && typeof request.responseHeaders === 'object' ? request.responseHeaders : {},
-      source: 'browser-network',
-    };
+    return { method, url: path, status: Number.isFinite(Number(request?.status)) ? Number(request.status) : null, responseHeaders: request?.responseHeaders && typeof request.responseHeaders === 'object' ? request.responseHeaders : {}, source: 'browser-network' };
   } catch {
     return null;
   }
@@ -397,13 +413,8 @@ function discoverDocument(win, requests) {
     routeHints,
     networkHints: Array.from(networkMap.values()),
     browserState: browserState(win),
-    capabilityDiscovery: {
-      scannedElements: Math.min(doc.querySelectorAll('*').length, MAX_DOM_SCAN),
-      capturedElements: elements.length,
-      maxElements: MAX_ELEMENTS_PER_PAGE,
-      openShadowDom: elements.some((item) => item.shadowDom === true),
-    },
-    discoveryEngine: 'BROWSER_RENDERED_DOM_V2',
+    capabilityDiscovery: { scannedElements: Math.min(doc.querySelectorAll('*').length, MAX_DOM_SCAN), capturedElements: elements.length, maxElements: MAX_ELEMENTS_PER_PAGE, openShadowDom: elements.some((item) => item.shadowDom === true) },
+    discoveryEngine: 'BROWSER_RENDERED_DOM_V3',
   };
 }
 
@@ -482,12 +493,7 @@ describe('TestNexus internal rendered page discovery', () => {
     }
 
     next().then(() => {
-      cy.writeFile(outputFile, {
-        version: 3,
-        engine: 'BROWSER_RENDERED_DOM_V2',
-        discoveredAt: new Date().toISOString(),
-        pages,
-      }, { log: false });
+      cy.writeFile(outputFile, { version: 4, engine: 'BROWSER_RENDERED_DOM_V3', discoveredAt: new Date().toISOString(), pages }, { log: false });
     });
   });
 });
