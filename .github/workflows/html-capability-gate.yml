@@ -22,11 +22,12 @@ jobs:
       - name: Install platform and automation runtime
         run: npm install
 
-      - name: Verify native HTML and searchable suggestion contracts
+      - name: Verify native HTML, searchable suggestion and enterprise execution contracts
         run: |
           npm run test:html-native-controls
           npm run test:html-capability-contract
           npm run test:searchable-suggestions
+          npm run test:enterprise-execution-contract
 
       - name: Run deterministic capability regression suite
         run: npm run test:capabilities
