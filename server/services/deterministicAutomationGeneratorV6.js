@@ -3,6 +3,21 @@ const v4 = require('./deterministicAutomationGeneratorV4');
 
 function js(value) { return JSON.stringify(value); }
 
+function emitResolvedFiles(selector, fileNames, { dragDrop = false } = {}) {
+  const names = Array.isArray(fileNames) ? fileNames : [];
+  if (!selector) throw new Error('File interaction requires a grounded selector.');
+  if (!names.length) throw new Error('File interaction requires at least one approved fixture.');
+  if (names.length > 10) throw new Error('A single file interaction supports at most 10 approved fixtures.');
+  const vars = names.map((_, index) => `filePath${index}`);
+  const filesExpression = names.length === 1 ? vars[0] : `[${vars.join(', ')}]`;
+  const options = dragDrop ? `, { action: 'drag-drop' }` : '';
+  let expression = `cy.get(${js(selector)}).selectFile(${filesExpression}${options})`;
+  for (let index = names.length - 1; index >= 0; index -= 1) {
+    expression = `cy.task('testNexusResolveUploadFixture', ${js(names[index])}, { log:false }).then((${vars[index]}) => ${expression})`;
+  }
+  return `    ${expression};`;
+}
+
 function emitAction(action) {
   if (action?.operation === 'TYPE_RUNTIME_CREDENTIAL') {
     const credential = String(action.credential || '').trim().toLowerCase();
@@ -17,15 +32,23 @@ function emitAction(action) {
   }
   if (action?.operation === 'SUBMIT') {
     if (!action.selector) throw new Error('SUBMIT requires a grounded selector.');
-    // Canonical SUBMIT represents user form submission intent. Discovery may ground
-    // that intent to either the form itself or its submit button. Cypress .submit()
-    // only accepts <form>, so choose the correct real browser interaction.
     return `    cy.get(${js(action.selector)}).then(($el) => { if ($el.is('form')) cy.wrap($el).submit(); else cy.wrap($el).click(); });`;
   }
-  // UNCHECK deliberately delegates to Cypress .uncheck(). The strict contract
-  // validator permits it only for checkbox inputs. Radio buttons are never force-
-  // cleared through direct DOM mutation because that creates a state a user may not
-  // be able to produce through the application UI.
+  if (action?.operation === 'SET_RANGE_VALUE') {
+    if (!action.selector) throw new Error('SET_RANGE_VALUE requires a grounded selector.');
+    const value = String(action.value ?? '');
+    if (!value) throw new Error('SET_RANGE_VALUE requires a numeric value.');
+    return `    cy.get(${js(action.selector)}).then(($range) => { const el=$range[0]; const win=el.ownerDocument.defaultView; const setter=Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype,'value')?.set; if(typeof setter!=='function') throw new Error('Native range value setter is unavailable.'); setter.call(el, ${js(value)}); }).trigger('input').trigger('change');`;
+  }
+  if (action?.operation === 'DROP_FILE') {
+    return emitResolvedFiles(action.selector, [action.fileName], { dragDrop: true });
+  }
+  if (action?.operation === 'SELECT_FILES') {
+    return emitResolvedFiles(action.selector, action.fileNames, { dragDrop: false });
+  }
+  if (action?.operation === 'DROP_FILES') {
+    return emitResolvedFiles(action.selector, action.fileNames, { dragDrop: true });
+  }
   return v5.emitAction(action);
 }
 
