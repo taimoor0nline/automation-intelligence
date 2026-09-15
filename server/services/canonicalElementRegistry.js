@@ -1,1 +1,1 @@
-module.exports = require('./canonicalElementRegistryV3');
+module.exports = require('./canonicalElementRegistryV4');
