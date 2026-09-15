@@ -17,13 +17,8 @@ function boundedNumberEnv(name, fallback, min, max) {
   return Math.max(min, Math.min(value, max));
 }
 
-function getDemoStepDelayMs() {
-  return boundedNumberEnv("DEMO_STEP_DELAY_MS", 0, 0, 3000);
-}
-
-function getCompletionPauseMs() {
-  return boundedNumberEnv("TEST_COMPLETION_PAUSE_MS", 5000, 0, 30000);
-}
+function getDemoStepDelayMs() { return boundedNumberEnv("DEMO_STEP_DELAY_MS", 0, 0, 3000); }
+function getCompletionPauseMs() { return boundedNumberEnv("TEST_COMPLETION_PAUSE_MS", 5000, 0, 30000); }
 
 function withDemoDelay(chain) {
   const delayMs = getDemoStepDelayMs();
@@ -34,10 +29,7 @@ function withDemoDelay(chain) {
 function safeEvidenceName(title) {
   const raw = String(title || "test");
   const id = raw.match(/TC(?:\d{3}|-H\d{3})/i)?.[0]?.toUpperCase() || "TEST";
-  const suffix = raw
-    .replace(/[^a-zA-Z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 70);
+  const suffix = raw.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
   return `${id}-${suffix || "completion"}`;
 }
 
@@ -55,14 +47,11 @@ function performGroundedLogin(username, password) {
   const runtime = loginRuntime();
   if (!username || !password) throw new Error("Runtime login credentials are not configured for this test run.");
   if (!runtime.usernameSelector || !runtime.passwordSelector || !runtime.submitSelector) throw new Error("Runtime login controls were not grounded from page discovery.");
-
   cy.visit(runtime.loginPath);
   cy.get(runtime.usernameSelector).clear({ log: false }).type(String(username), { log: false });
   cy.get(runtime.passwordSelector).clear({ log: false }).type(String(password), { log: false });
   cy.get(runtime.submitSelector).click();
-  if (runtime.successPath && runtime.successPath !== runtime.loginPath) {
-    cy.location("pathname", { timeout: 15000 }).should("eq", runtime.successPath);
-  }
+  if (runtime.successPath && runtime.successPath !== runtime.loginPath) cy.location("pathname", { timeout: 15000 }).should("eq", runtime.successPath);
 }
 
 function configuredActors() {
@@ -72,9 +61,7 @@ function configuredActors() {
   try {
     const parsed = JSON.parse(String(raw));
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    throw new Error("Runtime test actor configuration is malformed.");
-  }
+  } catch { throw new Error("Runtime test actor configuration is malformed."); }
 }
 
 function parseJsonEnv(name, fallback = {}) {
@@ -104,26 +91,14 @@ function installBrowserEvidence(win) {
   const originalError = win.console?.error?.bind(win.console);
   const originalWarn = win.console?.warn?.bind(win.console);
   if (win.console) {
-    win.console.error = (...args) => {
-      try { win.__testNexusConsoleErrors.push(args.map((item) => String(item)).join(" ").slice(0, 2000)); } catch {}
-      return originalError?.(...args);
-    };
-    win.console.warn = (...args) => {
-      try { win.__testNexusConsoleWarnings.push(args.map((item) => String(item)).join(" ").slice(0, 2000)); } catch {}
-      return originalWarn?.(...args);
-    };
+    win.console.error = (...args) => { try { win.__testNexusConsoleErrors.push(args.map(String).join(" ").slice(0, 2000)); } catch {} return originalError?.(...args); };
+    win.console.warn = (...args) => { try { win.__testNexusConsoleWarnings.push(args.map(String).join(" ").slice(0, 2000)); } catch {} return originalWarn?.(...args); };
   }
-  win.addEventListener?.("error", (event) => {
-    try { win.__testNexusRuntimeErrors.push(String(event?.error?.message || event?.message || "window error").slice(0, 2000)); } catch {}
-  });
-  win.addEventListener?.("unhandledrejection", (event) => {
-    try { win.__testNexusRuntimeErrors.push(String(event?.reason?.message || event?.reason || "unhandled rejection").slice(0, 2000)); } catch {}
-  });
+  win.addEventListener?.("error", (event) => { try { win.__testNexusRuntimeErrors.push(String(event?.error?.message || event?.message || "window error").slice(0, 2000)); } catch {} });
+  win.addEventListener?.("unhandledrejection", (event) => { try { win.__testNexusRuntimeErrors.push(String(event?.reason?.message || event?.reason || "unhandled rejection").slice(0, 2000)); } catch {} });
 }
 
-Cypress.on("window:before:load", (win) => {
-  if (boolEnv("CAPTURE_BROWSER_EVIDENCE", true)) installBrowserEvidence(win);
-});
+Cypress.on("window:before:load", (win) => { if (boolEnv("CAPTURE_BROWSER_EVIDENCE", true)) installBrowserEvidence(win); });
 
 Cypress.on("fail", (err) => {
   if (currentRuntimeItem?.itemId) {
@@ -138,9 +113,7 @@ Cypress.Commands.add("testNexusSetCurrentItem", (item) => {
   return cy.wrap(null, { log: false });
 });
 
-Cypress.Commands.add("loginWithRuntimeCredentials", () => {
-  performGroundedLogin(Cypress.env("TEST_USERNAME"), Cypress.env("TEST_PASSWORD"));
-});
+Cypress.Commands.add("loginWithRuntimeCredentials", () => performGroundedLogin(Cypress.env("TEST_USERNAME"), Cypress.env("TEST_PASSWORD")));
 
 Cypress.Commands.add("typeRuntimeCredential", (selector, credential) => {
   const kind = String(credential || "").trim().toLowerCase();
@@ -153,12 +126,9 @@ Cypress.Commands.add("loginAsTestActor", (actorRef) => {
   const ref = String(actorRef || "").trim();
   const actor = configuredActors()[ref] || null;
   if (!ref || !actor?.username || !actor?.password) throw new Error(`Runtime credentials are not configured for test actor ${ref || "(missing)"}.`);
-
   cy.clearCookies({ log: false });
   cy.clearLocalStorage({ log: false });
-  cy.window({ log: false }).then((win) => {
-    try { win.sessionStorage.clear(); } catch {}
-  });
+  cy.window({ log: false }).then((win) => { try { win.sessionStorage.clear(); } catch {} });
   performGroundedLogin(actor.username, actor.password);
 });
 
@@ -172,6 +142,7 @@ Cypress.Commands.add("loginEnterpriseSso", (provider = "ENTERPRISE") => {
     if (cfg.startPath) cy.visit(String(cfg.startPath));
     if (cfg.triggerSelector) cy.get(String(cfg.triggerSelector)).should("have.length", 1).click();
 
+    const mfa = cfg.mfa && typeof cfg.mfa === "object" ? cfg.mfa : null;
     const args = {
       username: String(username),
       password: String(password),
@@ -181,17 +152,40 @@ Cypress.Commands.add("loginEnterpriseSso", (provider = "ENTERPRISE") => {
       passwordSubmitSelector: String(cfg.passwordSubmitSelector || cfg.submitSelector || ""),
       continueSelector: String(cfg.continueSelector || ""),
       originPath: String(cfg.originPath || ""),
+      mfa: mfa ? {
+        selector: String(mfa.selector || ""),
+        submitSelector: String(mfa.submitSelector || ""),
+        accountRef: String(mfa.accountRef || ""),
+        action: String(mfa.action || "get-code"),
+        resultField: String(mfa.resultField || "code"),
+        timeoutMs: Math.max(1000, Math.min(Number(mfa.timeoutMs || 30000), 120000)),
+        required: mfa.required !== false,
+      } : null,
     };
-    if (!args.usernameSelector || !args.passwordSelector || !args.passwordSubmitSelector) {
-      throw new Error(`Enterprise SSO ${cfg.key} requires configured username/password/submit selectors; TestNexus will not invent identity-provider selectors.`);
-    }
+    if (!args.usernameSelector || !args.passwordSelector || !args.passwordSubmitSelector) throw new Error(`Enterprise SSO ${cfg.key} requires configured username/password/submit selectors; TestNexus will not invent identity-provider selectors.`);
+    if (args.mfa?.required && (!args.mfa.selector || !args.mfa.submitSelector || !args.mfa.accountRef)) throw new Error(`Enterprise SSO ${cfg.key} MFA requires selector, submitSelector and approved accountRef configuration.`);
 
-    cy.origin(cfg.origin, { args }, ({ username, password, usernameSelector, usernameSubmitSelector, passwordSelector, passwordSubmitSelector, continueSelector, originPath }) => {
+    cy.origin(cfg.origin, { args }, ({ username, password, usernameSelector, usernameSubmitSelector, passwordSelector, passwordSubmitSelector, continueSelector, originPath, mfa }) => {
       if (originPath) cy.visit(originPath);
       cy.get(usernameSelector).should("have.length", 1).clear({ log: false }).type(username, { log: false });
       if (usernameSubmitSelector) cy.get(usernameSubmitSelector).should("have.length", 1).click();
       cy.get(passwordSelector, { timeout: 20000 }).should("have.length", 1).clear({ log: false }).type(password, { log: false });
       cy.get(passwordSubmitSelector).should("have.length", 1).click();
+
+      if (mfa?.required) {
+        cy.get(mfa.selector, { timeout: mfa.timeoutMs }).should("have.length", 1).and("be.visible");
+        cy.task("testNexusEnterpriseAdapter", {
+          capability: "MFA_OTP",
+          action: mfa.action,
+          payload: { accountRef: mfa.accountRef },
+        }, { log: false }).then((result) => {
+          const code = result && (result[mfa.resultField] ?? result.code ?? result.otp ?? result.value);
+          if (!code) throw new Error("MFA_OTP adapter did not return an approved test-account code.");
+          cy.get(mfa.selector).clear({ log: false }).type(String(code), { log: false });
+          cy.get(mfa.submitSelector).should("have.length", 1).click();
+        });
+      }
+
       if (continueSelector) {
         cy.get("body").then(($body) => {
           const $continue = $body.find(continueSelector);
@@ -218,18 +212,9 @@ Cypress.Commands.add("pressNativeKey", (key) => {
   const name = String(key || "").trim().toUpperCase();
   const keys = Cypress.Keyboard?.Keys || {};
   const aliases = {
-    TAB: keys.TAB,
-    ENTER: keys.ENTER,
-    ESC: keys.ESC,
-    ESCAPE: keys.ESC,
-    UP: keys.UP,
-    DOWN: keys.DOWN,
-    LEFT: keys.LEFT,
-    RIGHT: keys.RIGHT,
-    HOME: keys.HOME,
-    END: keys.END,
-    PAGEUP: keys.PAGE_UP,
-    PAGEDOWN: keys.PAGE_DOWN,
+    TAB: keys.TAB, ENTER: keys.ENTER, ESC: keys.ESC, ESCAPE: keys.ESC,
+    UP: keys.UP, DOWN: keys.DOWN, LEFT: keys.LEFT, RIGHT: keys.RIGHT,
+    HOME: keys.HOME, END: keys.END, PAGEUP: keys.PAGEUP, PAGEDOWN: keys.PAGEDOWN,
   };
   const resolved = aliases[name];
   if (!resolved || typeof cy.press !== "function") throw new Error(`Native key ${name || "(missing)"} is not supported by the installed automation runtime.`);
@@ -239,7 +224,6 @@ Cypress.Commands.add("pressNativeKey", (key) => {
 ["click", "type", "select", "check", "uncheck", "clear"].forEach((commandName) => {
   Cypress.Commands.overwrite(commandName, (originalFn, subject, ...args) => withDemoDelay(originalFn(subject, ...args)));
 });
-
 Cypress.Commands.overwrite("visit", (originalFn, url, options) => withDemoDelay(originalFn(url, options)));
 
 beforeEach(function () {
@@ -248,12 +232,8 @@ beforeEach(function () {
   const testCaseId = String(title).match(/TC(?:\d{3}|-H\d{3})/i)?.[0]?.toUpperCase() || "";
   cy.task("markTestStarted", { testTitle: String(title), testCaseId }, { log: false });
   cy.task("testNexusRuntimeEvent", {
-    kind: "TEST",
-    phase: "STARTED",
-    testCaseId,
-    testTitle: String(title),
-    browser: Cypress.browser?.name || null,
-    browserVersion: Cypress.browser?.version || null,
+    kind: "TEST", phase: "STARTED", testCaseId, testTitle: String(title),
+    browser: Cypress.browser?.name || null, browserVersion: Cypress.browser?.version || null,
   }, { log: false });
 });
 
@@ -272,9 +252,7 @@ afterEach(function () {
         durationMs: Number.isFinite(Number(entry.duration)) ? Math.round(Number(entry.duration)) : null,
       }));
       cy.task("testNexusRuntimeEvent", {
-        kind: "BROWSER_EVIDENCE",
-        phase: "CAPTURED",
-        testCaseId,
+        kind: "BROWSER_EVIDENCE", phase: "CAPTURED", testCaseId,
         url: String(win.location?.href || ""),
         consoleErrors: Array.isArray(win.__testNexusConsoleErrors) ? win.__testNexusConsoleErrors.slice(-50) : [],
         consoleWarnings: Array.isArray(win.__testNexusConsoleWarnings) ? win.__testNexusConsoleWarnings.slice(-50) : [],
@@ -285,18 +263,9 @@ afterEach(function () {
   }
 
   cy.task("testNexusRuntimeEvent", { kind: "TEST", phase: "FINISHED", testCaseId, testTitle: String(title), state }, { log: false });
-
-  if (screenshotEachTest) {
-    cy.screenshot(safeEvidenceName(title), {
-      capture: "viewport",
-      overwrite: true,
-      log: false,
-    });
-  }
-
-  if (completionPauseMs > 0) {
-    cy.wait(completionPauseMs, { log: false });
-  } else {
+  if (screenshotEachTest) cy.screenshot(safeEvidenceName(title), { capture: "viewport", overwrite: true, log: false });
+  if (completionPauseMs > 0) cy.wait(completionPauseMs, { log: false });
+  else {
     const demoDelayMs = getDemoStepDelayMs();
     if (demoDelayMs > 0) cy.wait(Math.max(300, Math.min(demoDelayMs, 1200)), { log: false });
   }
