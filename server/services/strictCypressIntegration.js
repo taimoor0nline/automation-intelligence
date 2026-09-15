@@ -3,6 +3,7 @@ const { validateCypressContract } = require('./cypressContractValidator');
 const { validateWebScenarioPolicy } = require('./webScenarioPolicy');
 const { validateNavigationContract } = require('./navigationContract');
 const { validateDeterministicStateContract } = require('./deterministicStateContract');
+const { validateStaticExpectationContract } = require('./staticExpectationContract');
 const { buildCanonicalElementRegistry } = require('./canonicalElementRegistry');
 const {
   validateStrictGeneratedArtifact,
@@ -38,7 +39,8 @@ function strictFailure(testCase, strict, extra = {}) {
       webScenarioPolicy: extra.webScenarioPolicy ?? testCase?.automationReadiness?.webScenarioPolicy ?? null,
       navigationContract: extra.navigationContract ?? testCase?.automationReadiness?.navigationContract ?? null,
       stateContract: extra.stateContract ?? testCase?.automationReadiness?.stateContract ?? null,
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+strict-artifact-contract',
+      staticExpectationContract: extra.staticExpectationContract ?? testCase?.automationReadiness?.staticExpectationContract ?? null,
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+strict-artifact-contract',
     },
   };
 }
@@ -80,12 +82,23 @@ function attachStrictContract(testCase, context) {
     });
   }
 
+  const staticExpectationContract = validateStaticExpectationContract(testCase, registry, context);
+  if (!staticExpectationContract.ok) {
+    return strictFailure(testCase, staticExpectationContract, {
+      webScenarioPolicy: scenarioPolicy,
+      navigationContract,
+      stateContract,
+      staticExpectationContract,
+    });
+  }
+
   const strict = validateCypressContract(testCase, { ...context, canonicalElementRegistry: registry });
   if (!strict.ok) {
     return strictFailure(testCase, strict, {
       webScenarioPolicy: scenarioPolicy,
       navigationContract,
       stateContract,
+      staticExpectationContract,
       cypressContract: strict,
     });
   }
@@ -96,6 +109,7 @@ function attachStrictContract(testCase, context) {
       webScenarioPolicy: scenarioPolicy,
       navigationContract,
       stateContract,
+      staticExpectationContract,
       cypressContract: strict,
       generatedArtifactContract,
     });
@@ -109,7 +123,7 @@ function attachStrictContract(testCase, context) {
       reasonCode: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED',
       reason: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.',
       errors: [{ code: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED', message: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.' }],
-    }, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract, cypressContract: strict, generatedArtifactContract });
+    }, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract, staticExpectationContract, cypressContract: strict, generatedArtifactContract });
   }
 
   return {
@@ -121,6 +135,7 @@ function attachStrictContract(testCase, context) {
       webScenarioPolicy: scenarioPolicy,
       navigationContract,
       stateContract,
+      staticExpectationContract,
       contractIntegrity: {
         ...(testCase.automationReadiness?.contractIntegrity || {}),
         cypressArtifactHash: strict.scriptHash,
@@ -128,8 +143,9 @@ function attachStrictContract(testCase, context) {
         generatedArtifactValidatorVersion: generatedArtifactContract.version,
         navigationValidatorVersion: navigationContract.version,
         stateValidatorVersion: stateContract.version,
+        staticExpectationValidatorVersion: staticExpectationContract.version,
       },
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+strict-artifact-contract',
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+strict-artifact-contract',
     },
   };
 }
