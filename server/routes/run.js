@@ -15,7 +15,7 @@ const ALLOWED_TYPES = new Set(["positive", "negative", "boundary", "functional",
 const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
 const LOGIN_SCOPE_FORBIDDEN_ANALYSIS = /\b(feedback|website|url|age|rating|consent|product|category|checkout|payment|cart|profile)\b/i;
 const RUNNABLE_STATES = new Set(["AWAITING_APPROVAL", "DONE"]);
-const RUNTIME_ITEM_MARKER = /\[TN_ITEM=(TC(?:\d{3}|-H\d{3})-(ACT|ASRT)-(\d{3});KIND=(ACTION|ASSERTION);OP=([A-Z0-9_]+)\]/i;
+const RUNTIME_ITEM_MARKER = /\[TN_ITEM=(TC(?:\d{3}|-H\d{3})-(ACT|ASRT)-(\d{3}));KIND=(ACTION|ASSERTION);OP=([A-Z0-9_]+)\]/i;
 
 function cleanString(value, max = 1000) {
   return String(value ?? "").trim().slice(0, max);
