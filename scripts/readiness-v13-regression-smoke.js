@@ -66,6 +66,6 @@ const verifyUrl = readiness({
   expectedResults:['Element [data-testid="username"] exists'],
 });
 assert.equal(verifyUrl.status, READY, verifyUrl.reason);
-assert(verifyUrl.automationPlan.assertions.some((item) => item.operation === 'ASSERT_URL_INCLUDES' && item.value === '/feedback'));
+assert(verifyUrl.automationPlan.assertions.some((item) => item.operation === 'ASSERT_URL_INCLUDES' && item.fragment === '/feedback'));
 
 console.log('Readiness V13 regression smoke passed: selector quotes, sentence punctuation and verify URL syntax are normalized safely.');
