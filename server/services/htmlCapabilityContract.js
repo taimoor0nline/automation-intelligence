@@ -1,6 +1,6 @@
 const { runtimeCapabilities } = require('./progressiveTestGenerator');
 
-const VERSION = 'HTML_CAPABILITY_CONTRACT_V1';
+const VERSION = 'HTML_CAPABILITY_CONTRACT_V2';
 const TEXT_ASSERTIONS = new Set(['ASSERT_TEXT_EQUALS','ASSERT_TEXT_CONTAINS','ASSERT_TEXT_NOT_CONTAINS','ASSERT_TEXT_EMPTY','ASSERT_TEXT_NOT_EMPTY']);
 const HTML_ASSERTIONS = new Set(['ASSERT_HTML_EQUALS','ASSERT_HTML_CONTAINS']);
 const VALUE_ASSERTIONS = new Set(['ASSERT_VALUE_EQUALS','ASSERT_VALUE_CONTAINS','ASSERT_VALUE_EMPTY','ASSERT_VALUE_NOT_EMPTY','ASSERT_VALUE_LENGTH_EQUALS','ASSERT_VALUE_LENGTH_AT_MOST','ASSERT_VALUE_LENGTH_AT_LEAST']);
@@ -36,6 +36,7 @@ function validDateTimeLocal(value) {
   const parts = clean(value).split('T');
   return parts.length === 2 && validDate(parts[0]) && validTime(parts[1]);
 }
+function validColor(value) { return /^#[0-9a-fA-F]{6}$/.test(clean(value)); }
 function typeValueProblem(element = {}, value) {
   const type = lower(element.type || 'text');
   const text = String(value ?? '');
@@ -72,9 +73,12 @@ function configuredFixtures() {
   return new Set(Array.isArray(direct.fixtures) ? direct.fixtures.map(String) : []);
 }
 function actionFiles(action = {}) {
-  if (Array.isArray(action.fileNames)) return [...new Set(action.fileNames.map((value) => clean(value)).filter(Boolean))];
+  if (Array.isArray(action.fileNames)) return action.fileNames.map((value) => clean(value)).filter(Boolean);
   const single = clean(action.fileName);
   return single ? [single] : [];
+}
+function actionValues(action = {}) {
+  return Array.isArray(action.values) ? action.values.map((value) => clean(value)).filter(Boolean) : [];
 }
 
 function rangeProblem(element = {}, value) {
@@ -93,6 +97,19 @@ function rangeProblem(element = {}, value) {
   return null;
 }
 
+function validateSelectValues(element, values, operation, problems, elementRef) {
+  if (!values.length) {
+    problems.push(issue('HTML_SELECT_VALUES_REQUIRED', `${operation} requires at least one discovered option value.`, { elementRef }));
+    return;
+  }
+  if (new Set(values).size !== values.length) problems.push(issue('HTML_SELECT_DUPLICATE_VALUE', `${operation} contains duplicate option values.`, { elementRef, values }));
+  for (const requested of values) {
+    const option = (element?.options || []).find((item) => clean(item.value) === requested || clean(item.text) === requested);
+    if (!option) problems.push(issue('HTML_SELECT_OPTION_NOT_FOUND', `${operation} value ${JSON.stringify(requested)} is not present in the discovered native select.`, { elementRef }));
+    else if (option.disabled === true) problems.push(issue('HTML_SELECT_OPTION_DISABLED', `${operation} value ${JSON.stringify(requested)} targets a discovered disabled option or disabled optgroup.`, { elementRef }));
+  }
+}
+
 function validateAction(action, elements, fixtures, problems) {
   const operation = op(action.operation);
   const element = action.elementRef ? elements.get(String(action.elementRef)) : null;
@@ -101,16 +118,16 @@ function validateAction(action, elements, fixtures, problems) {
   };
   const capabilityMap = {
     TYPE: 'TYPE', TYPE_RUNTIME_CREDENTIAL: 'TYPE', CLEAR: 'CLEAR', CLICK: 'CLICK', DBLCLICK: 'DBLCLICK', RIGHTCLICK: 'RIGHTCLICK',
-    HOVER: 'HOVER', FOCUS: 'FOCUS', BLUR: 'BLUR', SELECT: 'SELECT', CHECK: 'CHECK', UNCHECK: 'UNCHECK', SUBMIT: 'SUBMIT',
-    SCROLL_INTO_VIEW: 'SCROLL_INTO_VIEW', PRESS_KEY: 'PRESS_KEY', SELECT_FILE: 'SELECT_FILE', SET_RANGE_VALUE: 'SET_RANGE_VALUE',
+    HOVER: 'HOVER', FOCUS: 'FOCUS', BLUR: 'BLUR', SELECT: 'SELECT', SELECT_MULTIPLE: 'SELECT_MULTIPLE', CHECK: 'CHECK', UNCHECK: 'UNCHECK', SUBMIT: 'SUBMIT',
+    SCROLL_INTO_VIEW: 'SCROLL_INTO_VIEW', PRESS_KEY: 'PRESS_KEY', SELECT_FILE: 'SELECT_FILE', SET_RANGE_VALUE: 'SET_RANGE_VALUE', SET_COLOR_VALUE: 'SET_COLOR_VALUE',
     DROP_FILE: 'DROP_FILE', SELECT_FILES: 'SELECT_FILE', DROP_FILES: 'DROP_FILE',
   };
   if (capabilityMap[operation]) requireCapability(capabilityMap[operation]);
 
-  if (element?.disabled === true && ['TYPE','TYPE_RUNTIME_CREDENTIAL','CLEAR','CLICK','DBLCLICK','RIGHTCLICK','FOCUS','SELECT','CHECK','UNCHECK','SUBMIT','PRESS_KEY','SELECT_FILE','SELECT_FILES','SET_RANGE_VALUE'].includes(operation)) {
+  if (element?.disabled === true && ['TYPE','TYPE_RUNTIME_CREDENTIAL','CLEAR','CLICK','DBLCLICK','RIGHTCLICK','FOCUS','SELECT','SELECT_MULTIPLE','CHECK','UNCHECK','SUBMIT','PRESS_KEY','SELECT_FILE','SELECT_FILES','SET_RANGE_VALUE','SET_COLOR_VALUE'].includes(operation)) {
     problems.push(issue('HTML_DISABLED_ELEMENT_INTERACTION', `${operation} targets an element discovered as disabled.`, { elementRef: action.elementRef }));
   }
-  if (element?.readonly === true && ['TYPE','TYPE_RUNTIME_CREDENTIAL','CLEAR','SET_RANGE_VALUE'].includes(operation)) {
+  if (element?.readonly === true && ['TYPE','TYPE_RUNTIME_CREDENTIAL','CLEAR','SET_RANGE_VALUE','SET_COLOR_VALUE'].includes(operation)) {
     problems.push(issue('HTML_READONLY_ELEMENT_INTERACTION', `${operation} targets an element discovered as read-only.`, { elementRef: action.elementRef }));
   }
 
@@ -122,21 +139,24 @@ function validateAction(action, elements, fixtures, problems) {
     const problem = rangeProblem(element, action.value);
     if (problem) problems.push(issue('HTML_RANGE_VALUE_INVALID', `${operation}: ${problem}`, { elementRef: action.elementRef, value: action.value }));
   }
-  if (operation === 'SELECT' && element) {
-    const requested = clean(action.value);
-    const option = (element.options || []).find((item) => clean(item.value) === requested || clean(item.text) === requested);
-    if (!option) problems.push(issue('HTML_SELECT_OPTION_NOT_FOUND', `SELECT value ${JSON.stringify(requested)} is not present in the discovered native select.`, { elementRef: action.elementRef }));
-    else if (option.disabled === true) problems.push(issue('HTML_SELECT_OPTION_DISABLED', `SELECT value ${JSON.stringify(requested)} targets a discovered disabled option.`, { elementRef: action.elementRef }));
+  if (operation === 'SET_COLOR_VALUE' && !validColor(action.value)) {
+    problems.push(issue('HTML_COLOR_VALUE_INVALID', `${operation} requires a six-digit #RRGGBB color value.`, { elementRef: action.elementRef, value: action.value }));
+  }
+  if (operation === 'SELECT' && element) validateSelectValues(element, [clean(action.value)], operation, problems, action.elementRef);
+  if (operation === 'SELECT_MULTIPLE') {
+    if (element?.multiple !== true) problems.push(issue('HTML_SELECT_MULTIPLE_NOT_ALLOWED', 'SELECT_MULTIPLE requires a discovered native select with multiple=true.', { elementRef: action.elementRef }));
+    validateSelectValues(element, actionValues(action), operation, problems, action.elementRef);
   }
 
   if (['SELECT_FILE','DROP_FILE','SELECT_FILES','DROP_FILES'].includes(operation)) {
     const files = actionFiles(action);
     if (!files.length) problems.push(issue('HTML_FILE_FIXTURE_REQUIRED', `${operation} requires at least one approved fixture.`, { elementRef: action.elementRef }));
     if (files.length > 10) problems.push(issue('HTML_FILE_COUNT_TOO_HIGH', `${operation} supports at most 10 files in one deterministic interaction.`, { elementRef: action.elementRef }));
-    if (operation === 'SELECT_FILES' && files.length > 1 && element?.multiple !== true) problems.push(issue('HTML_FILE_MULTIPLE_NOT_ALLOWED', 'Multiple-file selection requires a discovered input[type=file] with multiple=true.', { elementRef: action.elementRef }));
+    if (new Set(files).size !== files.length) problems.push(issue('HTML_FILE_DUPLICATE_FIXTURE', `${operation} contains the same fixture more than once.`, { elementRef: action.elementRef, files }));
+    if (['SELECT_FILES','DROP_FILES'].includes(operation) && files.length > 1 && element?.multiple === false) problems.push(issue('HTML_FILE_MULTIPLE_NOT_ALLOWED', `${operation} requires a discovered multiple-file contract for more than one file.`, { elementRef: action.elementRef }));
     for (const fileName of files) {
       if (!fixtures.has(fileName)) problems.push(issue('HTML_FILE_FIXTURE_UNAVAILABLE', `${operation} references a file that is not present in the approved upload fixture inventory: ${fileName}.`, { elementRef: action.elementRef, fileName }));
-      if (operation.startsWith('SELECT') && element && !fileAccepted(element, fileName)) problems.push(issue('HTML_FILE_ACCEPT_MISMATCH', `${fileName} does not match the discovered accept=${JSON.stringify(element.accept)} contract.`, { elementRef: action.elementRef, fileName, accept: element.accept }));
+      if (element && clean(element.accept) && !fileAccepted(element, fileName)) problems.push(issue('HTML_FILE_ACCEPT_MISMATCH', `${fileName} does not match the discovered accept=${JSON.stringify(element.accept)} contract.`, { elementRef: action.elementRef, fileName, accept: element.accept }));
       if (element && has(element, 'IMAGE_UPLOAD') && !String(MIME_BY_EXT[extension(fileName)] || '').startsWith('image/')) problems.push(issue('HTML_IMAGE_UPLOAD_FIXTURE_MISMATCH', `${fileName} is not an image fixture for the discovered image-upload control.`, { elementRef: action.elementRef, fileName }));
     }
   }
@@ -161,6 +181,15 @@ function validateAssertion(assertion, elements, problems) {
   if (VALUE_ASSERTIONS.has(operation)) requireCapability('VALUE');
   if (CHECK_ASSERTIONS.has(operation)) requireCapability('CHECK');
   if (SELECT_ASSERTIONS.has(operation)) requireCapability('SELECT');
+  if (operation === 'ASSERT_SELECTED_VALUES_EQUALS') {
+    requireCapability('SELECT_MULTIPLE');
+    const values = actionValues(assertion);
+    if (new Set(values).size !== values.length) problems.push(issue('HTML_SELECT_DUPLICATE_VALUE', `${operation} contains duplicate option values.`, { elementRef: assertion.elementRef, values }));
+    for (const value of values) {
+      const option = (element?.options || []).find((item) => clean(item.value) === value);
+      if (!option) problems.push(issue('HTML_SELECT_OPTION_NOT_FOUND', `${operation} expected value ${JSON.stringify(value)} is not present in discovery.`, { elementRef: assertion.elementRef }));
+    }
+  }
   if (INPUT_METADATA_ASSERTIONS.has(operation)) requireCapability('INPUT_METADATA');
   if (IMAGE_ASSERTIONS.has(operation)) requireCapability('IMAGE');
   if (['ASSERT_REQUIRED','ASSERT_OPTIONAL'].includes(operation)) requireCapability('REQUIRED_STATE');
@@ -208,4 +237,5 @@ module.exports = {
   fileAccepted,
   typeValueProblem,
   rangeProblem,
+  validColor,
 };
