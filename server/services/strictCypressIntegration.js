@@ -4,7 +4,7 @@ const { validateWebScenarioPolicy } = require('./webScenarioPolicy');
 const { validateNavigationContract } = require('./navigationContract');
 const { validateDeterministicStateContract } = require('./deterministicStateContract');
 const { validateStaticExpectationContract } = require('./staticExpectationContract');
-const { validateHtmlCapabilityContract } = require('./htmlCapabilityContract');
+const { validateHtmlCapabilityContract, assertHtmlRuntimePrerequisites } = require('./htmlCapabilityContract');
 const { buildCanonicalElementRegistry } = require('./canonicalElementRegistry');
 const {
   validateStrictGeneratedArtifact,
@@ -172,6 +172,7 @@ function patchFeasibility() {
 
 function currentSingleArtifactHash(testCase) {
   assertRuntimePrerequisites(testCase);
+  assertHtmlRuntimePrerequisites(testCase);
   const generated = rawGenerator.generateDeterministicAutomation([testCase]);
   assertGeneratedScriptSyntax(generated.script, { singleCase: true });
   return scriptHash(generated.script);
