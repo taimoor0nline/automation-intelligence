@@ -6,12 +6,19 @@ function boolValue(value) {
 }
 
 function parsedSeeds() {
+  const raw = Cypress.env('DISCOVERY_TARGET_URLS_JSON');
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  if (raw && typeof raw === 'object') return [];
+  const text = String(raw || '').trim();
+  if (!text) return [];
   try {
-    const value = JSON.parse(String(Cypress.env('DISCOVERY_TARGET_URLS_JSON') || '[]'));
-    return Array.isArray(value) ? value.filter(Boolean) : [];
+    const value = JSON.parse(text);
+    if (Array.isArray(value)) return value.map(String).filter(Boolean);
+    if (typeof value === 'string' && value) return [value];
   } catch {
-    return [];
+    if (/^https?:\/\//i.test(text)) return [text];
   }
+  return [];
 }
 
 describe('TestNexus rendered discovery input contract', () => {
