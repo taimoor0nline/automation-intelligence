@@ -16,6 +16,7 @@
     .repair-workbench-status{display:none;margin-top:12px;padding:9px 11px;border-radius:9px;font-size:10.5px;line-height:1.45}.repair-workbench-status.show{display:block}.repair-workbench-status.ok{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0}.repair-workbench-status.bad{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}.repair-workbench-status.working{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
     .repair-contract-note{margin-top:13px;padding:9px 11px;border-radius:9px;background:#f8fafc;border:1px solid #e2e8f0;font-size:9.8px;line-height:1.5;color:#64748b}.repair-contract-note b{color:#334155}
     .readiness-actions .testnexus-repair-workbench-btn{font-weight:800}
+    .repair-workbench [data-ai-repair-busy="true"]{opacity:.7;cursor:wait}
     @media(max-width:760px){.repair-paths{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
@@ -34,7 +35,7 @@
         <div class="repair-paths">
           <div class="repair-path"><h4>Regenerate with AI</h4><p>Keep the test's current business intent/category/scenario, but regenerate its canonical actions and assertions from the current rendered application evidence.</p><button type="button" class="btn ghost" data-repair-action="regenerate">Regenerate</button></div>
           <div class="repair-path"><h4>Rewrite Test</h4><p>Open the normal human test-case editor and rewrite the title, steps and expected results yourself. Saving triggers deterministic readiness again.</p><button type="button" class="btn ghost" data-repair-action="human">Rewrite Manually</button></div>
-          <div class="repair-path"><h4>Edit Cypress</h4><p>Advanced authoring using the supported Cypress command/assertion subset. Selectors and routes still have to match discovered evidence; arbitrary JavaScript is not executed.</p><button type="button" class="btn ghost" data-repair-action="cypress">Edit Cypress Syntax</button></div>
+          <div class="repair-path"><h4>Edit Automation Script</h4><p>Advanced authoring using the supported automation command/assertion subset. Selectors and routes still have to match discovered evidence; arbitrary JavaScript is not executed.</p><button type="button" class="btn ghost" data-repair-action="automation-script">Edit Automation Script</button></div>
         </div>
         <div class="repair-ai-rewrite">
           <label for="repairAiInstruction">Or tell AI exactly how to rewrite this case</label>
@@ -42,20 +43,38 @@
           <div class="actions"><button type="button" class="btn primary" data-repair-action="rewrite-ai">Rewrite with AI</button></div>
         </div>
         <div class="repair-workbench-status" id="repairWorkbenchStatus"></div>
-        <div class="repair-contract-note"><b>Contract rule:</b> every repair invalidates the previous approval seal. The repaired case must pass deterministic readiness and exact Cypress validation, then be reviewed again before Run/Re-run can seal it for execution.</div>
+        <div class="repair-contract-note"><b>Contract rule:</b> every repair invalidates the previous approval seal. The repaired case must pass deterministic readiness and exact automation-artifact validation, then be reviewed again before Run/Re-run can seal it for execution.</div>
       </div>
     </div>`;
   document.body.appendChild(modal);
 
-  let currentIndex = -1;
+  let currentCaseId = '';
+  let activeRepairController = null;
+  let activeRepairTimeout = null;
 
   function cases() {
     try { if (typeof testCases !== 'undefined' && Array.isArray(testCases)) return testCases; } catch {}
     return Array.isArray(window.testCases) ? window.testCases : [];
   }
 
+  function resolveCase(ref) {
+    const list = cases();
+    if (typeof ref === 'number' || /^\d+$/.test(String(ref || ''))) {
+      const index = Number(ref);
+      const tc = list[index] || null;
+      return { tc, index };
+    }
+    const id = String(ref || '').trim().toUpperCase();
+    const index = list.findIndex((item) => String(item?.id || '').trim().toUpperCase() === id);
+    return { tc: index >= 0 ? list[index] : null, index };
+  }
+
+  function currentCaseInfo() {
+    return resolveCase(currentCaseId);
+  }
+
   function currentCase() {
-    return currentIndex >= 0 ? cases()[currentIndex] || null : null;
+    return currentCaseInfo().tc;
   }
 
   function setStatus(text, type) {
@@ -64,20 +83,42 @@
     box.className = `repair-workbench-status${text ? ` show ${type || ''}` : ''}`;
   }
 
+  function setAiBusy(busy, action = '') {
+    modal.querySelectorAll('[data-repair-action="regenerate"],[data-repair-action="rewrite-ai"]').forEach((button) => {
+      if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent;
+      button.disabled = Boolean(busy);
+      button.dataset.aiRepairBusy = busy ? 'true' : 'false';
+      button.textContent = busy && button.dataset.repairAction === action
+        ? (action === 'regenerate' ? 'Regenerating…' : 'Rewriting…')
+        : button.dataset.idleLabel;
+    });
+  }
+
+  function cancelActiveRepair() {
+    if (activeRepairTimeout) clearTimeout(activeRepairTimeout);
+    activeRepairTimeout = null;
+    if (activeRepairController) activeRepairController.abort();
+    activeRepairController = null;
+    setAiBusy(false);
+  }
+
   function close() {
+    cancelActiveRepair();
     modal.classList.remove('show');
     setStatus('', '');
   }
 
-  function open(index) {
-    const tc = cases()[Number(index)];
+  function open(ref) {
+    const resolved = resolveCase(ref);
+    const tc = resolved.tc;
     if (!tc) return;
-    currentIndex = Number(index);
+    currentCaseId = String(tc.id || '').trim().toUpperCase();
     const readiness = tc.automationReadiness || {};
     document.getElementById('repairWorkbenchTitle').textContent = `Repair ${tc.id || 'test case'}`;
     document.getElementById('repairWorkbenchSubtitle').textContent = tc.title || 'Choose how this test definition should be corrected.';
     document.getElementById('repairWorkbenchReason').textContent = `${String(readiness.status || 'BLOCKED').replaceAll('_',' ')} · ${readiness.reasonCode || 'REVIEW_REQUIRED'} — ${readiness.reason || 'The case is not currently executable.'}`;
     document.getElementById('repairAiInstruction').value = '';
+    cancelActiveRepair();
     setStatus('', '');
     modal.classList.add('show');
   }
@@ -91,40 +132,80 @@
 
   async function aiRepair(action) {
     const tc = currentCase();
-    if (!tc || !window.sessionId && typeof sessionId === 'undefined') return;
+    if (!tc || (!window.sessionId && typeof sessionId === 'undefined')) return;
     const instruction = document.getElementById('repairAiInstruction').value.trim();
     if (action === 'rewrite-ai' && !instruction) {
       setStatus('Describe how you want this test rewritten.', 'bad');
       return;
     }
-    setStatus(action === 'regenerate' ? 'Regenerating from current rendered evidence…' : 'AI is rewriting the test contract…', 'working');
-    modal.querySelectorAll('[data-repair-action]').forEach((button) => { button.disabled = true; });
+    if (activeRepairController) return;
+
+    const controller = new AbortController();
+    activeRepairController = controller;
+    let timedOut = false;
+    activeRepairTimeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 120000);
+
+    setStatus(action === 'regenerate'
+      ? 'Regenerating from current rendered evidence… You can close this dialog to cancel.'
+      : 'AI is rewriting the test contract… You can close this dialog to cancel.', 'working');
+    setAiBusy(true, action);
+
     try {
       const sid = typeof sessionId !== 'undefined' ? sessionId : window.sessionId;
       const response = await fetch('/api/test-cases/repair-workbench', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: sid, testCase: tc, action, instruction, credentials: credentials() }),
+        signal: controller.signal,
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.reply || 'The test case could not be regenerated safely.');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = Array.isArray(data.validationErrors) && data.validationErrors.length
+          ? ` ${data.validationErrors[0]?.message || data.validationErrors[0]}`
+          : '';
+        throw new Error(`${data.reply || 'The test case could not be regenerated safely.'}${detail}`.trim());
+      }
       if (!data.testCase) throw new Error('Repair returned no test case.');
-      cases()[currentIndex] = data.testCase;
+
+      const list = cases();
+      const index = list.findIndex((item) => String(item?.id || '').toUpperCase() === currentCaseId);
+      if (index < 0) throw new Error(`The repaired test case ${currentCaseId} is no longer present in the review list.`);
+      list[index] = data.testCase;
+      currentCaseId = String(data.testCase.id || currentCaseId).toUpperCase();
       if (typeof renderCases === 'function') renderCases();
-      setStatus(data.message || (data.automationReady ? 'Repair validated. Review the new case before execution.' : 'The rewritten case is still blocked; choose another repair path or revise it manually.'), data.automationReady ? 'ok' : 'bad');
-      setTimeout(() => {
-        close();
-        const card = document.querySelectorAll('#cases .case')[currentIndex];
-        card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, data.automationReady ? 900 : 1700);
+
+      if (data.automationReady) {
+        setStatus(data.message || 'Repair validated. Review the new case before execution.', 'ok');
+        setTimeout(() => {
+          if (!modal.classList.contains('show')) return;
+          modal.classList.remove('show');
+          setStatus('', '');
+          const card = Array.from(document.querySelectorAll('#cases .case')).find((item) => String(item.querySelector('.case-check')?.value || '').toUpperCase() === currentCaseId);
+          card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 900);
+      } else {
+        setStatus(data.message || 'The rewritten case is still blocked. The repair controls remain active so you can retry, rewrite manually, or edit the automation script.', 'bad');
+      }
     } catch (err) {
-      setStatus(err.message || 'Repair failed.', 'bad');
+      if (err?.name === 'AbortError') {
+        setStatus(timedOut
+          ? 'AI repair timed out. The repair controls are active again; retry or use another repair path.'
+          : 'AI repair was cancelled.', 'bad');
+      } else {
+        setStatus(`${err.message || 'Repair failed.'} The repair controls are active again.`, 'bad');
+      }
     } finally {
-      modal.querySelectorAll('[data-repair-action]').forEach((button) => { button.disabled = false; });
+      if (activeRepairTimeout) clearTimeout(activeRepairTimeout);
+      activeRepairTimeout = null;
+      activeRepairController = null;
+      setAiBusy(false);
     }
   }
 
-  function extractEditableCypress(tc) {
+  function extractEditableAutomation(tc) {
     if (Array.isArray(tc?.cypressSteps) && Array.isArray(tc?.cypressAssertions)) {
       return { steps: tc.cypressSteps, assertions: tc.cypressAssertions };
     }
@@ -137,21 +218,24 @@
   }
 
   function openHumanRewrite() {
-    const index = currentIndex;
-    close();
+    const { tc, index } = currentCaseInfo();
+    if (!tc || index < 0) return;
+    modal.classList.remove('show');
+    setStatus('', '');
     if (typeof openEditor !== 'function') return;
     openEditor(index);
     const mode = document.getElementById('testCreationModeSelect');
     if (mode) mode.value = '';
     const heading = document.getElementById('editorHeading');
-    if (heading) heading.textContent = `Rewrite Test Case · ${currentCase()?.id || ''}`;
+    if (heading) heading.textContent = `Rewrite Test Case · ${tc.id || ''}`;
   }
 
-  function openCypressRewrite() {
-    const tc = currentCase();
-    const index = currentIndex;
-    const seed = extractEditableCypress(tc);
-    close();
+  function openAutomationRewrite() {
+    const { tc, index } = currentCaseInfo();
+    if (!tc || index < 0) return;
+    const seed = extractEditableAutomation(tc);
+    modal.classList.remove('show');
+    setStatus('', '');
     if (typeof openEditor !== 'function') return;
     openEditor(index);
     const mode = document.getElementById('testCreationModeSelect');
@@ -164,9 +248,9 @@
     if (steps && seed.steps.length) steps.value = seed.steps.join('\n');
     if (expected && seed.assertions.length) expected.value = seed.assertions.join('\n');
     const heading = document.getElementById('editorHeading');
-    if (heading) heading.textContent = `Rewrite Test Case · Cypress Syntax · ${tc?.id || ''}`;
+    if (heading) heading.textContent = `Rewrite Test Case · Automation Script · ${tc.id || ''}`;
     const hint = document.getElementById('testCreationModeHint');
-    if (hint) hint.textContent = 'Advanced rewrite: use only the supported Cypress command/assertion subset. Save converts this syntax back into the deterministic TestNexus contract and revalidates it before execution.';
+    if (hint) hint.textContent = 'Advanced rewrite: use only the supported automation command/assertion subset. Save converts this syntax back into the deterministic TestNexus contract and revalidates it before execution.';
     if (!seed.steps.length || !seed.assertions.length) {
       const help = document.getElementById('manualCypressHelp');
       help?.classList.add('show');
@@ -180,10 +264,11 @@
     const action = button.dataset.repairAction;
     if (action === 'regenerate' || action === 'rewrite-ai') return void aiRepair(action);
     if (action === 'human') return openHumanRewrite();
-    if (action === 'cypress') return openCypressRewrite();
+    if (action === 'automation-script') return openAutomationRewrite();
   });
 
   window.openTestRepairWorkbench = open;
+  window.openTestRepairWorkbenchById = (id) => open(String(id || ''));
 
   let decorating = false;
   function decorateBlockedCases() {
@@ -192,7 +277,10 @@
     try {
       const list = cases();
       document.querySelectorAll('#cases .case').forEach((card, index) => {
-        const tc = list[index];
+        const cardId = String(card.querySelector('.case-check')?.value || '').trim().toUpperCase();
+        const tc = cardId
+          ? list.find((item) => String(item?.id || '').trim().toUpperCase() === cardId)
+          : list[index];
         if (!tc) return;
         const status = String(tc?.automationReadiness?.status || 'NEEDS_PREFLIGHT').toUpperCase();
         card.querySelectorAll('button[onclick*="repairCaseWithAI"],button[title="Repair test case with AI"]').forEach((button) => button.remove());
@@ -210,7 +298,7 @@
         button.dataset.repairWorkbench = '1';
         button.textContent = 'Repair';
         button.title = 'Regenerate or rewrite this blocked test case';
-        button.addEventListener('click', () => open(index));
+        button.addEventListener('click', () => open(String(tc.id || cardId || index)));
         actions.prepend(button);
       });
     } finally {
@@ -220,5 +308,11 @@
 
   const casesRoot = document.getElementById('cases');
   if (casesRoot) new MutationObserver(() => setTimeout(decorateBlockedCases, 0)).observe(casesRoot, { childList: true, subtree: true });
-  setTimeout(decorateBlockedCases, 0);
+
+  // readiness.js still owns the historical inline handler. Route it into this
+  // workbench after all page scripts finish loading so there is one repair path.
+  setTimeout(() => {
+    window.repairCaseWithAI = function (index) { open(Number(index)); };
+    decorateBlockedCases();
+  }, 0);
 })();
