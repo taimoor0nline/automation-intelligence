@@ -57,6 +57,7 @@
   }
 
   function prepareBaseUi() {
+    loadScript('/technology-neutral-automation-language.js', 'data-technology-neutral-automation-language', true);
     setFastProfile();
     const obsoleteBatchField = document.getElementById('readinessBatchSize')?.closest('.field');
     if (obsoleteBatchField) obsoleteBatchField.remove();
