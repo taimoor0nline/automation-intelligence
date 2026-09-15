@@ -122,4 +122,12 @@ assert(emailGrounding.ir.actions.some((item) => item.operation === 'CHECK' && it
 assert(!emailGrounding.ir.actions.some((item) => item.operation === 'TYPE' && item.elementRef === ref('email') && item.value !== 'invalid-email'), 'Behavioral grounding must not overwrite the invalid field under test.');
 assert(!emailGrounding.ir.actions.some((item) => item.elementRef === ref('website')), 'Negative field isolation must not populate unrelated optional fields.');
 
+const emailValidation = validateCanonicalIr(emailGrounding.ir, {
+  registry,
+  plannedUnit: { plannedId: 'P006', scenarioType: 'negative', objective: emailIr.objective },
+  story: 'The feedback form must validate email format.',
+  hasCredentials: true,
+});
+assert(emailValidation.ok, emailValidation.reason);
+
 console.log('behavioral-grounding-smoke: PASS');
