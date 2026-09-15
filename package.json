@@ -2,7 +2,7 @@
   "name": "ai-testpilot-poc",
   "version": "2.3.0",
   "private": true,
-  "description": "TestNexus AI — persistent source-aware Cypress automation platform",
+  "description": "TestNexus AI — persistent source-aware browser automation platform",
   "scripts": {
     "postinstall": "npm run automation:install",
     "automation:install": "npm install --prefix automation-system --include=dev",
@@ -25,7 +25,8 @@
     "test:behavioral-grounding": "node scripts/behavioral-grounding-smoke.js",
     "test:behavior-rules": "node scripts/behavior-rule-registry-smoke.js",
     "test:strict-cypress-contract": "node scripts/strict-cypress-contract-smoke.js",
-    "test:capabilities": "node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js && node scripts/multi-role-actor-regression-smoke.js && node scripts/test-actor-import-smoke.js && node scripts/unified-test-user-ui-smoke.js && node scripts/page-scope-regression-smoke.js && node scripts/behavioral-grounding-smoke.js && node scripts/behavior-rule-registry-smoke.js && node scripts/strict-cypress-contract-smoke.js"
+    "test:strict-generated-artifact": "node scripts/strict-generated-artifact-smoke.js",
+    "test:capabilities": "node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js && node scripts/multi-role-actor-regression-smoke.js && node scripts/test-actor-import-smoke.js && node scripts/unified-test-user-ui-smoke.js && node scripts/page-scope-regression-smoke.js && node scripts/behavioral-grounding-smoke.js && node scripts/behavior-rule-registry-smoke.js && node scripts/strict-cypress-contract-smoke.js && node scripts/strict-generated-artifact-smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
