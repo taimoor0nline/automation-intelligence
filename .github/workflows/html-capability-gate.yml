@@ -22,6 +22,11 @@ jobs:
       - name: Install platform and automation runtime
         run: npm install
 
+      - name: Verify server syntax and automation config
+        run: |
+          npm run test:server-syntax
+          npm run test:automation-config
+
       - name: Verify native HTML, searchable suggestion and enterprise execution contracts
         run: |
           npm run test:html-native-controls
