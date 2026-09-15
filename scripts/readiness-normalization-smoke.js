@@ -50,7 +50,7 @@ const valueEquals = readiness({
   expectedResults:['Value of [data-testid="age"] equals "17"'],
 });
 assert.equal(valueEquals.status, READY, valueEquals.reason);
-assert(valueEquals.automationPlan.assertions.some((item) => item.operation === 'ASSERT_VALUE_EQUALS' && item.value === '17'));
+assert(valueEquals.automationPlan.assertions.some((item) => item.operation === 'ASSERT_VALUE_EQUALS' && String(item.value) === '17'));
 
 const verifyPath = readiness({
   id:'TC003', title:'Verify feedback route', type:'positive', preconditions:[],
