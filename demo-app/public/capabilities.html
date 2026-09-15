@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TestNexus HTML Capability Lab</title>
   <style>
-    body{font-family:system-ui,sans-serif;max-width:1100px;margin:24px auto;padding:0 18px;line-height:1.45}section{border:1px solid #ddd;border-radius:8px;padding:16px;margin:14px 0}label{display:block;margin:8px 0}input,textarea,select,button{margin:4px;padding:6px}.drop{border:2px dashed #888;padding:22px;margin:8px 0}.drag{display:inline-block;padding:10px;border:1px solid #888}.status{font-family:monospace;background:#f5f5f5;padding:8px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}table{border-collapse:collapse}td,th{border:1px solid #bbb;padding:5px}
+    body{font-family:system-ui,sans-serif;max-width:1100px;margin:24px auto;padding:0 18px;line-height:1.45}section{border:1px solid #ddd;border-radius:8px;padding:16px;margin:14px 0}label{display:block;margin:8px 0}input,textarea,select,button{margin:4px;padding:6px}.drop{border:2px dashed #888;padding:22px;margin:8px 0}.drag{display:inline-block;padding:10px;border:1px solid #888}.status{font-family:monospace;background:#f5f5f5;padding:8px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}table{border-collapse:collapse}td,th{border:1px solid #bbb;padding:5px}.suggestion-list{list-style:none;margin:0 0 10px 4px;padding:0;border:1px solid #bbb;max-width:360px}.suggestion-list li{padding:6px;cursor:pointer}.suggestion-list li[aria-selected="true"]{font-weight:700}.chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.chip{border:1px solid #aaa;border-radius:14px;padding:3px 8px}
   </style>
 </head>
 <body>
@@ -48,14 +48,46 @@
   </section>
 
   <section>
+    <h2>Searchable suggestions and dropdowns</h2>
+    <label>Search with suggestions
+      <input id="search-suggest-input" type="search" role="combobox" aria-label="Site search" aria-autocomplete="list" aria-controls="search-suggest-list" aria-expanded="false" autocomplete="off">
+    </label>
+    <ul id="search-suggest-list" class="suggestion-list" role="listbox" hidden>
+      <li role="option" data-value="Dashboard">Dashboard</li><li role="option" data-value="Documents">Documents</li><li role="option" data-value="Document Intelligence">Document Intelligence</li><li role="option" data-value="Users">Users</li>
+    </ul>
+    <output id="search-suggest-selected">none</output>
+
+    <label>Searchable country dropdown
+      <input id="country-combo" type="text" role="combobox" aria-label="Country" aria-autocomplete="list" aria-controls="country-list" aria-expanded="false" autocomplete="off">
+    </label>
+    <ul id="country-list" class="suggestion-list" role="listbox" hidden>
+      <li role="option" data-value="Oman">Oman</li><li role="option" data-value="Pakistan">Pakistan</li><li role="option" data-value="Qatar">Qatar</li><li role="option" data-value="Saudi Arabia">Saudi Arabia</li>
+    </ul>
+    <output id="country-selected">none</output>
+
+    <label>Searchable multi-select skills
+      <input id="skills-combo" type="text" role="combobox" aria-label="Skills" aria-autocomplete="list" aria-controls="skills-list" aria-expanded="false" autocomplete="off">
+    </label>
+    <ul id="skills-list" class="suggestion-list" role="listbox" aria-multiselectable="true" hidden>
+      <li role="option" aria-selected="false" data-value="Laravel">Laravel</li><li role="option" aria-selected="false" data-value="Vue">Vue</li><li role="option" aria-selected="false" data-value="Next.js">Next.js</li><li role="option" aria-selected="false" data-value="ASP.NET">ASP.NET</li><li role="option" aria-selected="false" data-value="PostgreSQL">PostgreSQL</li>
+    </ul>
+    <div id="skills-chips" class="chips" aria-label="Selected skills"></div>
+    <output id="skills-selected">none</output>
+
+    <label>Async employee search
+      <input id="async-search" type="search" role="combobox" aria-label="Employee search" aria-autocomplete="list" aria-controls="async-search-list" aria-expanded="false" autocomplete="off">
+    </label>
+    <span id="async-loading" role="status" hidden>Loading suggestions</span>
+    <ul id="async-search-list" class="suggestion-list" role="listbox" hidden></ul>
+    <output id="async-selected">none</output>
+  </section>
+
+  <section>
     <h2>Files and drag/drop</h2>
     <label>Text file <input id="file-input" type="file" accept=".txt"></label>
     <label>Image file <input id="image-file-input" type="file" accept="image/*"></label>
     <label>Multiple files <input id="multi-file-input" type="file" multiple accept=".txt,image/*"></label>
-    <div id="file-drop-zone" class="drop" aria-label="Drop image files here" ondragover="event.preventDefault()" ondrop="handleFileDrop(event)">
-      Drop image files here
-      <input id="drop-contract-input" type="file" accept="image/*" multiple hidden>
-    </div>
+    <div id="file-drop-zone" class="drop" aria-label="Drop image files here" ondragover="event.preventDefault()" ondrop="handleFileDrop(event)">Drop image files here<input id="drop-contract-input" type="file" accept="image/*" multiple hidden></div>
     <output id="file-drop-output">no files dropped</output>
     <div><span id="drag-source" class="drag" draggable="true" ondragstart="handleDragStart(event)">Drag source</span></div>
     <div id="drag-target" class="drop" ondragover="event.preventDefault()" ondrop="handleElementDrop(event)">Element drop target</div>
@@ -70,8 +102,7 @@
       <label>Disabled field <input id="disabled-input" type="text" value="disabled" disabled></label>
       <button id="default-button">Default button type</button>
       <button id="button-control" type="button" onclick="setStatus('button-clicked')">Button</button>
-      <button id="submit-button" type="submit">Submit</button>
-      <button id="reset-button" type="reset">Reset</button>
+      <button id="submit-button" type="submit">Submit</button><button id="reset-button" type="reset">Reset</button>
       <input id="image-submit" type="image" alt="Image submit" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='gray'/%3E%3C/svg%3E">
     </form>
     <details id="details-control"><summary id="details-summary">Details summary</summary><p>Details body</p></details>
@@ -79,32 +110,38 @@
     <dialog id="lab-dialog"><p>Dialog body</p><button id="dialog-close" type="button" onclick="document.getElementById('lab-dialog').close()">Close dialog</button></dialog>
   </section>
 
-  <section>
-    <h2>Semantic data and media</h2>
-    <progress id="progress-control" max="100" value="35">35%</progress>
-    <meter id="meter-control" min="0" max="10" value="7">7/10</meter>
-    <output id="output-control">Calculated output</output>
-    <ul id="list-control"><li>One</li><li>Two</li></ul>
-    <table id="table-control"><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>Alpha</td><td>1</td></tr><tr><td>Beta</td><td>2</td></tr></tbody></table>
-    <img id="image-control" alt="Capability sample" width="40" height="30" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='30'%3E%3Crect width='40' height='30' fill='gray'/%3E%3C/svg%3E">
-    <canvas id="canvas-control" width="80" height="30"></canvas>
-  </section>
-
-  <section>
-    <h2>Open Shadow DOM</h2>
-    <div id="shadow-host"></div>
-  </section>
+  <section><h2>Semantic data and media</h2><progress id="progress-control" max="100" value="35">35%</progress><meter id="meter-control" min="0" max="10" value="7">7/10</meter><output id="output-control">Calculated output</output><ul id="list-control"><li>One</li><li>Two</li></ul><table id="table-control"><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>Alpha</td><td>1</td></tr><tr><td>Beta</td><td>2</td></tr></tbody></table><img id="image-control" alt="Capability sample" width="40" height="30" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='30'%3E%3Crect width='40' height='30' fill='gray'/%3E%3C/svg%3E"><canvas id="canvas-control" width="80" height="30"></canvas></section>
+  <section><h2>Open Shadow DOM</h2><div id="shadow-host"></div></section>
 
   <script>
-    const status = document.getElementById('status');
-    function setStatus(value){ status.textContent=String(value); }
-    document.getElementById('range-input').addEventListener('input', (event)=>{ document.getElementById('range-output').value=event.target.value; setStatus('range:'+event.target.value); });
-    document.getElementById('color-input').addEventListener('input', (event)=>{ document.getElementById('color-output').value=event.target.value; setStatus('color:'+event.target.value); });
-    function handleFileDrop(event){ event.preventDefault(); const files=Array.from(event.dataTransfer?.files||[]); const output=document.getElementById('file-drop-output'); output.value=files.map((file)=>file.name).join(','); output.textContent=output.value||'no files dropped'; event.currentTarget.dataset.fileCount=String(files.length); setStatus('file-drop:'+files.length); }
-    function handleDragStart(event){ event.dataTransfer.setData('text/plain','drag-source'); }
-    function handleElementDrop(event){ event.preventDefault(); const value=event.dataTransfer.getData('text/plain'); document.getElementById('drag-output').value=value; document.getElementById('drag-output').textContent=value; setStatus('element-drop:'+value); }
-    const host=document.getElementById('shadow-host'); const shadow=host.attachShadow({mode:'open'}); shadow.innerHTML='<label>Shadow input <input id="shadow-input" data-testid="shadow-input"></label><button id="shadow-button" type="button">Shadow button</button><span id="shadow-status">shadow-ready</span>'; shadow.getElementById('shadow-button').addEventListener('click',()=>{shadow.getElementById('shadow-status').textContent='shadow-clicked';});
-    const ctx=document.getElementById('canvas-control').getContext('2d'); ctx.fillRect(0,0,40,20);
+    const status=document.getElementById('status'); function setStatus(value){status.textContent=String(value);}
+    document.getElementById('range-input').addEventListener('input',(event)=>{document.getElementById('range-output').value=event.target.value;setStatus('range:'+event.target.value);});
+    document.getElementById('color-input').addEventListener('input',(event)=>{document.getElementById('color-output').value=event.target.value;setStatus('color:'+event.target.value);});
+    function handleFileDrop(event){event.preventDefault();const files=Array.from(event.dataTransfer?.files||[]);const output=document.getElementById('file-drop-output');output.value=files.map((file)=>file.name).join(',');output.textContent=output.value||'no files dropped';event.currentTarget.dataset.fileCount=String(files.length);setStatus('file-drop:'+files.length);}
+    function handleDragStart(event){event.dataTransfer.setData('text/plain','drag-source');}
+    function handleElementDrop(event){event.preventDefault();const value=event.dataTransfer.getData('text/plain');document.getElementById('drag-output').value=value;document.getElementById('drag-output').textContent=value;setStatus('element-drop:'+value);}
+
+    function optionText(option){return String(option.dataset.value||option.textContent||'').trim();}
+    function installSearchable(controlId,listId,selectedId,{multi=false,delay=0}={}){
+      const control=document.getElementById(controlId), list=document.getElementById(listId), selected=document.getElementById(selectedId); const all=Array.from(list.querySelectorAll('[role="option"]')); const selectedValues=new Set(); let timer=null;
+      function render(query=''){const q=String(query).trim().toLowerCase();let count=0;for(const option of all){const show=!q||optionText(option).toLowerCase().includes(q);option.hidden=!show;if(show)count+=1;}list.hidden=count===0;control.setAttribute('aria-expanded',count?'true':'false');return count;}
+      function choose(option){const value=optionText(option);if(multi){const now=option.getAttribute('aria-selected')==='true';option.setAttribute('aria-selected',now?'false':'true');if(now)selectedValues.delete(value);else selectedValues.add(value);selected.value=[...selectedValues].join(',');selected.textContent=selected.value||'none';document.getElementById('skills-chips').innerHTML=[...selectedValues].map((item)=>'<span class="chip" data-selected-value="'+item.replace(/"/g,'&quot;')+'">'+item+'</span>').join('');control.value='';render('');}else{control.value=value;selected.value=value;selected.textContent=value;list.hidden=true;control.setAttribute('aria-expanded','false');}setStatus(controlId+':'+value);}
+      control.addEventListener('focus',()=>render(control.value)); control.addEventListener('click',()=>render(control.value));
+      control.addEventListener('input',()=>{clearTimeout(timer);if(delay){document.getElementById('async-loading').hidden=false;list.hidden=true;control.setAttribute('aria-expanded','false');timer=setTimeout(()=>{document.getElementById('async-loading').hidden=true;render(control.value);},delay);}else render(control.value);});
+      list.addEventListener('click',(event)=>{const option=event.target.closest('[role="option"]');if(option&&!option.hidden)choose(option);});
+      control.addEventListener('keydown',(event)=>{const options=all.filter((option)=>!option.hidden);if(event.key==='Escape'){list.hidden=true;control.setAttribute('aria-expanded','false');return;}if(event.key==='ArrowDown'&&options.length){event.preventDefault();options[0].focus?.();control.setAttribute('aria-activedescendant',options[0].id||'');}if(event.key==='Enter'&&options.length){event.preventDefault();choose(options[0]);}});
+      if(!delay) render('');
+    }
+    installSearchable('search-suggest-input','search-suggest-list','search-suggest-selected');
+    installSearchable('country-combo','country-list','country-selected');
+    installSearchable('skills-combo','skills-list','skills-selected',{multi:true});
+
+    const asyncControl=document.getElementById('async-search'), asyncList=document.getElementById('async-search-list');
+    ['Taimoor Iqbal','Muhammad Waqas','Sara Khan','Ahmed Ali'].forEach((name,index)=>{const li=document.createElement('li');li.setAttribute('role','option');li.dataset.value=name;li.id='async-option-'+index;li.textContent=name;asyncList.appendChild(li);});
+    installSearchable('async-search','async-search-list','async-selected',{delay:180});
+
+    const host=document.getElementById('shadow-host');const shadow=host.attachShadow({mode:'open'});shadow.innerHTML='<label>Shadow input <input id="shadow-input" data-testid="shadow-input"></label><button id="shadow-button" type="button">Shadow button</button><span id="shadow-status">shadow-ready</span>';shadow.getElementById('shadow-button').addEventListener('click',()=>{shadow.getElementById('shadow-status').textContent='shadow-clicked';});
+    const ctx=document.getElementById('canvas-control').getContext('2d');ctx.fillRect(0,0,40,20);
   </script>
 </body>
 </html>
