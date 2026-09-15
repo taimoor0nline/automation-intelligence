@@ -88,21 +88,24 @@ function normalizeValueExpectation(value, index) {
   if (!selector) return source;
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  // Keep the selector before quoted business data. The legacy deterministic parser
+  // extracts quoted values after resolving the selector; placing selectors last can
+  // make a quoted data-testid/name token look like the expected business value.
   source = source.replace(
     new RegExp(`^\\s*Value\\s+of\\s+${escaped}\\s+(?:is|equals?|exactly)\\s+(["'\`][\\s\\S]*["'\`])\\s*$`, 'i'),
-    (_all, expected) => `Value equals ${expected} in ${selector}`
+    (_all, expected) => `${selector} Value equals ${expected}`
   );
   source = source.replace(
     new RegExp(`^\\s*Value\\s+of\\s+${escaped}\\s+(?:contains?|includes?)\\s+(["'\`][\\s\\S]*["'\`])\\s*$`, 'i'),
-    (_all, expected) => `Value contains ${expected} in ${selector}`
+    (_all, expected) => `${selector} Value contains ${expected}`
   );
   source = source.replace(
     new RegExp(`^\\s*Value\\s+of\\s+${escaped}\\s+(?:is\\s+)?(?:non[- ]?empty|not\\s+empty)\\s*$`, 'i'),
-    () => `Value is non-empty in ${selector}`
+    () => `${selector} Value is non-empty`
   );
   source = source.replace(
     new RegExp(`^\\s*Value\\s+of\\s+${escaped}\\s+(?:is\\s+)?empty\\s*$`, 'i'),
-    () => `Value is empty in ${selector}`
+    () => `${selector} Value is empty`
   );
   return source;
 }
