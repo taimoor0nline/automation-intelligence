@@ -22,10 +22,11 @@ jobs:
       - name: Install platform and automation runtime
         run: npm install
 
-      - name: Verify native HTML contracts
+      - name: Verify native HTML and searchable suggestion contracts
         run: |
           npm run test:html-native-controls
           npm run test:html-capability-contract
+          npm run test:searchable-suggestions
 
       - name: Run deterministic capability regression suite
         run: npm run test:capabilities
@@ -40,8 +41,11 @@ jobs:
           cat /tmp/testnexus-demo.log
           exit 1
 
-      - name: Run one-by-one browser capability lab
+      - name: Run native browser capability lab
         run: npm run test:html-capability-lab
+
+      - name: Run searchable suggestions browser lab
+        run: npm run test:searchable-suggestions-lab
 
       - name: Upload browser artifacts on failure
         if: failure()
