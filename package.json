@@ -10,6 +10,7 @@
     "start:server": "node server/index.js",
     "start": "concurrently -n demo-app,server -c blue,green \"npm:start:demo-app\" \"npm:start:server\"",
     "db:migrate": "node server/db/migrate.js",
+    "test:server-syntax": "node scripts/server-syntax-smoke.js",
     "test:platform": "node scripts/platform-smoke.js",
     "test:rest": "node scripts/rest-smoke.js",
     "test:canonical-architecture": "node scripts/canonical-architecture-smoke.js",
@@ -35,7 +36,7 @@
     "test:repair-workbench-contract": "node scripts/repair-workbench-contract-smoke.js",
     "test:html-capability-lab": "npm --prefix automation-system run engine:run -- --spec tests/e2e/system/html-capability-lab.cy.js",
     "test:searchable-suggestions-lab": "npm --prefix automation-system run engine:run -- --spec tests/e2e/system/searchable-suggestions-lab.cy.js",
-    "test:capabilities": "node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js && node scripts/multi-role-actor-regression-smoke.js && node scripts/test-actor-import-smoke.js && node scripts/unified-test-user-ui-smoke.js && node scripts/page-scope-regression-smoke.js && node scripts/behavioral-grounding-smoke.js && node scripts/behavior-rule-registry-smoke.js && node scripts/strict-cypress-contract-smoke.js && node scripts/strict-generated-artifact-smoke.js && node scripts/deterministic-state-contract-smoke.js && node scripts/static-expectation-contract-smoke.js && node scripts/html-capability-contract-smoke.js && node scripts/html-native-controls-v2-smoke.js && node scripts/searchable-suggestions-smoke.js && node scripts/enterprise-execution-contract-smoke.js && node scripts/repair-workbench-contract-smoke.js"
+    "test:capabilities": "node scripts/server-syntax-smoke.js && node scripts/canonical-architecture-smoke.js && node scripts/capability-smoke.js && node scripts/readiness-regression-smoke.js && node scripts/readiness-normalization-smoke.js && node scripts/readiness-v13-regression-smoke.js && node scripts/assertion-grounding-regression-smoke.js && node scripts/advanced-capabilities-smoke.js && node scripts/story-discovery-compatibility-smoke.js && node scripts/multi-role-actor-regression-smoke.js && node scripts/test-actor-import-smoke.js && node scripts/unified-test-user-ui-smoke.js && node scripts/page-scope-regression-smoke.js && node scripts/behavioral-grounding-smoke.js && node scripts/behavior-rule-registry-smoke.js && node scripts/strict-cypress-contract-smoke.js && node scripts/strict-generated-artifact-smoke.js && node scripts/deterministic-state-contract-smoke.js && node scripts/static-expectation-contract-smoke.js && node scripts/html-capability-contract-smoke.js && node scripts/html-native-controls-v2-smoke.js && node scripts/searchable-suggestions-smoke.js && node scripts/enterprise-execution-contract-smoke.js && node scripts/repair-workbench-contract-smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
