@@ -99,7 +99,6 @@ function validateAction(action, elements, fixtures, problems) {
   const requireCapability = (capability, message = null) => {
     if (!element || !has(element, capability)) problems.push(issue('HTML_ACTION_CAPABILITY_MISMATCH', `${operation} requires discovered capability ${capability}${message ? ` (${message})` : ''}.`, { elementRef: action.elementRef || null, capability }));
   };
-
   const capabilityMap = {
     TYPE: 'TYPE', TYPE_RUNTIME_CREDENTIAL: 'TYPE', CLEAR: 'CLEAR', CLICK: 'CLICK', DBLCLICK: 'DBLCLICK', RIGHTCLICK: 'RIGHTCLICK',
     HOVER: 'HOVER', FOCUS: 'FOCUS', BLUR: 'BLUR', SELECT: 'SELECT', CHECK: 'CHECK', UNCHECK: 'UNCHECK', SUBMIT: 'SUBMIT',
@@ -184,9 +183,28 @@ function validateHtmlCapabilityContract(ir = {}, registry = {}) {
   };
 }
 
+function assertHtmlRuntimePrerequisites(testCase = {}) {
+  const fixtures = configuredFixtures();
+  const problems = [];
+  for (const action of testCase?.automationReadiness?.automationPlan?.actions || []) {
+    const operation = op(action.operation);
+    if (!['SELECT_FILE','DROP_FILE','SELECT_FILES','DROP_FILES'].includes(operation)) continue;
+    for (const fileName of actionFiles(action)) {
+      if (!fixtures.has(fileName)) problems.push(issue('HTML_FILE_FIXTURE_UNAVAILABLE', `${operation} fixture is no longer available immediately before execution: ${fileName}.`, { fileName }));
+    }
+  }
+  if (problems.length) {
+    const error = new Error(problems[0].message);
+    error.code = problems[0].code;
+    error.validationErrors = problems;
+    throw error;
+  }
+}
+
 module.exports = {
   VERSION,
   validateHtmlCapabilityContract,
+  assertHtmlRuntimePrerequisites,
   fileAccepted,
   typeValueProblem,
   rangeProblem,
