@@ -2,6 +2,7 @@ const { defineConfig } = require("cypress");
 const fs = require("fs");
 const path = require("path");
 const { createAdvancedTasks } = require("./advanced-capabilities");
+const { createRuntimeEvidenceTasks } = require("./runtime-evidence-tasks");
 
 function boolEnv(value, fallback) {
   if (value == null || value === "") return fallback;
@@ -11,6 +12,35 @@ function boolEnv(value, fallback) {
 function numberEnv(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function parseJsonEnv(name, fallback) {
+  const raw = String(process.env[name] || "").trim();
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); }
+  catch (err) { throw new Error(`${name} is invalid JSON: ${err.message}`); }
+}
+
+function clientCertificatesFromEnv() {
+  const configured = parseJsonEnv("AUTOMATION_CLIENT_CERTIFICATES_JSON", []);
+  if (!Array.isArray(configured)) throw new Error("AUTOMATION_CLIENT_CERTIFICATES_JSON must be a JSON array.");
+  return configured.slice(0, 20).map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`Client certificate entry ${index + 1} must be an object.`);
+    const url = String(entry.url || "").trim();
+    if (!/^https:\/\//i.test(url)) throw new Error(`Client certificate entry ${index + 1} requires an https:// URL pattern.`);
+    const certs = Array.isArray(entry.certs) ? entry.certs : [];
+    if (!certs.length) throw new Error(`Client certificate entry ${index + 1} requires at least one certificate definition.`);
+    return {
+      url,
+      ca: Array.isArray(entry.ca) ? entry.ca.map(String).filter(Boolean).slice(0, 10) : [],
+      certs: certs.slice(0, 10).map((cert, certIndex) => {
+        if (!cert || typeof cert !== "object" || Array.isArray(cert)) throw new Error(`Client certificate entry ${index + 1}.${certIndex + 1} is invalid.`);
+        if (cert.pfx) return { pfx: String(cert.pfx), ...(cert.passphrase ? { passphrase: String(cert.passphrase) } : {}) };
+        if (cert.cert && cert.key) return { cert: String(cert.cert), key: String(cert.key), ...(cert.passphrase ? { passphrase: String(cert.passphrase) } : {}) };
+        throw new Error(`Client certificate entry ${index + 1}.${certIndex + 1} requires either pfx or cert+key.`);
+      }),
+    };
+  });
 }
 
 const RESULT_FILE = process.env.AUTOMATION_RESULT_FILE || path.join(__dirname, "artifacts", "latest-run-result.json");
@@ -32,6 +62,8 @@ function runtimeEnv(existing = {}) {
     REST_AUTH_USERNAME: process.env.REST_AUTH_USERNAME || existing.REST_AUTH_USERNAME || "",
     REST_AUTH_SECRET: process.env.REST_AUTH_SECRET || existing.REST_AUTH_SECRET || "",
     REST_AUTH_HEADER: process.env.REST_AUTH_HEADER || existing.REST_AUTH_HEADER || "",
+    ENTERPRISE_SSO_CONFIG_JSON: process.env.AUTOMATION_ENTERPRISE_SSO_CONFIG_JSON || existing.ENTERPRISE_SSO_CONFIG_JSON || "{}",
+    CAPTURE_BROWSER_EVIDENCE: boolEnv(process.env.AUTOMATION_CAPTURE_BROWSER_EVIDENCE, existing.CAPTURE_BROWSER_EVIDENCE ?? true),
     DISCOVERY_ENABLED: boolEnv(process.env.CYPRESS_DISCOVERY_ENABLED, Boolean(existing.DISCOVERY_ENABLED)),
     DISCOVERY_TARGET_URLS_JSON: process.env.CYPRESS_DISCOVERY_TARGET_URLS_JSON || existing.DISCOVERY_TARGET_URLS_JSON || "[]",
     DISCOVERY_OUTPUT_FILE: process.env.CYPRESS_DISCOVERY_OUTPUT_FILE || existing.DISCOVERY_OUTPUT_FILE || "",
@@ -116,12 +148,13 @@ module.exports = defineConfig({
   allowCypressEnv: true,
   experimentalMemoryManagement: true,
   numTestsKeptInMemory: 0,
+  testIsolation: true,
+  clientCertificates: clientCertificatesFromEnv(),
+  experimentalModifyObstructiveThirdPartyCode: boolEnv(process.env.AUTOMATION_MODIFY_OBSTRUCTIVE_THIRD_PARTY_CODE, false),
   e2e: {
     baseUrl: process.env.AUTOMATION_BASE_URL || process.env.TEST_BASE_URL || "http://localhost:4000",
     specPattern: "tests/e2e/**/*.cy.js",
     supportFile: "tests/support/e2e.js",
-    // Generic web execution traverses open Shadow DOM by default. Closed shadow
-    // roots remain an explicit unsupported/adapter capability and are never guessed.
     includeShadowDom: true,
     videosFolder: "artifacts/videos",
     screenshotsFolder: "artifacts/screenshots",
@@ -130,9 +163,6 @@ module.exports = defineConfig({
     screenshotOnRunFailure: boolEnv(process.env.AUTOMATION_SCREENSHOT_ON_FAILURE, true),
     env: runtimeEnv(),
     setupNodeEvents(on, config) {
-      // setupNodeEvents is the authoritative env bridge for browser specs. This
-      // avoids relying on implicit CYPRESS_* promotion and keeps discovery inputs
-      // deterministic even when the project config owns an explicit env object.
       config.env = runtimeEnv(config.env || {});
 
       on("task", {
@@ -145,6 +175,7 @@ module.exports = defineConfig({
           return null;
         },
         ...createAdvancedTasks(),
+        ...createRuntimeEvidenceTasks(),
       });
 
       on("before:browser:launch", (browser, launchOptions) => {
