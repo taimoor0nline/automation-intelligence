@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const { buildCanonicalElementRegistry } = require('../server/services/canonicalElementRegistry');
+const { buildCanonicalElementRegistry, registryForModel } = require('../server/services/canonicalElementRegistry');
 const { validateHtmlCapabilityContract } = require('../server/services/htmlCapabilityContract');
 const generator = require('../server/services/deterministicAutomationGeneratorV6');
 
@@ -16,6 +16,7 @@ const pageDiscoveries = [{
     { tag: 'p', type: 'p', id: 'intro', selector: '#intro', text: 'Intro paragraph' },
     { tag: 'div', type: 'div', id: 'content', selector: '#content', text: 'Read only content' },
     { tag: 'span', type: 'span', id: 'badge', selector: '#badge', text: 'Ready' },
+    { tag: 'input', type: 'input', id: 'default-input', selector: '#default-input' },
     { tag: 'input', type: 'text', id: 'text', selector: '#text', required: true },
     { tag: 'input', type: 'email', id: 'email', selector: '#email' },
     { tag: 'input', type: 'number', id: 'number', selector: '#number', min: '1', max: '100' },
@@ -47,6 +48,11 @@ const pageDiscoveries = [{
 }];
 
 const registry = buildCanonicalElementRegistry(pageDiscoveries);
+const modelRegistry = registryForModel(registry);
+assert.equal(modelRegistry.capabilityContract?.authoritative, true, 'AI-facing capability contract must be authoritative');
+assert.equal(modelRegistry.capabilityContract?.actionRequirements?.SELECT, 'SELECT');
+assert.equal(modelRegistry.capabilityContract?.actionRequirements?.SET_RANGE_VALUE, 'SET_RANGE_VALUE');
+
 const byId = new Map(registry.elements.filter((element) => element.id).map((element) => [element.id, element]));
 const element = (id) => {
   const item = byId.get(id);
@@ -55,11 +61,13 @@ const element = (id) => {
 };
 const has = (id, capability) => element(id).capabilities.includes(capability);
 
+assert.equal(element('default-input').type, 'text', 'missing input type must normalize to browser-default text');
 assert(has('heading', 'TEXT'));
 assert(has('intro', 'TEXT'));
 assert(has('content', 'TEXT'));
 assert(has('badge', 'TEXT'));
 assert(!has('content', 'TYPE'), 'content-only div must not become a form input');
+assert(has('default-input', 'TYPE'));
 assert(has('text', 'TYPE'));
 assert(has('email', 'TYPE'));
 assert(has('number', 'TYPE'));
@@ -95,6 +103,7 @@ function validate(actions, assertions = []) {
 function assertOk(result) { assert.equal(result.ok, true, JSON.stringify(result.errors)); }
 function assertCode(result, code) { assert.equal(result.ok, false, 'expected contract rejection'); assert(result.errors.some((item) => item.code === code), JSON.stringify(result.errors)); }
 
+assertOk(validate([{ operation: 'TYPE', elementRef: element('default-input').elementRef, value: 'hello' }]));
 assertOk(validate([{ operation: 'TYPE', elementRef: element('date').elementRef, value: '2026-09-15' }]));
 assertCode(validate([{ operation: 'TYPE', elementRef: element('date').elementRef, value: '2026-02-30' }]), 'HTML_INPUT_VALUE_INVALID');
 assertOk(validate([{ operation: 'TYPE', elementRef: element('time').elementRef, value: '23:59:30' }]));
@@ -111,7 +120,7 @@ assertCode(validate([{ operation: 'SELECT', elementRef: element('custom-combo').
 assertOk(validate([{ operation: 'SELECT_FILE', elementRef: element('image-file').elementRef, fileName: 'sample.svg' }]));
 assertCode(validate([{ operation: 'SELECT_FILE', elementRef: element('image-file').elementRef, fileName: 'sample.txt' }]), 'HTML_FILE_ACCEPT_MISMATCH');
 assertOk(validate([{ operation: 'SELECT_FILES', elementRef: element('multi-file').elementRef, fileNames: ['sample.txt', 'sample.svg'] }]));
-assertCode(validate([{ operation: 'SELECT_FILES', elementRef: element('image-file').elementRef, fileNames: ['sample.svg', 'sample.svg'] }]), 'HTML_FILE_MULTIPLE_NOT_ALLOWED');
+assertCode(validate([{ operation: 'SELECT_FILES', elementRef: element('image-file').elementRef, fileNames: ['sample.svg', 'sample.txt'] }]), 'HTML_FILE_MULTIPLE_NOT_ALLOWED');
 assertOk(validate([{ operation: 'DROP_FILE', elementRef: element('file-drop').elementRef, fileName: 'sample.svg' }]));
 assertCode(validate([{ operation: 'DROP_FILE', elementRef: element('ordinary').elementRef, fileName: 'sample.svg' }]), 'HTML_ACTION_CAPABILITY_MISMATCH');
 assertOk(validate([{ operation: 'DRAG_DROP', sourceElementRef: element('drag-source').elementRef, targetElementRef: element('drop-target').elementRef }]));
