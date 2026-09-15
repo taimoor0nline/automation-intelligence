@@ -10,7 +10,7 @@ Status terminology:
 - **ADAPTER** — intentionally requires an explicit configured integration rather than guessing/bypassing browser or security boundaries.
 - **NOT YET** — no generic deterministic contract today.
 
-> Repository CI is not currently configured. READY means the code path is implemented and regression/lab coverage is committed; run the local commands in this document before promoting a release.
+> The HTML capability workflow runs the deterministic contracts and browser labs on the active capability branch and on `main`. Do not promote a capability while this gate is red.
 
 ## Native input and form controls
 
@@ -20,7 +20,7 @@ Status terminology:
 | text | READY | TYPE, CLEAR, focus/blur/key, value/validity/metadata assertions |
 | password | READY | TYPE/CLEAR; runtime credential helper available |
 | email | READY | TYPE/CLEAR + HTML validity |
-| search | READY | TYPE/CLEAR |
+| search | READY | TYPE/CLEAR; semantic suggestions supported when a datalist/listbox relationship is rendered |
 | tel | READY | TYPE/CLEAR |
 | url | READY | TYPE/CLEAR + validity |
 | number | READY | TYPE/CLEAR; finite numeric syntax + min/max metadata |
@@ -43,8 +43,37 @@ Status terminology:
 | native single `<select>` | READY | SELECT only discovered enabled option values |
 | native `<select multiple>` | READY | `SELECT_MULTIPLE` + exact `ASSERT_SELECTED_VALUES_EQUALS` |
 | disabled `<option>` | READY | selection is blocked by deterministic contract |
-| disabled `<optgroup>` inheritance | PARTIAL | browser itself enforces it; rendered discovery should still record effective disabled state directly for AI grounding |
-| datalist input | PARTIAL | ordinary typed input and `list` metadata are discovered; datalist option choice is not yet a dedicated grounded action |
+| disabled `<optgroup>` inheritance | READY | rendered discovery records effective inherited disabled state |
+| native datalist input | READY/PARTIAL | datalist values are grounded and searchable; browser-owned suggestion popup is intentionally not treated as a custom listbox click surface |
+
+## Searchable dropdowns, autocomplete and suggestions
+
+| Surface | Status | Current deterministic capability |
+|---|---|---|
+| search box with semantic suggestions | READY | `SEARCH_SUGGESTIONS`, clear query, exact grounded option assertions/selection when a rendered listbox is related |
+| searchable single-select dropdown | READY | open/close, search, select one exact grounded suggestion, expanded/collapsed assertions |
+| searchable multi-select dropdown | READY | search/select multiple exact grounded options when `aria-multiselectable=true` is rendered |
+| async/server-backed suggestions | READY with explicit data | search can wait for delayed rendered options; a not-yet-rendered option must come from the user story/approved test data, never AI invention |
+| no-results state | READY | exact no-suggestion assertion against the associated listbox |
+| keyboard Enter selection | READY | browser-lab coverage for selecting the first filtered suggestion |
+| Escape/collapse | READY | semantic collapsed state is verified |
+| ARIA combobox/listbox/option relationships | READY | `aria-controls`, `aria-owns`, `aria-autocomplete`, `aria-activedescendant`, `aria-multiselectable`, `aria-selected` captured |
+| selected-option state | READY | `aria-selected=true` assertion on associated listbox options |
+| exact selected multi-option vector | READY | `ASSERT_SELECTED_SUGGESTIONS_EQUALS` |
+| chips/tags rendered after multi-select | OBSERVE/READY via normal elements | chips are discoverable/assertable; dedicated remove-chip/clear-all actions are a remaining refinement |
+| virtualized listbox | PARTIAL | search-driven selection works when the requested option is rendered after the query; generic bounded scroll-through virtualization remains backlog |
+| framework-specific widgets | READY when semantic | no library-specific selector contract; React/Vue/Angular/Select2/MUI/Ant-style widgets work when rendered semantics expose a deterministic editable control + listbox/options relation |
+
+### Anti-invention rules for suggestions
+
+For suggestion/dropdown generation, AI may use an option/value only when it is supported by at least one of these sources:
+
+1. a suggestion rendered during discovery;
+2. explicit user-authored story/requirement text;
+3. approved test data;
+4. a deterministic substring/prefix used only to search for a grounded final option.
+
+AI-provided labels, CSS classes, likely country/customer names, or invented search results are never treated as evidence. If a dynamic option is unknown until runtime and was not explicitly supplied by the user, the case remains blocked/repairable.
 
 ## Content, semantics and element state
 
@@ -72,20 +101,20 @@ Status terminology:
 | Capability | Status | Notes |
 |---|---|---|
 | click/double-click/right-click | READY | only when rendered semantics/capability permits |
-| hover | READY | mouseover-based deterministic hover surface |
+| hover | READY | deterministic hover surface |
 | focus/blur | READY | focusable rendered elements only |
 | scroll into view | READY | discovered element only |
-| keyboard Enter/Escape/arrows/Home/End/Backspace/Delete | READY/PARTIAL | deterministic special-key support; Tab/modifier/native-key coverage should move to `cy.press()` contract |
+| keyboard Enter/Escape/arrows/Home/End/Backspace/Delete | READY/PARTIAL | deterministic special-key support; Tab/modifier/native-key coverage remains a refinement |
 | native HTML5 element drag/drop | READY | draggable source + evidenced drop target + DataTransfer |
-| file drag/drop | READY/PARTIAL | `selectFile(...,{action:'drag-drop'})` on evidenced file-drop targets; modern delegated drop zones without explicit evidence may be conservatively rejected |
-| pointer/mouse sortable drag | PARTIAL | HTML5 DnD is not equivalent to pointer-driven SortableJS/react-beautiful-dnd style interaction |
+| file drag/drop | READY/PARTIAL | real file drag/drop on evidenced file-drop targets; modern delegated drop zones without explicit evidence may be conservatively rejected |
+| pointer/mouse sortable drag | PARTIAL | HTML5 DnD is not equivalent to pointer-driven sortable-library interaction |
 | touch/swipe/pinch/long-press | NOT YET | needs separate pointer/touch action model |
-| open Shadow DOM | READY | engine `includeShadowDom=true`; discovery scans open roots, avoiding structural shadow selectors |
+| open Shadow DOM | READY | execution and discovery cover open roots while avoiding brittle structural shadow selectors |
 | closed Shadow DOM | NOT YET | cannot be generically inspected without application-specific instrumentation |
 
 ## Assertions and browser state
 
-The deterministic assertion catalog currently covers element existence/visibility/layout, text/HTML, form values and state, checked state, selected values, required/readonly/validity, attributes/properties/classes/CSS/ARIA, collection counts, URL/path/query/hash/origin/host/protocol, title/document language/meta, cookies, localStorage/sessionStorage, network request/response observations, accessibility violations, downloads, console/runtime errors, window-open observations, page timing/resource limits, viewport, visual regression, Web Vitals, database named-query assertions, WebSocket/SSE messages, clipboard writes, downloaded-document content extraction and deterministic browser permission state.
+The deterministic assertion catalog covers element existence/visibility/layout, text/HTML, form values and state, checked state, native selected values, semantic suggestion/listbox state, required/readonly/validity, attributes/properties/classes/CSS/ARIA, collection counts, URL/path/query/hash/origin/host/protocol, title/document language/meta, cookies, localStorage/sessionStorage, network request/response observations, accessibility violations, downloads, console/runtime errors, window-open observations, page timing/resource limits, viewport, visual regression, Web Vitals, database named-query assertions, WebSocket/SSE messages, clipboard writes, downloaded-document content extraction and deterministic browser permission state.
 
 ## Advanced configured capabilities
 
@@ -108,30 +137,34 @@ The deterministic assertion catalog currently covers element existence/visibilit
 
 ## Remaining capability backlog
 
-The meaningful generic gaps after the current native-control work are: effective disabled-optgroup capture during rendered discovery; richer evidence for framework/delegated file-drop zones; native-key/Tab/modifier migration to a `cy.press()` contract; pointer/touch drag and gestures; recursive same-origin iframe discovery; specialized media actions/assertions; dedicated popover/dialog semantics where they add value; checkbox `indeterminate`; first-class JavaScript alert/confirm/prompt handling; and any closed-shadow/cross-origin/native-device case that inherently needs instrumentation or an adapter.
+The meaningful generic gaps are now: chip/tag remove and clear-all as dedicated semantic actions; bounded scrolling for virtualized listboxes without search; richer evidence for framework/delegated file-drop zones; Tab/modifier/native-key coverage; pointer/touch drag and gestures; recursive same-origin iframe discovery; specialized media actions/assertions; dedicated popover/dialog semantics where they add value; checkbox `indeterminate`; first-class JavaScript alert/confirm/prompt handling; and any closed-shadow/cross-origin/native-device case that inherently needs instrumentation or an adapter.
 
-## One-by-one local verification
+## Local verification
 
-Start the demo target in terminal A:
+Start the capability target in terminal A:
 
 ```bash
 npm run start:demo-app
 ```
 
-Open `http://localhost:4000/capabilities.html` if you want to watch/manually inspect the deterministic lab page.
+Open `http://localhost:4000/capabilities.html` if you want to inspect the target controls manually.
 
-In terminal B, verify the non-browser contracts first:
+In terminal B, verify deterministic contracts first:
 
 ```bash
 npm run test:html-native-controls
 npm run test:html-capability-contract
+npm run test:searchable-suggestions
 npm run test:capabilities
 ```
 
-Then run the browser lab containing individually named `CAP001`–`CAP043` cases:
+Then run browser labs:
 
 ```bash
 npm run test:html-capability-lab
+npm run test:searchable-suggestions-lab
 ```
 
-A failure name identifies the exact capability that needs investigation. Do not change an element capability or weaken a validator merely to make a lab test pass; fix the browser contract or mark the capability PARTIAL/NOT YET.
+The native lab contains `CAP001`–`CAP043`. The searchable-suggestion lab contains `CAP044`–`CAP053` covering search suggestions, searchable single select, searchable multi-select, async suggestions, no-results, Enter selection, Escape collapse and semantic ARIA relationships.
+
+A failure name identifies the exact capability that needs investigation. Do not weaken a validator merely to make a lab test pass; fix the deterministic contract or mark the capability PARTIAL/NOT YET.
