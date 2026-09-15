@@ -128,7 +128,10 @@ function stripTerminalFormatting(value) {
 function resultTail(resultOrError) {
   const stderr = stripTerminalFormatting(resultOrError?.stderr || '');
   const stdout = stripTerminalFormatting(resultOrError?.stdout || '');
-  return (stderr || stdout).slice(-1800);
+  // Cypress frequently writes warnings/config banners to stderr and the actual
+  // Mocha/Cypress failure detail to stdout. Preserve both, preferring the end of
+  // stdout instead of hiding the real assertion behind an earlier warning.
+  return [stderr, stdout].filter(Boolean).join(' ').slice(-3600);
 }
 
 function readRunnerFailure(resultFile) {
@@ -143,10 +146,12 @@ function readRunnerFailure(resultFile) {
   }
 }
 
-function discoveryCliEnv(seed, outputForCypress, pageScope) {
+function discoveryCliEnv(_seed, outputForCypress, pageScope) {
+  // Keep the URL list on the process->config bridge as JSON text. Cypress CLI
+  // --env can coerce JSON-looking values into arrays/objects, which makes a
+  // string-only parser silently see zero seeds. Scalars are safe to duplicate.
   return [
     'DISCOVERY_ENABLED=true',
-    `DISCOVERY_TARGET_URLS_JSON=${JSON.stringify([seed])}`,
     `DISCOVERY_OUTPUT_FILE=${outputForCypress}`,
     `DISCOVERY_PAGE_SCOPE=${pageScope}`,
     'DISCOVERY_MAX_PAGES=1',
@@ -179,6 +184,8 @@ async function discoverOneRenderedPage(seed, options) {
     AUTOMATION_SCREENSHOT_ON_FAILURE: 'false',
     AUTOMATION_SCREENSHOT_EACH_TEST: 'false',
     AUTOMATION_TEST_COMPLETION_PAUSE_MS: '0',
+    AUTOMATION_LIVE_STREAM: 'false',
+    AUTOMATION_CAPTURE_BROWSER_EVIDENCE: 'false',
     DEMO_STEP_DELAY_MS: '0',
     CYPRESS_DISCOVERY_ENABLED: 'true',
     CYPRESS_DISCOVERY_TARGET_URLS_JSON: JSON.stringify([seed]),
