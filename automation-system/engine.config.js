@@ -148,10 +148,10 @@ module.exports = defineConfig({
   allowCypressEnv: true,
   experimentalMemoryManagement: true,
   numTestsKeptInMemory: 0,
-  testIsolation: true,
   clientCertificates: clientCertificatesFromEnv(),
   experimentalModifyObstructiveThirdPartyCode: boolEnv(process.env.AUTOMATION_MODIFY_OBSTRUCTIVE_THIRD_PARTY_CODE, false),
   e2e: {
+    testIsolation: true,
     baseUrl: process.env.AUTOMATION_BASE_URL || process.env.TEST_BASE_URL || "http://localhost:4000",
     specPattern: "tests/e2e/**/*.cy.js",
     supportFile: "tests/support/e2e.js",
