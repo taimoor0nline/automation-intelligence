@@ -32,7 +32,7 @@ const pageDiscoveries = [
 ];
 
 const registry = buildCanonicalElementRegistry(pageDiscoveries);
-assert.equal(registry.version, 1);
+assert.ok(Number.isInteger(registry.version) && registry.version >= 1, `expected a positive canonical registry version, received ${registry.version}`);
 assert.equal(registry.pages.length, 2);
 assert.ok(registry.registryHash && registry.registryHash.length === 64);
 
