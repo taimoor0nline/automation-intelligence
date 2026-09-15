@@ -70,8 +70,8 @@ function repairHistory(testCase, action, priorReadiness, resultReadiness, instru
       reason: priorReadiness?.reason || null,
       instruction: instruction || null,
       explanation: action === 'AI_REGENERATE'
-        ? 'Regenerated the case from the same business intent using the current rendered discovery and strict Cypress contract.'
-        : 'Rewrote the case from the human repair instruction using the current rendered discovery and strict Cypress contract.',
+        ? 'Regenerated the case from the same business intent using the current rendered discovery and strict automation contract.'
+        : 'Rewrote the case from the human repair instruction using the current rendered discovery and strict automation contract.',
       result: resultReadiness?.status || null,
     },
   ].slice(-20);
@@ -106,7 +106,7 @@ async function regenerateCanonical(session, original, mode, instruction) {
 
   const originalObjective = baseObjective(original);
   const objective = mode === 'rewrite-ai'
-    ? `${originalObjective}\nHuman repair instruction: ${clean(instruction, 1200)}\nPreserve the business intent, but use only currently discovered evidence and supported Cypress-compatible browser operations/assertions.`
+    ? `${originalObjective}\nHuman repair instruction: ${clean(instruction, 1200)}\nPreserve the business intent, but use only currently discovered evidence and supported deterministic browser operations/assertions.`
     : originalObjective;
 
   const plannedUnit = {
@@ -208,7 +208,10 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
       ok: false,
       reply: err.message,
       code: err.code || 'TEST_CASE_REPAIR_WORKBENCH_FAILED',
+      validationErrors: Array.isArray(err.validationErrors) ? err.validationErrors : [],
+      plannedId: err.plannedId || null,
       requiresHumanReview: true,
+      retryable: ['CANONICAL_IR_VALIDATION_FAILED', 'CANONICAL_BEHAVIOR_UNGROUNDED', 'AI_CANONICAL_REQUEST_TIMEOUT'].includes(err.code),
     });
   }
 });
