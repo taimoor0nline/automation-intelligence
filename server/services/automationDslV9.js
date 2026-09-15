@@ -10,6 +10,37 @@ function normalizePath(value) {
   try { const url = new URL(source); return `${url.pathname}${url.search}` || '/'; } catch { return ''; }
 }
 
+function explicitSelector(value) {
+  return String(value || '').match(/\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\.[A-Za-z][A-Za-z0-9_-]*|\[name=(?:"[^"]+"|'[^']+')\]/)?.[0] || '';
+}
+
+function normalizeAdvancedExpectationText(value) {
+  const source = String(value || '').trim();
+  if (!source) return source;
+  const selector = explicitSelector(source);
+  const baseline = source.match(/baseline\s+["'`]([^"'`]+\.png)["'`]/i)?.[1];
+  const visualScreenshot = /\b(?:visual\s+)?screenshot\b/i.test(source) && /\b(?:matches?|equals?)\b/i.test(source);
+  if (visualScreenshot && baseline && !/screenshot\s+(?:matches?|equals?)/i.test(source)) {
+    const diff = source.match(/(?:max(?:imum)?\s+diff|difference)\s*(?:<=|at most|of)?\s*(\d+(?:\.\d+)?)\s*%/i)?.[1];
+    return [
+      `Screenshot matches baseline "${baseline}"`,
+      selector ? `for ${selector}` : '',
+      diff ? `with maximum diff ${diff}%` : '',
+    ].filter(Boolean).join(' ');
+  }
+  return source;
+}
+
+function normalizeAdvancedExpectations(testCase) {
+  if (!testCase || typeof testCase !== 'object' || !Array.isArray(testCase.expectedResults)) return testCase;
+  const expectedResults = testCase.expectedResults.map(normalizeAdvancedExpectationText);
+  return expectedResults.some((value, index) => value !== testCase.expectedResults[index]) ? { ...testCase, expectedResults } : testCase;
+}
+
+function parseAdvancedExpectation(value, discovery) {
+  return v8.parseAdvancedExpectation(normalizeAdvancedExpectationText(value), discovery);
+}
+
 function isAdvancedStep(step) {
   const action = lower(step?.action);
   const target = lower(step?.target);
@@ -61,7 +92,6 @@ function reorderActions(testCase, actions) {
     }
 
     if (matchedIndex < 0 && ['LOGIN_VALID', 'NAVIGATE', 'SET_VIEWPORT'].includes(action.operation)) {
-      // Compiler-inserted setup belongs before the first reviewed interaction.
       entries.push({ index: -1, sub: planOrder / 1000, planOrder, action });
     } else if (matchedIndex < 0) {
       entries.push({ index: steps.length + 1, sub: planOrder / 1000, planOrder, action });
@@ -76,7 +106,8 @@ function reorderActions(testCase, actions) {
 }
 
 function compileTestCase(testCase, context = {}) {
-  const compiled = v8.compileTestCase(testCase, context);
+  const normalized = normalizeAdvancedExpectations(testCase);
+  const compiled = v8.compileTestCase(normalized, context);
   if (!compiled?.ok || !compiled.plan) return compiled;
   return {
     ...compiled,
@@ -92,4 +123,7 @@ module.exports = {
   compileTestCase,
   reorderActions,
   isAdvancedStep,
+  normalizeAdvancedExpectationText,
+  normalizeAdvancedExpectations,
+  parseAdvancedExpectation,
 };
