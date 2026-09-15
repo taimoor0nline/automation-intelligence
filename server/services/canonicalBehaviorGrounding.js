@@ -1,3 +1,5 @@
+const { ASSERTION_OPERATION_SET } = require('./assertionRegistry');
+
 function clean(value, max = 1200) {
   return String(value ?? '').trim().slice(0, max);
 }
@@ -197,15 +199,44 @@ function findSubmitForProtected(protectedKeys, registry) {
   return elements.find((item) => isSubmitElement(item) && sameForm(protectedControl, item)) || null;
 }
 
+function normalizeOperationBuckets(ir = {}) {
+  const rawActions = Array.isArray(ir?.actions) ? ir.actions : [];
+  const rawAssertions = Array.isArray(ir?.assertions) ? ir.assertions : [];
+  const actions = [];
+  const relocatedAssertions = [];
+
+  for (const item of rawActions) {
+    const operation = String(item?.operation || '').trim().toUpperCase();
+    if (operation && ASSERTION_OPERATION_SET.has(operation)) relocatedAssertions.push({ ...item, operation });
+    else actions.push({ ...item });
+  }
+
+  return {
+    actions,
+    assertions: [...rawAssertions.map((item) => ({ ...item })), ...relocatedAssertions],
+    relocatedAssertions,
+  };
+}
+
 function normalizeBehavioralIr(ir, { registry = {}, plannedUnit = null, story = '' } = {}) {
   const elements = Array.isArray(registry?.elements) ? registry.elements : [];
   const byRef = new Map(elements.map((item) => [item.elementRef, item]));
-  const actions = (Array.isArray(ir?.actions) ? ir.actions : []).map((item) => ({ ...item }));
-  const assertions = (Array.isArray(ir?.assertions) ? ir.assertions : []).map((item) => ({ ...item }));
+  const buckets = normalizeOperationBuckets(ir);
+  const actions = buckets.actions;
+  const assertions = buckets.assertions;
   const notes = [];
   const unresolved = [];
   const objective = clean(plannedUnit?.objective || plannedUnit?.rationale || ir?.objective, 2000);
   const timingText = `${objective} ${clean(story, 6000)}`;
+
+  if (buckets.relocatedAssertions.length) {
+    notes.push({
+      code: 'MISPLACED_ASSERTION_RELOCATED',
+      message: 'A recognized assertion operation was returned in the action list. TestNexus moved it into the final assertion phase before strict canonical validation.',
+      operations: buckets.relocatedAssertions.map((item) => String(item.operation || '')),
+    });
+  }
+
   const protectedKeys = protectedValidationGroups(assertions, elements, byRef);
   const hasErrorAssertions = errorAssertionRefs(assertions, byRef).size > 0;
 
@@ -268,6 +299,7 @@ function normalizeBehavioralIr(ir, { registry = {}, plannedUnit = null, story = 
 
 module.exports = {
   normalizeBehavioralIr,
+  normalizeOperationBuckets,
   completionActionsFor,
   validationBearing,
   isSubmitElement,
