@@ -23,8 +23,9 @@ function normalizeAdvancedExpectationText(value) {
   if (visualScreenshot && baseline && !/screenshot\s+(?:matches?|equals?)/i.test(source)) {
     const diff = source.match(/(?:max(?:imum)?\s+diff|difference)\s*(?:<=|at most|of)?\s*(\d+(?:\.\d+)?)\s*%/i)?.[1];
     return [
-      `Screenshot matches baseline "${baseline}"`,
-      selector ? `for ${selector}` : '',
+      'Screenshot matches',
+      selector || '',
+      `baseline "${baseline}"`,
       diff ? `with maximum diff ${diff}%` : '',
     ].filter(Boolean).join(' ');
   }
