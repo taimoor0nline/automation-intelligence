@@ -13,11 +13,12 @@ const activeGenerationRouter = canonicalEnabled
 // request. Historical Custom cases remain readable in existing sessions/reports.
 router.use(require('./customTestDisableGuard'));
 
-// Keep generation first, then add deterministic coverage and approval-contract
-// guards to the same platform route stack. The approval guard calls next() for
-// ordinary requests and only seals canonical contracts on explicit run approval.
+// Keep generation first, then add deterministic coverage, repair, and approval-contract
+// guards to the same platform route stack. Repair always creates a new unapproved
+// contract; approval sealing still happens only on an explicit human Run/Re-run action.
 router.use(activeGenerationRouter);
 router.use(require('./requirementCoverage'));
+router.use(require('./testCaseRepairWorkbench'));
 router.use(require('./approvalContractGuard'));
 
 module.exports = router;
