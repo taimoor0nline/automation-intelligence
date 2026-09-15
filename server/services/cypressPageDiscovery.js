@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 const AUTOMATION_DIR = path.join(__dirname, '..', '..', 'automation-system');
 const CYPRESS_BIN = path.join(AUTOMATION_DIR, 'node_modules', 'cypress', 'bin', 'cypress');
 const ENGINE_CONFIG = path.join(AUTOMATION_DIR, 'engine.config.js');
-const SPEC_RELATIVE = 'tests/e2e/system/browser-discovery.cy.js';
+const SPEC_RELATIVE = 'tests/e2e/system/browser-discovery-strict.cy.js';
 const DISCOVERY_DIR = path.join(AUTOMATION_DIR, 'artifacts', 'discovery');
 
 function boolEnv(value, fallback) {
@@ -144,9 +144,6 @@ function readRunnerFailure(resultFile) {
 }
 
 function discoveryCliEnv(seed, outputForCypress, pageScope) {
-  // Duplicate the critical inputs through --env. The process environment remains
-  // the primary bridge, while this explicit Cypress input prevents a config-layer
-  // projection regression from silently turning discovery into a no-op.
   return [
     'DISCOVERY_ENABLED=true',
     `DISCOVERY_TARGET_URLS_JSON=${JSON.stringify([seed])}`,
@@ -164,14 +161,7 @@ function writeFailureDiagnostic(filePath, payload) {
 }
 
 async function discoverOneRenderedPage(seed, options) {
-  const {
-    context,
-    browser,
-    pageScope,
-    pageLoadTimeoutMs,
-    commandTimeoutMs,
-    pageBudgetMs,
-  } = options;
+  const { context, browser, pageScope, pageLoadTimeoutMs, commandTimeoutMs, pageBudgetMs } = options;
   const token = `${safeToken(context.sessionId)}-${randomUUID().slice(0, 8)}`;
   const outputRelative = `artifacts/discovery/${token}.json`;
   const outputAbsolute = path.join(AUTOMATION_DIR, outputRelative);
