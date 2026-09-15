@@ -1,7 +1,12 @@
 /* Independent browser verification for searchable suggestions and semantic dropdowns. */
 
 describe('TestNexus searchable suggestions capability lab', () => {
-  beforeEach(() => cy.visit('/capabilities.html'));
+  beforeEach(function () {
+    const wanted = String(Cypress.env('CAPABILITY_CASE') || '').trim().toUpperCase();
+    const current = String(this.currentTest?.title || '').trim().toUpperCase();
+    if (wanted && !current.startsWith(wanted)) this.skip();
+    cy.visit('/capabilities.html');
+  });
 
   it('CAP044 search input filters visible suggestions', () => {
     cy.get('#search-suggest-input').clear().type('Doc');
