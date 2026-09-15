@@ -53,12 +53,16 @@ function exactRemoveTarget(contract, expected) {
   return (Array.isArray(contract.removeTagTargets) ? contract.removeTagTargets : []).find((item) => String(item?.value || '').trim().toLowerCase() === wanted) || null;
 }
 
-function dynamicRemoveChain(contract, expected) {
+function dynamicRemoveCollection(contract, expected) {
   const listId = String(contract.suggestionListId || '').trim();
   const prefix = String(contract.removeTagPattern?.prefix || '').trimEnd();
   if (!listId || !prefix) throw new Error('Selected-tag removal requires a grounded listbox relation and discovered semantic remove-label pattern.');
   const expectedLabel = `${prefix} ${String(expected)}`.replace(/\s+/g, ' ').trim();
-  return `cy.get('body').find('button,[role="button"],input[type="button"],input[type="reset"]').filter((_,el)=>{ const controls=String(el.getAttribute('aria-controls')||el.getAttribute('aria-owns')||'').trim(); const label=String(el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent||'').trim().replace(/\\s+/g,' '); return controls===${js(listId)}&&label===${js(expectedLabel)}; }).should('have.length',1).first()`;
+  return `cy.get('body').find('button,[role="button"],input[type="button"],input[type="reset"]').filter((_,el)=>{ const controls=String(el.getAttribute('aria-controls')||el.getAttribute('aria-owns')||'').trim(); const label=String(el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent||'').trim().replace(/\\s+/g,' '); return controls===${js(listId)}&&label===${js(expectedLabel)}; })`;
+}
+
+function dynamicRemoveChain(contract, expected) {
+  return `${dynamicRemoveCollection(contract, expected)}.should('have.length',1).first()`;
 }
 
 function emitRemoveSelectedTag(contract, expected) {
@@ -73,8 +77,8 @@ function emitSelectedTagAssertion(assertion, expected, present) {
     if (present) return `    cy.get(${js(target.selector)}).should('be.visible');`;
     return `    cy.get('body').find(${js(target.selector)}).should('have.length',0);`;
   }
-  const chain = dynamicRemoveChain(assertion, expected);
-  return present ? `    ${chain}.should('be.visible');` : `    ${chain}.should('have.length',0);`;
+  if (present) return `    ${dynamicRemoveChain(assertion, expected)}.should('be.visible');`;
+  return `    ${dynamicRemoveCollection(assertion, expected)}.should('have.length',0);`;
 }
 
 function emitAction(action) {
