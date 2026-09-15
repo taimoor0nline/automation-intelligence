@@ -1,6 +1,6 @@
 const base = require('./canonicalTestIrV3Base');
 
-const EXTRA_ACTIONS = new Set(['SET_RANGE_VALUE','DROP_FILE','SELECT_FILES','DROP_FILES']);
+const EXTRA_ACTIONS = new Set(['SET_RANGE_VALUE','SET_COLOR_VALUE','DROP_FILE','SELECT_FILES','DROP_FILES','SELECT_MULTIPLE']);
 
 function hasValidLoginHelper(ir = {}) {
   return (Array.isArray(ir.actions) ? ir.actions : []).some((action) =>
@@ -16,9 +16,12 @@ function loginFocusedPlannedUnit(plannedUnit = {}) {
 }
 
 function clean(value, max = 1000) { return String(value ?? '').trim().slice(0, max); }
+function uniqueValues(values, max = 100) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => clean(value, 500)).filter(Boolean))].slice(0, max);
+}
 function fileNames(action = {}) {
   const values = Array.isArray(action.fileNames) ? action.fileNames : action.fileName ? [action.fileName] : [];
-  return [...new Set(values.map((value) => clean(value, 300)).filter(Boolean))].slice(0, 10);
+  return uniqueValues(values, 10).map((value) => clean(value, 300));
 }
 
 function preprocessExtendedIr(ir) {
@@ -39,8 +42,11 @@ function preprocessExtendedIr(ir) {
 function restoreExtendedAction(original, grounded) {
   const operation = String(original?.operation || '').trim().toUpperCase();
   if (!EXTRA_ACTIONS.has(operation)) return grounded;
-  if (operation === 'SET_RANGE_VALUE') {
+  if (operation === 'SET_RANGE_VALUE' || operation === 'SET_COLOR_VALUE') {
     return { operation, selector: grounded.selector, elementRef: grounded.elementRef, value: clean(original.value, 120) };
+  }
+  if (operation === 'SELECT_MULTIPLE') {
+    return { operation, selector: grounded.selector, elementRef: grounded.elementRef, values: uniqueValues(original.values, 100) };
   }
   const names = fileNames(original);
   if (operation === 'DROP_FILE') {
@@ -52,6 +58,8 @@ function restoreExtendedAction(original, grounded) {
 function extendedStep(original, action) {
   const operation = String(original?.operation || '').trim().toUpperCase();
   if (operation === 'SET_RANGE_VALUE') return { action: 'Set range value', target: action.selector || '', value: action.value };
+  if (operation === 'SET_COLOR_VALUE') return { action: 'Set color value', target: action.selector || '', value: action.value };
+  if (operation === 'SELECT_MULTIPLE') return { action: 'Select multiple options', target: action.selector || '', value: (action.values || []).join(', ') };
   if (operation === 'DROP_FILE') return { action: 'Drop approved file on target', target: action.selector || '', value: action.fileName || null };
   if (operation === 'SELECT_FILES') return { action: 'Select approved files', target: action.selector || '', value: (action.fileNames || []).join(', ') };
   if (operation === 'DROP_FILES') return { action: 'Drop approved files on target', target: action.selector || '', value: (action.fileNames || []).join(', ') };
@@ -82,7 +90,15 @@ function canonicalActionCatalog() {
     ...base.canonicalActionCatalog(),
     {
       operation: 'SET_RANGE_VALUE', usesElementRef: true, fields: ['elementRef','value'],
-      description: 'Set an exact value on a discovered input[type=range] using the framework-owned standards-compliant range interaction. Only available when the element advertises SET_RANGE_VALUE.',
+      description: 'Set an exact value on a discovered input[type=range] using the framework-owned native value setter. Only available when the element advertises SET_RANGE_VALUE.',
+    },
+    {
+      operation: 'SET_COLOR_VALUE', usesElementRef: true, fields: ['elementRef','value'],
+      description: 'Set a discovered input[type=color] to an exact #RRGGBB value using the native input value setter and input/change events. Only available when the element advertises SET_COLOR_VALUE.',
+    },
+    {
+      operation: 'SELECT_MULTIPLE', usesElementRef: true, fields: ['elementRef','values'],
+      description: 'Select an exact array of discovered enabled option values on a native select[multiple]. Only available when the element advertises SELECT_MULTIPLE.',
     },
     {
       operation: 'DROP_FILE', usesElementRef: true, fields: ['elementRef','fileName'],
