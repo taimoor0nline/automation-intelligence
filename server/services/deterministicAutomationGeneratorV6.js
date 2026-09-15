@@ -39,6 +39,44 @@ function emitSuggestionClick(contract, expected) {
   return `cy.get(${js(listSelector)}).should('be.visible').find('[role="option"]').filter((_,el)=>{ ${optionMatchBody(expected)} }).first().should('be.visible').and('not.have.attr','aria-disabled','true').click()`;
 }
 
+function emitSuggestionTraversal(contract, expected, { click = false } = {}) {
+  const listSelector = suggestionListSelector(contract);
+  const maxAttempts = Math.max(1, Math.min(Number(contract.suggestionTraversalMaxAttempts || 24), 50));
+  const found = click
+    ? `return cy.wrap($match,{log:false}).scrollIntoView().should('be.visible').and('not.have.attr','aria-disabled','true').click();`
+    : `return cy.wrap($match,{log:false}).scrollIntoView().should('be.visible');`;
+  return `cy.then(()=>{ const seek=(attempt=0)=>cy.get(${js(listSelector)}).should('be.visible').then(($list)=>{ const $matches=$list.find('[role="option"]').filter((_,el)=>{ ${optionMatchBody(expected)} }); if($matches.length){ const $match=$matches.first(); ${found} } if(attempt>=${maxAttempts}) throw new Error(${js(`Suggestion ${String(expected)} was not rendered within the bounded traversal limit.`)}); const el=$list[0]; const before=Number(el.scrollTop||0); const maxTop=Math.max(0,Number(el.scrollHeight||0)-Number(el.clientHeight||0)); const step=Math.max(48,Math.floor(Number(el.clientHeight||240)*0.8)); const next=Math.min(maxTop,before+step); if(next<=before) throw new Error(${js(`Suggestion ${String(expected)} was not found and the list cannot scroll further.`)}); return cy.wrap($list,{log:false}).scrollTo(0,next,{duration:0,ensureScrollable:false,log:false}).then(()=>cy.wait(40,{log:false})).then(()=>seek(attempt+1)); }); return seek(0); })`;
+}
+
+function exactRemoveTarget(contract, expected) {
+  const wanted = String(expected || '').trim().toLowerCase();
+  return (Array.isArray(contract.removeTagTargets) ? contract.removeTagTargets : []).find((item) => String(item?.value || '').trim().toLowerCase() === wanted) || null;
+}
+
+function dynamicRemoveChain(contract, expected) {
+  const listId = String(contract.suggestionListId || '').trim();
+  const prefix = String(contract.removeTagPattern?.prefix || '').trimEnd();
+  if (!listId || !prefix) throw new Error('Selected-tag removal requires a grounded listbox relation and discovered semantic remove-label pattern.');
+  const expectedLabel = `${prefix} ${String(expected)}`.replace(/\s+/g, ' ').trim();
+  return `cy.get('body').find('button,[role="button"],input[type="button"],input[type="reset"]').filter((_,el)=>{ const controls=String(el.getAttribute('aria-controls')||el.getAttribute('aria-owns')||'').trim(); const label=String(el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent||'').trim().replace(/\\s+/g,' '); return controls===${js(listId)}&&label===${js(expectedLabel)}; }).should('have.length',1).first()`;
+}
+
+function emitRemoveSelectedTag(contract, expected) {
+  const target = exactRemoveTarget(contract, expected);
+  if (target?.selector) return `cy.get(${js(target.selector)}).should('be.visible').and('not.be.disabled').click()`;
+  return `${dynamicRemoveChain(contract, expected)}.should('be.visible').click()`;
+}
+
+function emitSelectedTagAssertion(assertion, expected, present) {
+  const target = exactRemoveTarget(assertion, expected);
+  if (target?.selector) {
+    if (present) return `    cy.get(${js(target.selector)}).should('be.visible');`;
+    return `    cy.get('body').find(${js(target.selector)}).should('have.length',0);`;
+  }
+  const chain = dynamicRemoveChain(assertion, expected);
+  return present ? `    ${chain}.should('be.visible');` : `    ${chain}.should('have.length',0);`;
+}
+
 function emitAction(action) {
   if (action?.operation === 'TYPE_RUNTIME_CREDENTIAL') {
     const credential = String(action.credential || '').trim().toLowerCase();
@@ -101,6 +139,24 @@ function emitAction(action) {
     const listSelector = suggestionListSelector(action);
     return `    cy.wrap(${js(values)},{log:false}).each((expected)=>{ cy.get(${js(action.selector)}).then(($el)=>{ if(String($el.attr('aria-expanded')||'').toLowerCase()!=='true') cy.wrap($el).click(); }).then(()=>{ cy.get(${js(action.selector)}).clear().type(String(expected)); cy.get(${js(listSelector)}).should('be.visible').find('[role="option"]').filter((_,el)=>{ const text=String(el.textContent||'').trim().replace(/\\s+/g,' '); const value=String(el.getAttribute('data-value')||el.getAttribute('value')||el.getAttribute('aria-label')||'').trim(); return text===String(expected)||value===String(expected); }).first().should('be.visible').and('not.have.attr','aria-disabled','true').click(); }); });`;
   }
+  if (action?.operation === 'SCROLL_SUGGESTIONS_TO_VALUE') {
+    if (!action.selector || !String(action.value || '').trim()) throw new Error('SCROLL_SUGGESTIONS_TO_VALUE requires a grounded control and evidenced suggestion value.');
+    const traversal = emitSuggestionTraversal(action, String(action.value), { click: false });
+    return `    cy.get(${js(action.selector)}).then(($el)=>{ if(String($el.attr('aria-expanded')||'').toLowerCase()!=='true') cy.wrap($el).click(); }).then(()=>${traversal});`;
+  }
+  if (action?.operation === 'SELECT_SUGGESTION_BY_TRAVERSAL') {
+    if (!action.selector || !String(action.value || '').trim()) throw new Error('SELECT_SUGGESTION_BY_TRAVERSAL requires a grounded control and evidenced suggestion value.');
+    const traversal = emitSuggestionTraversal(action, String(action.value), { click: true });
+    return `    cy.get(${js(action.selector)}).then(($el)=>{ if(String($el.attr('aria-expanded')||'').toLowerCase()!=='true') cy.wrap($el).click(); }).then(()=>${traversal});`;
+  }
+  if (action?.operation === 'REMOVE_SELECTED_TAG') {
+    if (!action.selector || !String(action.value || '').trim()) throw new Error('REMOVE_SELECTED_TAG requires a grounded multi-select control and exact selected value.');
+    return `    ${emitRemoveSelectedTag(action, String(action.value))};`;
+  }
+  if (action?.operation === 'CLEAR_SELECTED_TAGS') {
+    if (!action.selector || !action.clearTagsSelector) throw new Error('CLEAR_SELECTED_TAGS requires a grounded multi-select control and discovered clear-all control.');
+    return `    cy.get(${js(action.clearTagsSelector)}).should('be.visible').and('not.be.disabled').click();`;
+  }
   return v5.emitAction(action);
 }
 
@@ -132,6 +188,22 @@ function emitAssertion(assertion) {
     const values = Array.isArray(assertion.values) ? assertion.values.map(String) : [];
     const listSelector = suggestionListSelector(assertion);
     return `    cy.get(${js(listSelector)}).find('[role="option"][aria-selected="true"]').then(($options)=>{ const actual=Array.from($options).map((el)=>String(el.getAttribute('data-value')||el.getAttribute('value')||el.getAttribute('aria-label')||el.textContent||'').trim()); expect(actual).to.deep.eq(${js(values)}); });`;
+  }
+  if (assertion?.operation === 'ASSERT_SELECTED_TAG_PRESENT') {
+    const expected = String(assertion.value ?? assertion.text ?? '');
+    if (!expected) throw new Error('ASSERT_SELECTED_TAG_PRESENT requires an exact selected value.');
+    return emitSelectedTagAssertion(assertion, expected, true);
+  }
+  if (assertion?.operation === 'ASSERT_SELECTED_TAG_ABSENT') {
+    const expected = String(assertion.value ?? assertion.text ?? '');
+    if (!expected) throw new Error('ASSERT_SELECTED_TAG_ABSENT requires an exact selected value.');
+    return emitSelectedTagAssertion(assertion, expected, false);
+  }
+  if (assertion?.operation === 'ASSERT_NO_SELECTED_TAGS') {
+    const listId = String(assertion.suggestionListId || '').trim();
+    const prefix = String(assertion.removeTagPattern?.prefix || '').trimEnd();
+    if (!listId || !prefix) throw new Error('ASSERT_NO_SELECTED_TAGS requires a grounded list relation and discovered semantic remove-label pattern.');
+    return `    cy.get('body').find('button,[role="button"],input[type="button"],input[type="reset"]').filter((_,el)=>{ const controls=String(el.getAttribute('aria-controls')||el.getAttribute('aria-owns')||'').trim(); const label=String(el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent||'').trim().replace(/\\s+/g,' '); return controls===${js(listId)}&&label.startsWith(${js(`${prefix} `)}); }).should('have.length',0);`;
   }
   return v4.emitAssertion(assertion);
 }
