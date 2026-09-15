@@ -121,7 +121,8 @@ try {
   assert(generated.script.includes("'testNexusEnterpriseAdapter'") || generated.script.includes('"testNexusEnterpriseAdapter"'));
   assert(generated.script.includes('TC901-ACT-001'));
   assert(generated.script.includes('TC901-ASRT-001'));
-  assert(generated.script.includes('runtime selector uniqueness'));
+  assert(generated.script.includes('testNexusSetCurrentItem'));
+  assert(generated.script.includes('testNexusRuntimeEvent'));
   assert.equal(generated.scriptHash, sha(generated.script));
 
   const frozen = require('../server/services/frozenExecutionIntegration');
