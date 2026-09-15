@@ -13,15 +13,11 @@ function rawKey(path, selector) { return `${clean(path, 1200)}|${clean(selector,
 
 function rawMaps(pageDiscoveries = []) {
   const byKey = new Map();
-  const byPathAndId = new Map();
   for (const page of pageDiscoveries || []) {
     const path = pagePath(page);
-    for (const item of [...(page?.elements || []), ...(page?.messages || [])]) {
-      if (item?.selector) byKey.set(rawKey(path, item.selector), item);
-      if (item?.id) byPathAndId.set(`${path}|${item.id}`, item);
-    }
+    for (const item of [...(page?.elements || []), ...(page?.messages || [])]) if (item?.selector) byKey.set(rawKey(path, item.selector), item);
   }
-  return { byKey, byPathAndId };
+  return { byKey };
 }
 
 function optionEvidence(raw = {}, path = '', pageDiscoveries = []) {
@@ -55,6 +51,10 @@ function searchableControl(entry = {}) {
   const type = lower(entry.type);
   const role = lower(entry.role);
   return role === 'combobox' || role === 'searchbox' || (tag === 'input' && (type === 'search' || Boolean(entry.ariaAutocomplete) || Boolean(entry.listboxId) || Boolean(entry.datalistId)));
+}
+function editableSearchControl(entry = {}) {
+  const tag = lower(entry.tag);
+  return ['input','textarea'].includes(tag) || entry.contenteditable === true;
 }
 
 function buildCanonicalElementRegistry(pageDiscoveries = []) {
@@ -96,9 +96,10 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
     const listbox = relation && lower(relation.role) === 'listbox' ? relation : null;
     const multi = entry.ariaMultiselectable === 'true' || listbox?.ariaMultiselectable === 'true';
     const search = searchableControl({ ...entry, listboxId: listbox?.id, datalistId: isDatalist ? entry.datalistId : null });
+    const editable = editableSearchControl(entry);
     const caps = new Set(entry.capabilities || []);
 
-    if (search) {
+    if (search && editable && entry.disabled !== true && entry.readonly !== true) {
       caps.add('SEARCH_SUGGESTIONS');
       caps.add('CLEAR_SUGGESTION_SEARCH');
       caps.add('SUGGESTION_QUERY');
@@ -112,7 +113,7 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
       caps.add('ASSERT_SUGGESTIONS');
       caps.add('ASSERT_COMBOBOX_STATE');
     }
-    if (multi && caps.has('SELECT_SUGGESTION')) caps.add('SELECT_SUGGESTIONS');
+    if (multi && caps.has('SELECT_SUGGESTION') && caps.has('SEARCH_SUGGESTIONS')) caps.add('SELECT_SUGGESTIONS');
     if (isDatalist) caps.add('NATIVE_DATALIST_SUGGESTIONS');
 
     return {
@@ -128,12 +129,7 @@ function buildCanonicalElementRegistry(pageDiscoveries = []) {
     };
   });
 
-  const registryCore = {
-    version: 7,
-    pages: base.pages || [],
-    elements,
-    capabilitySummary: v6.capabilitySummary(elements),
-  };
+  const registryCore = { version: 7, pages: base.pages || [], elements, capabilitySummary: v6.capabilitySummary(elements) };
   const registryHash = crypto.createHash('sha256').update(JSON.stringify(registryCore)).digest('hex');
   return { ...registryCore, registryHash };
 }
@@ -166,22 +162,14 @@ function registryForModel(registry = {}) {
       authoritative: true,
       actionRequirements: {
         ...(base.capabilityContract?.actionRequirements || {}),
-        OPEN_COMBOBOX: 'OPEN_COMBOBOX',
-        CLOSE_COMBOBOX: 'CLOSE_COMBOBOX',
-        SEARCH_SUGGESTIONS: 'SEARCH_SUGGESTIONS',
-        CLEAR_SUGGESTION_SEARCH: 'CLEAR_SUGGESTION_SEARCH',
-        SELECT_SUGGESTION: 'SELECT_SUGGESTION',
-        SELECT_SUGGESTIONS: 'SELECT_SUGGESTIONS',
+        OPEN_COMBOBOX: 'OPEN_COMBOBOX', CLOSE_COMBOBOX: 'CLOSE_COMBOBOX', SEARCH_SUGGESTIONS: 'SEARCH_SUGGESTIONS', CLEAR_SUGGESTION_SEARCH: 'CLEAR_SUGGESTION_SEARCH', SELECT_SUGGESTION: 'SELECT_SUGGESTION', SELECT_SUGGESTIONS: 'SELECT_SUGGESTIONS',
       },
       assertionRequirements: {
-        ...(base.capabilityContract?.assertionRequirements || {}),
-        suggestionVisible: 'ASSERT_SUGGESTIONS',
-        suggestionSelected: 'ASSERT_SUGGESTIONS',
-        comboState: 'ASSERT_COMBOBOX_STATE',
+        ...(base.capabilityContract?.assertionRequirements || {}), suggestionVisible: 'ASSERT_SUGGESTIONS', suggestionSelected: 'ASSERT_SUGGESTIONS', comboState: 'ASSERT_COMBOBOX_STATE',
       },
       specialRules: [
         ...(base.capabilityContract?.specialRules || []),
-        'Search/autocomplete actions are available only when rendered discovery proves a searchable input/combobox or native datalist relationship.',
+        'Search/autocomplete actions are available only when rendered discovery proves an editable searchable input/combobox or native datalist relationship.',
         'Custom listbox option values must come from rendered suggestions or explicit user-authored test data/requirements. AI may not fabricate suggestion labels.',
         'A custom ARIA combobox remains distinct from native <select>; never substitute SELECT or SELECT_MULTIPLE for semantic suggestion actions.',
         'Native <datalist> suggestions are discoverable/groundable, but browser-owned popup selection is not treated as a custom listbox click capability.',
@@ -191,9 +179,4 @@ function registryForModel(registry = {}) {
   };
 }
 
-module.exports = {
-  ...v6,
-  buildCanonicalElementRegistry,
-  registryForModel,
-  searchableControl,
-};
+module.exports = { ...v6, buildCanonicalElementRegistry, registryForModel, searchableControl, editableSearchControl };
