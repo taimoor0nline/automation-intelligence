@@ -95,8 +95,8 @@
     loadScript('/generation-dropdown-search.js', 'data-generation-dropdown-search');
     loadScript('/automation-details-cypress-preview.js', 'data-automation-details-cypress-preview');
     loadScript('/test-case-page-context.js', 'data-test-case-page-context');
-    loadScript('/manual-cypress-authoring.js', 'data-manual-cypress-authoring');
-    loadScript('/manual-cypress-authoring-ux.js', 'data-manual-cypress-authoring-ux');
+    loadScript('/manual-cypress-authoring.js', 'data-manual-cypress-authoring', true);
+    loadScript('/manual-cypress-authoring-ux.js', 'data-manual-cypress-authoring-ux', true);
     loadScript('/test-case-repair-workbench.js', 'data-test-case-repair-workbench', true);
   }
 
