@@ -115,8 +115,30 @@ function readSnapshot(filePath) {
   }
 }
 
+function stripTerminalFormatting(value) {
+  return String(value || '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gi, '')
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/gi, '')
+    .replace(/\[[0-9;]{1,12}m/g, '')
+    .replace(/[─│┌┐└┘]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function resultTail(resultOrError) {
-  return String(resultOrError?.stderr || resultOrError?.stdout || '').trim().slice(-1800);
+  return stripTerminalFormatting(resultOrError?.stderr || resultOrError?.stdout || '').slice(-1400);
+}
+
+function readRunnerFailure(resultFile) {
+  if (!fs.existsSync(resultFile)) return null;
+  try {
+    const payload = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
+    const failed = (Array.isArray(payload?.tests) ? payload.tests : []).find((test) => String(test?.state || '').toLowerCase() === 'failed');
+    const message = stripTerminalFormatting(failed?.err?.message || failed?.err?.stack || '');
+    return message || null;
+  } catch {
+    return null;
+  }
 }
 
 async function discoverOneRenderedPage(seed, options) {
@@ -145,6 +167,8 @@ async function discoverOneRenderedPage(seed, options) {
     AUTOMATION_SCREENSHOT_EACH_TEST: 'false',
     AUTOMATION_TEST_COMPLETION_PAUSE_MS: '0',
     DEMO_STEP_DELAY_MS: '0',
+    // These are explicitly projected by engine.config.js into Cypress.env().
+    CYPRESS_DISCOVERY_ENABLED: 'true',
     CYPRESS_DISCOVERY_TARGET_URLS_JSON: JSON.stringify([seed]),
     CYPRESS_DISCOVERY_OUTPUT_FILE: outputForCypress,
     CYPRESS_DISCOVERY_PAGE_SCOPE: pageScope,
@@ -183,8 +207,17 @@ async function discoverOneRenderedPage(seed, options) {
     const payload = readSnapshot(outputAbsolute);
     const page = payload?.pages?.[0] || null;
     if (!page) {
-      const error = processError || new Error(`Rendered page discovery produced no grounded snapshot${resultTail(result) ? `: ${resultTail(result)}` : '.'}`);
-      if (!error.code) error.code = 'BROWSER_DISCOVERY_PAGE_FAILED';
+      const runnerFailure = readRunnerFailure(resultFile);
+      let error = processError;
+      if (!error && runnerFailure) {
+        error = new Error(runnerFailure);
+        error.code = 'BROWSER_DISCOVERY_RUNNER_FAILED';
+      }
+      if (!error) {
+        const tail = resultTail(result);
+        error = new Error(`Rendered discovery runner finished without writing a grounded snapshot${tail ? ` (${tail})` : '.'}`);
+        error.code = 'BROWSER_DISCOVERY_SNAPSHOT_MISSING';
+      }
       error.targetUrl = seed;
       throw error;
     }
@@ -265,7 +298,8 @@ async function discoverRenderedPages(urls = [], options = {}) {
       }
     } catch (err) {
       if (!pages.length) {
-        err.code = err.code === 'BROWSER_DISCOVERY_PAGE_TIMEOUT' ? 'BROWSER_DISCOVERY_START_PAGE_TIMEOUT' : (err.code || 'BROWSER_DISCOVERY_START_PAGE_FAILED');
+        if (err.code === 'BROWSER_DISCOVERY_PAGE_TIMEOUT') err.code = 'BROWSER_DISCOVERY_START_PAGE_TIMEOUT';
+        else if (!err.code || err.code === 'BROWSER_DISCOVERY_PAGE_FAILED') err.code = 'BROWSER_DISCOVERY_START_PAGE_FAILED';
         err.message = `Starting page could not be rendered into a grounded browser snapshot. ${err.message}`;
         throw err;
       }
@@ -291,4 +325,4 @@ async function discoverRenderedPages(urls = [], options = {}) {
   }));
 }
 
-module.exports = { discoverRenderedPages, normalizeSeeds, readSnapshot };
+module.exports = { discoverRenderedPages, normalizeSeeds, readSnapshot, readRunnerFailure, stripTerminalFormatting };
