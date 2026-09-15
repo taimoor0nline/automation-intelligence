@@ -2,6 +2,7 @@ const assert = require('assert');
 
 const { buildCanonicalElementRegistry, registryForModel } = require('../server/services/canonicalElementRegistry');
 const { validateHtmlCapabilityContract } = require('../server/services/htmlCapabilityContract');
+const { validateHtmlCompiledAlignment } = require('../server/services/htmlCompiledAlignmentContract');
 const generator = require('../server/services/deterministicAutomationGeneratorV6');
 
 const pageDiscoveries = [{
@@ -129,6 +130,18 @@ assertCode(validate([{ operation: 'TYPE', elementRef: element('content').element
 assertOk(validate([], [{ operation: 'ASSERT_TEXT_CONTAINS', elementRef: element('heading').elementRef, text: 'Capability' }]));
 assertOk(validate([], [{ operation: 'ASSERT_IMAGE_LOADED', elementRef: element('image').elementRef }]));
 assertCode(validate([], [{ operation: 'ASSERT_IMAGE_LOADED', elementRef: element('content').elementRef }]), 'HTML_ASSERTION_CAPABILITY_MISMATCH');
+
+const alignedFiles = validateHtmlCompiledAlignment({
+  canonicalIr: { actions: [{ operation: 'SELECT_FILES', elementRef: element('multi-file').elementRef, fileNames: ['sample.txt', 'sample.svg'] }] },
+  automationReadiness: { automationPlan: { actions: [{ operation: 'SELECT_FILES', selector: '#multi-file', elementRef: element('multi-file').elementRef, fileNames: ['sample.txt', 'sample.svg'] }] } },
+});
+assert.equal(alignedFiles.ok, true, JSON.stringify(alignedFiles.errors));
+const driftedFiles = validateHtmlCompiledAlignment({
+  canonicalIr: { actions: [{ operation: 'SELECT_FILES', elementRef: element('multi-file').elementRef, fileNames: ['sample.txt', 'sample.svg'] }] },
+  automationReadiness: { automationPlan: { actions: [{ operation: 'SELECT_FILES', selector: '#multi-file', elementRef: element('multi-file').elementRef, fileNames: ['sample.svg', 'sample.txt'] }] } },
+});
+assert.equal(driftedFiles.ok, false);
+assert.equal(driftedFiles.reasonCode, 'HTML_COMPILED_FILE_ARRAY_DRIFT');
 
 const rangeScript = generator.generateDeterministicAutomation([{
   id: 'TC_RANGE', title: 'Range', automationReadiness: { automationPlan: { actions: [{ operation: 'SET_RANGE_VALUE', selector: '#range', elementRef: element('range').elementRef, value: '50' }], assertions: [] } },
