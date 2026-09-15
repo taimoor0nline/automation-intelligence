@@ -1,10 +1,38 @@
 /* Independent browser verification for searchable suggestions and semantic dropdowns. */
 
+function filterCapabilityCase(testContext) {
+  const wanted = String(Cypress.env('CAPABILITY_CASE') || '').trim().toUpperCase();
+  const current = String(testContext.currentTest?.title || '').trim().toUpperCase();
+  if (wanted && !current.startsWith(wanted)) testContext.skip();
+}
+
+function seekVirtualizedOption(expected, { click = false, attempt = 0, maxAttempts = 24 } = {}) {
+  return cy.get('#virtual-list').should('be.visible').then(($list) => {
+    const $match = $list.find('[role="option"]').filter((_, el) => {
+      const text = String(el.textContent || '').trim();
+      const value = String(el.getAttribute('data-value') || '').trim();
+      return text === expected || value === expected;
+    }).first();
+    if ($match.length) {
+      const chain = cy.wrap($match, { log: false }).scrollIntoView().should('be.visible');
+      return click ? chain.click() : chain;
+    }
+    if (attempt >= maxAttempts) throw new Error(`Could not render ${expected} within ${maxAttempts} bounded traversal attempts.`);
+    const el = $list[0];
+    const before = Number(el.scrollTop || 0);
+    const maxTop = Math.max(0, Number(el.scrollHeight || 0) - Number(el.clientHeight || 0));
+    const next = Math.min(maxTop, before + Math.max(48, Math.floor(Number(el.clientHeight || 150) * 0.8)));
+    if (next <= before) throw new Error(`Virtualized list cannot scroll further while looking for ${expected}.`);
+    return cy.wrap($list, { log: false })
+      .scrollTo(0, next, { duration: 0, ensureScrollable: false, log: false })
+      .then(() => cy.wait(40, { log: false }))
+      .then(() => seekVirtualizedOption(expected, { click, attempt: attempt + 1, maxAttempts }));
+  });
+}
+
 describe('TestNexus searchable suggestions capability lab', () => {
   beforeEach(function () {
-    const wanted = String(Cypress.env('CAPABILITY_CASE') || '').trim().toUpperCase();
-    const current = String(this.currentTest?.title || '').trim().toUpperCase();
-    if (wanted && !current.startsWith(wanted)) this.skip();
+    filterCapabilityCase(this);
     cy.visit('/capabilities.html');
   });
 
@@ -86,5 +114,58 @@ describe('TestNexus searchable suggestions capability lab', () => {
     cy.get('#search-suggest-input').should('have.attr', 'role', 'combobox').and('have.attr', 'aria-autocomplete', 'list').and('have.attr', 'aria-controls', 'search-suggest-list');
     cy.get('#search-suggest-list').should('have.attr', 'role', 'listbox');
     cy.get('#search-suggest-list [role="option"]').should('have.length', 4);
+  });
+});
+
+describe('TestNexus virtualized and selected-tag capability lab', () => {
+  beforeEach(function () {
+    filterCapabilityCase(this);
+    cy.visit('/searchable-advanced.html');
+  });
+
+  it('CAP054 bounded traversal renders an offscreen virtualized option', () => {
+    cy.get('#virtual-list [role="option"]').should('not.contain.text', 'Item 24');
+    seekVirtualizedOption('Item 24');
+    cy.get('#virtual-list [role="option"][data-value="Item 24"]').should('be.visible');
+    cy.get('#virtual-selected').should('have.text', 'none');
+  });
+
+  it('CAP055 bounded traversal selects an exact virtualized option', () => {
+    seekVirtualizedOption('Item 42', { click: true });
+    cy.get('#virtual-selected').should('have.text', 'Item 42');
+    cy.get('#virtual-combo').should('have.value', 'Item 42');
+  });
+
+  it('CAP056 selected chip can be removed through its semantic remove control', () => {
+    cy.get('#tag-chips [data-selected-value="Laravel"]').should('exist');
+    cy.get('button[aria-controls="tag-list"][aria-label="Remove Laravel"]').click();
+    cy.get('#tag-chips [data-selected-value="Laravel"]').should('not.exist');
+    cy.get('#tag-opt-laravel').should('have.attr', 'aria-selected', 'false');
+  });
+
+  it('CAP057 dynamically selected chip reuses the grounded remove-label pattern', () => {
+    cy.get('#tag-combo').clear().type('Vue');
+    cy.get('#tag-list [role="option"]:visible').contains('Vue').click();
+    cy.get('#tag-chips [data-selected-value="Vue"]').should('exist');
+    cy.get('button[aria-controls="tag-list"][aria-label="Remove Vue"]').click();
+    cy.get('#tag-chips [data-selected-value="Vue"]').should('not.exist');
+    cy.get('#tag-opt-vue').should('have.attr', 'aria-selected', 'false');
+  });
+
+  it('CAP058 clear-all removes every selected chip and selected state', () => {
+    cy.get('#tag-combo').clear().type('Vue');
+    cy.get('#tag-list [role="option"]:visible').contains('Vue').click();
+    cy.get('#tag-chips [data-selected-value]').should('have.length', 2);
+    cy.get('#tag-clear-all').click();
+    cy.get('#tag-chips [data-selected-value]').should('have.length', 0);
+    cy.get('#tag-list [role="option"][aria-selected="true"]').should('have.length', 0);
+    cy.get('#tag-selected').should('have.text', 'none');
+  });
+
+  it('CAP059 remove and clear controls are tied to the same semantic listbox', () => {
+    cy.get('#tag-combo').should('have.attr', 'aria-controls', 'tag-list');
+    cy.get('#tag-list').should('have.attr', 'role', 'listbox').and('have.attr', 'aria-multiselectable', 'true');
+    cy.get('button[aria-label="Remove Laravel"]').should('have.attr', 'aria-controls', 'tag-list');
+    cy.get('#tag-clear-all').should('have.attr', 'aria-controls', 'tag-list').and('have.attr', 'aria-label', 'Clear all selected tags');
   });
 });
