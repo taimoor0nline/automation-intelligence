@@ -4,7 +4,8 @@ const v3 = require('./canonicalElementRegistryV3');
 const CYPRESS_TYPEABLE_INPUT_TYPES = new Set([
   'text','password','email','number','date','week','month','time','datetime-local','search','url','tel',
 ]);
-const CLICKABLE_ROLES = new Set(['button','link','checkbox','radio','switch','tab','menuitem','option']);
+const CLICKABLE_ROLES = new Set(['button','link','checkbox','radio','switch','tab','menuitem','option','combobox','slider','spinbutton','treeitem']);
+const FOCUSABLE_ROLES = new Set(['button','link','textbox','combobox','checkbox','radio','switch','tab','menuitem','option','slider','spinbutton','treeitem','searchbox']);
 const NATIVE_CLICK_TAGS = new Set(['button','a','summary']);
 const BUTTON_INPUT_TYPES = new Set(['button','submit','reset','image']);
 
@@ -23,12 +24,17 @@ function isTypeable(item = {}) {
   const type = lower(item.type);
   return tag === 'textarea' || item.contenteditable === true || lower(item.contenteditable) === 'true' || (tag === 'input' && CYPRESS_TYPEABLE_INPUT_TYPES.has(type || 'text'));
 }
+function hasFocusableTabIndex(item = {}) {
+  if (item.tabIndex === null || item.tabIndex === undefined || item.tabIndex === '') return false;
+  const value = Number(item.tabIndex);
+  return Number.isFinite(value) && value >= 0;
+}
 function isFocusable(item = {}) {
   const tag = lower(item.tag || item.tagName);
   const type = lower(item.type);
   const role = lower(item.role);
   if (tag === 'input' && type === 'hidden') return false;
-  return isNativeFormControl(item) || tag === 'a' || item.contenteditable === true || CLICKABLE_ROLES.has(role) || Number(item.tabIndex) >= 0;
+  return isNativeFormControl(item) || tag === 'a' || item.contenteditable === true || FOCUSABLE_ROLES.has(role) || hasFocusableTabIndex(item);
 }
 function isClickable(item = {}) {
   const tag = lower(item.tag || item.tagName);
