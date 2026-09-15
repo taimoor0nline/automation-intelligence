@@ -4,6 +4,7 @@ const { validateWebScenarioPolicy } = require('./webScenarioPolicy');
 const { validateNavigationContract } = require('./navigationContract');
 const { validateDeterministicStateContract } = require('./deterministicStateContract');
 const { validateStaticExpectationContract } = require('./staticExpectationContract');
+const { validateHtmlCapabilityContract } = require('./htmlCapabilityContract');
 const { buildCanonicalElementRegistry } = require('./canonicalElementRegistry');
 const {
   validateStrictGeneratedArtifact,
@@ -40,7 +41,8 @@ function strictFailure(testCase, strict, extra = {}) {
       navigationContract: extra.navigationContract ?? testCase?.automationReadiness?.navigationContract ?? null,
       stateContract: extra.stateContract ?? testCase?.automationReadiness?.stateContract ?? null,
       staticExpectationContract: extra.staticExpectationContract ?? testCase?.automationReadiness?.staticExpectationContract ?? null,
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+strict-artifact-contract',
+      htmlCapabilityContract: extra.htmlCapabilityContract ?? testCase?.automationReadiness?.htmlCapabilityContract ?? null,
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+html-capability-contract+strict-artifact-contract',
     },
   };
 }
@@ -67,19 +69,12 @@ function attachStrictContract(testCase, context) {
     errors: navigationErrors,
   };
   if (!navigationContract.ok) {
-    return strictFailure(testCase, navigationContract, {
-      webScenarioPolicy: scenarioPolicy,
-      navigationContract,
-    });
+    return strictFailure(testCase, navigationContract, { webScenarioPolicy: scenarioPolicy, navigationContract });
   }
 
   const stateContract = validateDeterministicStateContract(testCase.canonicalIr, registry);
   if (!stateContract.ok) {
-    return strictFailure(testCase, stateContract, {
-      webScenarioPolicy: scenarioPolicy,
-      navigationContract,
-      stateContract,
-    });
+    return strictFailure(testCase, stateContract, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract });
   }
 
   const staticExpectationContract = validateStaticExpectationContract(testCase, registry, context);
@@ -92,6 +87,17 @@ function attachStrictContract(testCase, context) {
     });
   }
 
+  const htmlCapabilityContract = validateHtmlCapabilityContract(testCase.canonicalIr, registry);
+  if (!htmlCapabilityContract.ok) {
+    return strictFailure(testCase, htmlCapabilityContract, {
+      webScenarioPolicy: scenarioPolicy,
+      navigationContract,
+      stateContract,
+      staticExpectationContract,
+      htmlCapabilityContract,
+    });
+  }
+
   const strict = validateCypressContract(testCase, { ...context, canonicalElementRegistry: registry });
   if (!strict.ok) {
     return strictFailure(testCase, strict, {
@@ -99,6 +105,7 @@ function attachStrictContract(testCase, context) {
       navigationContract,
       stateContract,
       staticExpectationContract,
+      htmlCapabilityContract,
       cypressContract: strict,
     });
   }
@@ -110,6 +117,7 @@ function attachStrictContract(testCase, context) {
       navigationContract,
       stateContract,
       staticExpectationContract,
+      htmlCapabilityContract,
       cypressContract: strict,
       generatedArtifactContract,
     });
@@ -123,7 +131,7 @@ function attachStrictContract(testCase, context) {
       reasonCode: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED',
       reason: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.',
       errors: [{ code: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED', message: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.' }],
-    }, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract, staticExpectationContract, cypressContract: strict, generatedArtifactContract });
+    }, { webScenarioPolicy: scenarioPolicy, navigationContract, stateContract, staticExpectationContract, htmlCapabilityContract, cypressContract: strict, generatedArtifactContract });
   }
 
   return {
@@ -136,6 +144,7 @@ function attachStrictContract(testCase, context) {
       navigationContract,
       stateContract,
       staticExpectationContract,
+      htmlCapabilityContract,
       contractIntegrity: {
         ...(testCase.automationReadiness?.contractIntegrity || {}),
         cypressArtifactHash: strict.scriptHash,
@@ -144,8 +153,9 @@ function attachStrictContract(testCase, context) {
         navigationValidatorVersion: navigationContract.version,
         stateValidatorVersion: stateContract.version,
         staticExpectationValidatorVersion: staticExpectationContract.version,
+        htmlCapabilityValidatorVersion: htmlCapabilityContract.version,
       },
-      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+strict-artifact-contract',
+      validationSource: 'deterministic+web-scenario-policy+navigation-contract+state-contract+static-expectation-contract+html-capability-contract+strict-artifact-contract',
     },
   };
 }
@@ -222,9 +232,6 @@ function patchGenerator() {
       verifyCypressSeal(testCase);
     }
 
-    // Canonical execution bypasses all legacy late-source rewrite layers. The exact
-    // deterministic emitter used during readiness is also the only source of the
-    // executable browser artifact. No late mutation is permitted after approval.
     const generated = rawGenerator.generateDeterministicAutomation(canonical);
     assertGeneratedScriptSyntax(generated.script, { singleCase: canonical.length === 1 });
     return generated;
