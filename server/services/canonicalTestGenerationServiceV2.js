@@ -83,6 +83,10 @@ NON-NEGOTIABLE CONTRACT:
 - For a field-validation test, isolate the intended invalid field and keep unrelated validation-bearing controls valid when submission is the trigger.
 - Do not assume BLUR, CHANGE or typing populates a custom error container unless the business requirement explicitly requires that timing. Prefer deterministic form submission as the validation trigger when a submit control exists.
 - Navigation uses discovered paths only.
+- Link elements may expose href and destinationPath. When CLICK targets a discovered link, every final path/URL assertion must agree with that exact link destination. Never pair one link with another link's destination.
+- The executable contract runs actions in order and final assertions after those actions. Do not CLICK several independent navigation links and then assert several intermediate destinations as if assertions were interleaved. For an independent link test, use one navigated destination per case. If the objective is to inspect several links without navigating each one, validate their discovered href/attributes instead of inventing intermediate browser state.
+- After a navigation-producing action, subsequent element actions must belong to the resulting page unless the flow explicitly NAVIGATEs back or otherwise changes page state through a grounded operation.
+- A link with target=_blank is a new-window flow. Do not model it as same-tab navigation unless a configured capability explicitly supports that behavior.
 - Do not output raw SQL, credentials, API keys, tokens or connection strings. Database assertions use configured named queries only.
 - Advanced operations may be used only when runtimeCapabilities says the capability is available/configured.
 - Tests describe expected behavior; never manufacture a failure.
