@@ -1,6 +1,11 @@
 const crypto = require('crypto');
 const { validateCypressContract } = require('./cypressContractValidator');
 const { validateWebScenarioPolicy } = require('./webScenarioPolicy');
+const {
+  validateStrictGeneratedArtifact,
+  assertGeneratedScriptSyntax,
+  assertRuntimePrerequisites,
+} = require('./strictGeneratedArtifactValidator');
 const rawGenerator = require('./deterministicAutomationGeneratorV6');
 const { contractSnapshot } = require('./startupIntegrityGuards');
 
@@ -12,22 +17,23 @@ function scriptHash(script) {
 
 function strictFailure(testCase, strict, extra = {}) {
   const messages = (strict?.errors || []).map((item) => item?.message || String(item)).filter(Boolean);
-  const reason = strict?.reason || messages[0] || 'The exact Cypress execution contract failed strict deterministic validation.';
+  const reason = strict?.reason || messages[0] || 'The exact executable automation contract failed strict deterministic validation.';
   return {
     ...testCase,
     automationReadiness: {
       ...(testCase.automationReadiness || {}),
       status: 'INVALID_TEST_CASE',
       automatable: false,
-      reasonCode: strict?.reasonCode || strict?.errors?.[0]?.code || 'STRICT_CYPRESS_CONTRACT_INVALID',
+      reasonCode: strict?.reasonCode || strict?.errors?.[0]?.code || 'STRICT_AUTOMATION_CONTRACT_INVALID',
       reason,
       reasons: messages.length ? messages : [reason],
       resolutionType: 'AI_REPAIRABLE',
       repairable: true,
       canSuggestAssertion: false,
       cypressContract: extra.cypressContract ?? strict?.cypressContract ?? testCase?.automationReadiness?.cypressContract ?? null,
+      generatedArtifactContract: extra.generatedArtifactContract ?? testCase?.automationReadiness?.generatedArtifactContract ?? null,
       webScenarioPolicy: extra.webScenarioPolicy ?? testCase?.automationReadiness?.webScenarioPolicy ?? null,
-      validationSource: 'deterministic+web-scenario-policy+cypress-contract',
+      validationSource: 'deterministic+web-scenario-policy+strict-artifact-contract',
     },
   };
 }
@@ -47,15 +53,24 @@ function attachStrictContract(testCase, context) {
   const strict = validateCypressContract(testCase, context);
   if (!strict.ok) return strictFailure(testCase, strict, { webScenarioPolicy: scenarioPolicy, cypressContract: strict });
 
+  const generatedArtifactContract = validateStrictGeneratedArtifact(testCase, context);
+  if (!generatedArtifactContract.ok) {
+    return strictFailure(testCase, generatedArtifactContract, {
+      webScenarioPolicy: scenarioPolicy,
+      cypressContract: strict,
+      generatedArtifactContract,
+    });
+  }
+
   const approvedHash = testCase?.canonicalValidation?.approvedCypressArtifactHash || null;
   if (approvedHash && approvedHash !== strict.scriptHash) {
     return strictFailure(testCase, {
       ...strict,
       ok: false,
-      reasonCode: 'APPROVED_CYPRESS_ARTIFACT_CHANGED',
-      reason: 'The exact Cypress artifact changed after human approval. Revalidate the case before execution.',
-      errors: [{ code: 'APPROVED_CYPRESS_ARTIFACT_CHANGED', message: 'The exact Cypress artifact changed after human approval. Revalidate the case before execution.' }],
-    }, { webScenarioPolicy: scenarioPolicy, cypressContract: strict });
+      reasonCode: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED',
+      reason: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.',
+      errors: [{ code: 'APPROVED_AUTOMATION_ARTIFACT_CHANGED', message: 'The exact executable automation artifact changed after human approval. Revalidate the case before execution.' }],
+    }, { webScenarioPolicy: scenarioPolicy, cypressContract: strict, generatedArtifactContract });
   }
 
   return {
@@ -63,13 +78,15 @@ function attachStrictContract(testCase, context) {
     automationReadiness: {
       ...testCase.automationReadiness,
       cypressContract: strict,
+      generatedArtifactContract,
       webScenarioPolicy: scenarioPolicy,
       contractIntegrity: {
         ...(testCase.automationReadiness?.contractIntegrity || {}),
         cypressArtifactHash: strict.scriptHash,
         cypressValidatorVersion: strict.version,
+        generatedArtifactValidatorVersion: generatedArtifactContract.version,
       },
-      validationSource: 'deterministic+web-scenario-policy+cypress-contract',
+      validationSource: 'deterministic+web-scenario-policy+strict-artifact-contract',
     },
   };
 }
@@ -85,7 +102,9 @@ function patchFeasibility() {
 }
 
 function currentSingleArtifactHash(testCase) {
+  assertRuntimePrerequisites(testCase);
   const generated = rawGenerator.generateDeterministicAutomation([testCase]);
+  assertGeneratedScriptSyntax(generated.script, { singleCase: true });
   return scriptHash(generated.script);
 }
 
@@ -98,7 +117,7 @@ function verifyLegacyDeterministicSeals(testCase) {
     throw error;
   }
   if (snapshot.canonicalHash !== approved.approvedCanonicalHash || snapshot.compiledHash !== approved.approvedCompiledHash || snapshot.displayExpectationHash !== approved.approvedDisplayExpectationHash) {
-    const error = new Error(`${testCase.id || 'Canonical test'} no longer matches its human-approved deterministic contract. Execution was blocked before Cypress started.`);
+    const error = new Error(`${testCase.id || 'Canonical test'} no longer matches its human-approved deterministic contract. Execution was blocked before the browser started.`);
     error.code = 'APPROVED_CONTRACT_MISMATCH';
     throw error;
   }
@@ -107,20 +126,20 @@ function verifyLegacyDeterministicSeals(testCase) {
 function verifyCypressSeal(testCase) {
   const approvedHash = testCase?.canonicalValidation?.approvedCypressArtifactHash || null;
   if (!approvedHash) {
-    const error = new Error(`${testCase.id || 'Canonical test'} is missing its human-approved Cypress artifact seal. Revalidate/review the test before execution.`);
-    error.code = 'APPROVED_CYPRESS_ARTIFACT_SEAL_MISSING';
+    const error = new Error(`${testCase.id || 'Canonical test'} is missing its human-approved executable artifact seal. Revalidate/review the test before execution.`);
+    error.code = 'APPROVED_AUTOMATION_ARTIFACT_SEAL_MISSING';
     throw error;
   }
   const readinessHash = testCase?.automationReadiness?.cypressContract?.scriptHash || null;
   if (!readinessHash || readinessHash !== approvedHash) {
-    const error = new Error(`${testCase.id || 'Canonical test'} readiness artifact does not match the human-approved Cypress artifact. Execution was blocked before the browser started.`);
-    error.code = 'APPROVED_CYPRESS_ARTIFACT_MISMATCH';
+    const error = new Error(`${testCase.id || 'Canonical test'} readiness artifact does not match the human-approved executable artifact. Execution was blocked before the browser started.`);
+    error.code = 'APPROVED_AUTOMATION_ARTIFACT_MISMATCH';
     throw error;
   }
   const currentHash = currentSingleArtifactHash(testCase);
   if (currentHash !== approvedHash) {
-    const error = new Error(`${testCase.id || 'Canonical test'} regenerated Cypress artifact differs from the reviewed artifact. Execution was blocked before the browser started.`);
-    error.code = 'APPROVED_CYPRESS_ARTIFACT_CHANGED';
+    const error = new Error(`${testCase.id || 'Canonical test'} regenerated executable artifact differs from the reviewed artifact. Execution was blocked before the browser started.`);
+    error.code = 'APPROVED_AUTOMATION_ARTIFACT_CHANGED';
     throw error;
   }
 }
@@ -134,7 +153,7 @@ function patchGenerator() {
     const canonical = (approvedTestCases || []).filter((testCase) => testCase?.canonicalIr);
     if (!canonical.length) return previous(approvedTestCases);
     if (canonical.length !== approvedTestCases.length) {
-      const error = new Error('Canonical and non-canonical tests cannot be mixed in one strict Cypress execution batch. Run them separately.');
+      const error = new Error('Canonical and non-canonical tests cannot be mixed in one strict execution batch. Run them separately.');
       error.code = 'MIXED_EXECUTION_CONTRACT_TYPES';
       throw error;
     }
@@ -144,10 +163,12 @@ function patchGenerator() {
       verifyCypressSeal(testCase);
     }
 
-    // Canonical execution bypasses all legacy late-source rewrite layers. The same
-    // deterministic V6 emitter used to validate/seal each test is the only source of
-    // executable Cypress code. Multi-test suites concatenate those same test bodies.
-    return rawGenerator.generateDeterministicAutomation(canonical);
+    // Canonical execution bypasses all legacy late-source rewrite layers. The exact
+    // deterministic emitter used during readiness is also the only source of the
+    // executable browser artifact. No late mutation is permitted after approval.
+    const generated = rawGenerator.generateDeterministicAutomation(canonical);
+    assertGeneratedScriptSyntax(generated.script, { singleCase: canonical.length === 1 });
+    return generated;
   };
   generator.__strictCypressContractPatched = true;
 }
