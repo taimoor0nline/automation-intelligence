@@ -13,6 +13,7 @@ const files = [
   'server/services/enterpriseAutomationCapabilities.js',
   'server/services/cypressPageDiscovery.js',
   'scripts/rendered-discovery-smoke.js',
+  'scripts/direct-browser-render-probe.js',
   'scripts/virtualized-traversal-emitter-smoke.js',
   'automation-system/tests/e2e/system/browser-discovery-strict.cy.js',
   'automation-system/tests/e2e/system/browser-discovery.cy.js',
