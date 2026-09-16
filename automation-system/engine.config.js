@@ -14,6 +14,15 @@ function numberEnv(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function configuredBaseUrl() {
+  // Hidden discovery visits an absolute target URL from the discovery contract. It must
+  // not anchor Cypress's own runner to the application origin (for example
+  // https://target.example/__/...), because application proxies/security policies can
+  // block or crash that internal runner route before the discovery spec starts.
+  if (boolEnv(process.env.CYPRESS_DISCOVERY_ENABLED, false)) return null;
+  return process.env.AUTOMATION_BASE_URL || process.env.TEST_BASE_URL || "http://localhost:4000";
+}
+
 function parseJsonEnv(name, fallback) {
   const raw = String(process.env[name] || "").trim();
   if (!raw) return fallback;
@@ -152,7 +161,7 @@ module.exports = defineConfig({
   experimentalModifyObstructiveThirdPartyCode: boolEnv(process.env.AUTOMATION_MODIFY_OBSTRUCTIVE_THIRD_PARTY_CODE, false),
   e2e: {
     testIsolation: true,
-    baseUrl: process.env.AUTOMATION_BASE_URL || process.env.TEST_BASE_URL || "http://localhost:4000",
+    baseUrl: configuredBaseUrl(),
     specPattern: "tests/e2e/**/*.cy.js",
     supportFile: "tests/support/e2e.js",
     includeShadowDom: true,
