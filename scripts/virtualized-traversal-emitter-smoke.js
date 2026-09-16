@@ -26,9 +26,13 @@ const selectSource = generator.emitAction({
   operation: 'SELECT_SUGGESTION_BY_TRAVERSAL',
 });
 
+assert(selectSource.includes('const centered='), selectSource);
+assert(selectSource.includes('option.offsetTop'), selectSource);
+assert(selectSource.includes('settle().then(()=>cy.get("#virtual-list")'), selectSource);
 assert(selectSource.includes("click({scrollBehavior:false})"), selectSource);
 assert(selectSource.includes("and('not.have.attr','aria-disabled','true')"), selectSource);
 assert(selectSource.includes('requestAnimationFrame'), selectSource);
+assert(!selectSource.includes('force:true'), 'selection must preserve normal Cypress actionability');
 assert(!selectSource.includes('.scrollIntoView()'), 'selection must not trigger a second auto-scroll that can recycle the matched option');
 
 console.log('virtualized-traversal-emitter-smoke: PASS');
