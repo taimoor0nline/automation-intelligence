@@ -70,7 +70,7 @@ async function stopDemoApp(child) {
 
 (async () => {
   const target = String(process.env.RENDERED_DISCOVERY_SMOKE_URL || DEFAULT_TARGET);
-  const browser = String(process.env.AUTOMATION_BROWSER || 'chrome');
+  const browser = String(process.env.AUTOMATION_DISCOVERY_BROWSER || process.env.AUTOMATION_BROWSER || 'chrome');
   let demo = null;
 
   try {
@@ -97,12 +97,16 @@ async function stopDemoApp(child) {
     assert.equal(page.discoveryEngine, 'BROWSER_RENDERED_DOM');
     assert(page.capabilityDiscovery && Number(page.capabilityDiscovery.capturedElements) > 0, 'Capability discovery must report captured rendered elements.');
 
-    console.log(`rendered-discovery-smoke: PASS (${page.elements.length} rendered elements from ${page.finalUrl || page.url})`);
+    const browserNote = page.discoveryBrowserFallbackFrom
+      ? `${page.discoveryBrowser} fallback from ${page.discoveryBrowserFallbackFrom}`
+      : (page.discoveryBrowser || browser);
+    console.log(`rendered-discovery-smoke: PASS (${page.elements.length} rendered elements from ${page.finalUrl || page.url}; browser=${browserNote})`);
   } finally {
     await stopDemoApp(demo);
   }
 })().catch((err) => {
   console.error(`rendered-discovery-smoke: FAIL: ${err.code || 'ERROR'} ${err.message}`);
+  if (err.browser) console.error(`browser: ${err.browser}`);
   if (err.diagnosticFile) console.error(`diagnostic: ${err.diagnosticFile}`);
   process.exit(1);
 });
