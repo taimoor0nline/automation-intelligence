@@ -40,21 +40,46 @@ function settleVirtualizedWindow(win) {
   });
 }
 
+function centerVirtualizedOption(scrollNode, option) {
+  if (!scrollNode || !option) return;
+  const maxTop = Math.max(0, Number(scrollNode.scrollHeight || 0) - Number(scrollNode.clientHeight || 0));
+  const optionTop = Number(option.offsetTop || 0);
+  const optionHeight = Math.max(1, Number(option.offsetHeight || 0));
+  const centered = Math.max(0, Math.min(maxTop, optionTop - Math.max(0, (Number(scrollNode.clientHeight || 0) - optionHeight) / 2)));
+  if (Math.abs(Number(scrollNode.scrollTop || 0) - centered) <= 0.5) return;
+  if (typeof scrollNode.scrollTo === 'function') {
+    scrollNode.scrollTo({ top: centered, left: Number(scrollNode.scrollLeft || 0), behavior: 'auto' });
+  } else {
+    scrollNode.scrollTop = centered;
+  }
+}
+
+function exactVirtualizedOption(list, expected) {
+  return Cypress.$(list).find('[role="option"]').filter((_, el) => {
+    const text = String(el.textContent || '').trim();
+    const value = String(el.getAttribute('data-value') || '').trim();
+    return text === expected || value === expected;
+  }).first();
+}
+
 function seekVirtualizedOption(expected, { click = false, attempt = 0, maxAttempts = 24 } = {}) {
   return cy.get('#virtual-list').should('be.visible').then(($list) => {
-    const $match = $list.find('[role="option"]').filter((_, el) => {
-      const text = String(el.textContent || '').trim();
-      const value = String(el.getAttribute('data-value') || '').trim();
-      return text === expected || value === expected;
-    }).first();
-    if ($match.length) {
-      const chain = cy.wrap($match, { log: false }).should('be.visible');
-      return click ? chain.click({ scrollBehavior: false }) : chain;
-    }
-    if (attempt >= maxAttempts) throw new Error(`Could not render ${expected} within ${maxAttempts} bounded traversal attempts.`);
-
     const list = $list[0];
     const scrollNode = findScrollableListNode(list);
+    const $match = exactVirtualizedOption(list, expected);
+    if ($match.length) {
+      if (!click) return cy.wrap($match, { log: false }).should('be.visible');
+      centerVirtualizedOption(scrollNode, $match[0]);
+      return settleVirtualizedWindow(list.ownerDocument.defaultView).then(() => {
+        const $stableMatch = exactVirtualizedOption(list, expected);
+        expect($stableMatch.length, `${expected} must remain rendered after centering`).to.eq(1);
+        return cy.wrap($stableMatch, { log: false })
+          .should('be.visible')
+          .and('not.have.attr', 'aria-disabled', 'true')
+          .click({ scrollBehavior: false });
+      });
+    }
+    if (attempt >= maxAttempts) throw new Error(`Could not render ${expected} within ${maxAttempts} bounded traversal attempts.`);
     if (!scrollNode) throw new Error(`No grounded scrollable list container is available while looking for ${expected}.`);
 
     const before = Number(scrollNode.scrollTop || 0);
