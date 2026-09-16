@@ -14,6 +14,7 @@
     "test:automation-config": "node scripts/automation-config-smoke.js",
     "test:rendered-discovery": "node scripts/rendered-discovery-smoke.js",
     "test:direct-browser-render": "node scripts/direct-browser-render-probe.js",
+    "test:direct-chrome-discovery": "node scripts/direct-chrome-discovery-smoke.js",
     "test:discovery-browser-fallback": "node scripts/discovery-browser-fallback-smoke.js",
     "test:virtualized-traversal-emitter": "node scripts/virtualized-traversal-emitter-smoke.js",
     "test:persistence-modes": "node scripts/persistence-modes-smoke.js",
