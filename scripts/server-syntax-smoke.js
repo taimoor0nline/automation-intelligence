@@ -6,13 +6,17 @@ const files = [
   'server/routes/run.js',
   'server/routes/testCaseRepairWorkbench.js',
   'server/services/deterministicAutomationGeneratorV6.js',
+  'server/services/deterministicAutomationGeneratorV7.js',
+  'server/services/virtualizedSuggestionTraversalEmitter.js',
   'server/services/canonicalTestIrV3.js',
   'server/services/strictCypressIntegration.js',
   'server/services/enterpriseAutomationCapabilities.js',
   'server/services/cypressPageDiscovery.js',
   'scripts/rendered-discovery-smoke.js',
+  'scripts/virtualized-traversal-emitter-smoke.js',
   'automation-system/tests/e2e/system/browser-discovery-strict.cy.js',
   'automation-system/tests/e2e/system/browser-discovery.cy.js',
+  'automation-system/tests/e2e/system/searchable-suggestions-lab.cy.js',
 ];
 
 for (const file of files) {
