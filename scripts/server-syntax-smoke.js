@@ -9,6 +9,10 @@ const files = [
   'server/services/canonicalTestIrV3.js',
   'server/services/strictCypressIntegration.js',
   'server/services/enterpriseAutomationCapabilities.js',
+  'server/services/cypressPageDiscovery.js',
+  'scripts/rendered-discovery-smoke.js',
+  'automation-system/tests/e2e/system/browser-discovery-strict.cy.js',
+  'automation-system/tests/e2e/system/browser-discovery.cy.js',
 ];
 
 for (const file of files) {
