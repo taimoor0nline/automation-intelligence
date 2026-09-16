@@ -21,8 +21,25 @@ Optional source-aware repository inspection
       ↓
 Developer fix guidance + candidate files/line areas
       ↓
-PostgreSQL persistence + defect ownership
+Optional PostgreSQL persistence + defect ownership
 ```
+
+## Runtime modes
+
+TestNexus supports two deliberate platform runtime modes. PostgreSQL is **strictly opt-in**; a `DATABASE_URL` by itself does not enable database access.
+
+| Mode | Configuration | Core testing workflow | Persistence / rehydration | Platform users/projects/source repositories |
+|---|---|---|---|---|
+| Session-only / no DB | `DATABASE_ENABLED=false` | READY — rendered discovery, AI generation, human review, readiness, approval, Web/API execution, results, repair workbench, behavior rules and generated reports continue in process memory | No durable restart recovery | Not available; keep `AUTH_REQUIRED=false` |
+| PostgreSQL | `DATABASE_ENABLED=true` plus `DATABASE_URL=...` | Same deterministic execution semantics as session-only mode | Sessions, tests, runs, results, canonical artifacts, behavior rules and supported metadata are persisted/rehydrated | Available; production can set `AUTH_REQUIRED=true` |
+
+When `DATABASE_ENABLED=false`, the database module does not load `pg`, create a pool, resolve the configured database host, open a socket, or perform PostgreSQL network activity. The in-memory `sessionStore` is authoritative.
+
+When `DATABASE_ENABLED=true`, active browser/API execution still uses the in-process session object. Persistence adds recoverability and history; it must not change test generation, approval, readiness or execution semantics.
+
+`DATABASE_REQUIRED` only has meaning when `DATABASE_ENABLED=true`. For production, normally use both `DATABASE_ENABLED=true` and `DATABASE_REQUIRED=true`. For local/session-only development, use `DATABASE_ENABLED=false` even if a placeholder `DATABASE_URL` exists.
+
+TestNexus platform authentication, user administration, projects and durable source-repository configuration are PostgreSQL-backed features. They are intentionally not silently emulated in session-only mode. The core testing workflow remains usable without them.
 
 ## Platform roles
 
@@ -34,11 +51,11 @@ The first platform roles are:
 | `QA` | Generate/review tests, execute Cypress runs, request failure/source analysis, connect source repositories. |
 | `MANAGER` | User/project administration plus QA permissions. Comparative management reporting is intentionally deferred to a later phase. |
 
-For production use set `AUTH_REQUIRED=true`. The UI stores the JWT only in browser `sessionStorage`; passwords are bcrypt-hashed in PostgreSQL.
+For production use set `AUTH_REQUIRED=true` together with PostgreSQL mode. The UI stores the JWT only in browser `sessionStorage`; passwords are bcrypt-hashed in PostgreSQL.
 
 ## PostgreSQL persistence
 
-PostgreSQL now stores projects, users, memberships, source repositories, test sessions, test cases, runs, results and defect analyses. Active browser execution still uses an in-process session object, but persisted sessions can be rehydrated after a backend restart.
+PostgreSQL stores projects, users, memberships, source repositories, test sessions, test cases, runs, results and defect analyses when database mode is enabled. Active browser execution still uses an in-process session object, but persisted sessions can be rehydrated after a backend restart.
 
 Sensitive runtime credentials are deliberately **not** written into `session_json`. Local artifact paths and generated report HTML are also not restored as durable secrets/state.
 
@@ -55,7 +72,7 @@ A future manager comparison should not rank developers by raw bug count alone. U
 
 ## Source-aware failed-test analysis
 
-A project may have one or more GitHub source repositories. When QA selects a repository for a run, failed `APPLICATION_DEFECT` scenarios can use bounded source evidence during the optional AI analysis stage.
+A project may have one or more GitHub source repositories in PostgreSQL mode. When QA selects a repository for a run, failed `APPLICATION_DEFECT` scenarios can use bounded source evidence during the optional AI analysis stage.
 
 The source analyzer:
 
@@ -77,11 +94,36 @@ The AI output distinguishes:
 
 Private repositories require a server-side `GITHUB_SOURCE_TOKEN`. The token is never exposed to the browser. Repository code snippets used for source-aware analysis are intentionally sent to the configured AI provider, so enable this mode only for repositories whose code is permitted to be processed by that provider.
 
-## Database setup
+## Configuration
 
-Create a PostgreSQL database and copy `.env.example` to `.env`. At minimum configure:
+Copy `.env.example` to `.env`.
+
+### Session-only / no database
+
+This is the default development mode:
 
 ```env
+DATABASE_ENABLED=false
+# DATABASE_URL may be absent or may contain a placeholder; it is ignored while disabled.
+DATABASE_REQUIRED=false
+AUTH_REQUIRED=false
+```
+
+Start normally:
+
+```bash
+npm install
+npm start
+```
+
+No database migration is required for this mode.
+
+### PostgreSQL mode
+
+Create a PostgreSQL database and configure:
+
+```env
+DATABASE_ENABLED=true
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_testpilot
 DATABASE_REQUIRED=true
 DATABASE_SSL=false
@@ -117,9 +159,19 @@ Demo target app: http://localhost:4000
 AI TestPilot:    http://localhost:5000
 ```
 
-On a fresh database, enter the intended first manager email/password in the platform sign-in card and choose **Bootstrap first manager**. Bootstrap is disabled once the first user exists.
+On a fresh PostgreSQL database, enter the intended first manager email/password in the platform sign-in card and choose **Bootstrap first manager**. Bootstrap is disabled once the first user exists.
 
 The manager can then create `DEV`, `QA`, or additional `MANAGER` users. The manager can also create a project and attach a GitHub repository from **Platform setup**. QA can select that project/repository before generating a run.
+
+## Persistence-mode regression
+
+Run:
+
+```bash
+npm run test:persistence-modes
+```
+
+The smoke test verifies that session-only mode remains fully database-disabled even if a `DATABASE_URL` is present, that the in-memory session store remains available, and that PostgreSQL persistence is enabled only when `DATABASE_ENABLED=true` and a connection string is configured. It deliberately does not open a real PostgreSQL connection; database connectivity/migrations remain a separate integration concern.
 
 ## Demo application
 
@@ -163,7 +215,7 @@ The current browser runtime remains **Cypress**. Do not migrate this branch to P
 
 Failed cases can retain screenshot/video evidence when enabled. The HTML analytics report distinguishes automation readiness from execution outcome and includes optional AI failure analysis, developer fix guidance, and source-evidence level/candidate files when available.
 
-Run/result/defect records are normalized into PostgreSQL for later reporting. The standalone HTML report remains a generated artifact rather than the primary long-term reporting store.
+In PostgreSQL mode, run/result/defect records are normalized into PostgreSQL for later reporting. In session-only mode, current-session results and generated reports remain available in memory/artifacts but are not durable across backend restarts.
 
 ## Current project layout
 
@@ -198,7 +250,7 @@ automation-intelligence/
 
 For production:
 
-- set `DATABASE_REQUIRED=true` and `AUTH_REQUIRED=true`;
+- set `DATABASE_ENABLED=true`, `DATABASE_REQUIRED=true` and `AUTH_REQUIRED=true`;
 - use a strong externally managed `JWT_SECRET`;
 - put PostgreSQL and API secrets in a secret manager rather than source control;
 - use a least-privilege GitHub token with read-only repository-content access;
