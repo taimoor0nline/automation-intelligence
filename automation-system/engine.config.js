@@ -179,19 +179,25 @@ module.exports = defineConfig({
       });
 
       on("before:browser:launch", (browser, launchOptions) => {
-        if (browser.family === "chromium" && AUTOMATION_RUN_ID) {
+        const discoveryMode = boolEnv(process.env.CYPRESS_DISCOVERY_ENABLED, false);
+
+        // Hidden rendered discovery owns the Cypress process tree directly. Do not
+        // add execution-only Chromium switches here: Electron does not support
+        // launchOptions.args, and local Chrome policies can reject unfamiliar
+        // switches. Discovery must be as close as possible to a clean browser launch.
+        if (!discoveryMode && browser.family === "chromium" && browser.name !== "electron" && AUTOMATION_RUN_ID) {
           const marker = `--ai-testpilot-run-id=${AUTOMATION_RUN_ID}`;
           if (!launchOptions.args.includes(marker)) launchOptions.args.push(marker);
         }
 
-        if (browser.family === "chromium" && boolEnv(process.env.AUTOMATION_FAKE_MEDIA_PERMISSIONS, false)) {
+        if (!discoveryMode && browser.family === "chromium" && browser.name !== "electron" && boolEnv(process.env.AUTOMATION_FAKE_MEDIA_PERMISSIONS, false)) {
           for (const arg of ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]) {
             if (!launchOptions.args.includes(arg)) launchOptions.args.push(arg);
           }
         }
 
-        const streamingEnabled = boolEnv(process.env.AUTOMATION_LIVE_STREAM, false);
-        if (!streamingEnabled || browser.family !== "chromium") return launchOptions;
+        const streamingEnabled = !discoveryMode && boolEnv(process.env.AUTOMATION_LIVE_STREAM, false);
+        if (!streamingEnabled || browser.family !== "chromium" || browser.name === "electron") return launchOptions;
 
         const fallbackPort = Math.max(1024, Math.min(numberEnv(process.env.AUTOMATION_LIVE_STREAM_PORT, 9223), 65535));
         const existingIndex = launchOptions.args.findIndex((arg) => String(arg).startsWith("--remote-debugging-port="));
