@@ -48,6 +48,27 @@ function normalizeSeeds(urls = []) {
   return output;
 }
 
+function discoveryBrowserCandidates(options = {}) {
+  const configured = String(
+    options.browser ||
+    process.env.AUTOMATION_DISCOVERY_BROWSER ||
+    process.env.AUTOMATION_BROWSER ||
+    'chrome'
+  ).trim() || 'chrome';
+  const browsers = [configured];
+  if (boolEnv(process.env.BROWSER_DISCOVERY_ALLOW_ELECTRON_FALLBACK, true) && configured.toLowerCase() !== 'electron') {
+    browsers.push('electron');
+  }
+  return browsers;
+}
+
+function mayRetryWithFallbackBrowser(error) {
+  if (!error || error.code !== 'BROWSER_DISCOVERY_PROCESS_FAILED') return false;
+  if (error.runnerFailure) return false;
+  if (error.snapshotFilePresent === true) return false;
+  return true;
+}
+
 async function terminateProcessTree(child) {
   if (!child?.pid) return;
   if (process.platform === 'win32') {
@@ -128,9 +149,6 @@ function stripTerminalFormatting(value) {
 function resultTail(resultOrError) {
   const stderr = stripTerminalFormatting(resultOrError?.stderr || '');
   const stdout = stripTerminalFormatting(resultOrError?.stdout || '');
-  // Cypress frequently writes warnings/config banners to stderr and the actual
-  // Mocha/Cypress failure detail to stdout. Preserve both, preferring the end of
-  // stdout instead of hiding the real assertion behind an earlier warning.
   return [stderr, stdout].filter(Boolean).join(' ').slice(-3600);
 }
 
@@ -147,9 +165,6 @@ function readRunnerFailure(resultFile) {
 }
 
 function discoveryCliEnv(_seed, outputForCypress, pageScope) {
-  // Keep the URL list on the process->config bridge as JSON text. Cypress CLI
-  // --env can coerce JSON-looking values into arrays/objects, which makes a
-  // string-only parser silently see zero seeds. Scalars are safe to duplicate.
   return [
     'DISCOVERY_ENABLED=true',
     `DISCOVERY_OUTPUT_FILE=${outputForCypress}`,
@@ -167,7 +182,7 @@ function writeFailureDiagnostic(filePath, payload) {
 
 async function discoverOneRenderedPage(seed, options) {
   const { context, browser, pageScope, pageLoadTimeoutMs, commandTimeoutMs, pageBudgetMs } = options;
-  const token = `${safeToken(context.sessionId)}-${randomUUID().slice(0, 8)}`;
+  const token = `${safeToken(context.sessionId)}-${safeToken(browser)}-${randomUUID().slice(0, 8)}`;
   const outputRelative = `artifacts/discovery/${token}.json`;
   const outputAbsolute = path.join(AUTOMATION_DIR, outputRelative);
   const resultFile = path.join(DISCOVERY_DIR, `${token}-runner-result.json`);
@@ -231,6 +246,8 @@ async function discoverOneRenderedPage(seed, options) {
       const runnerFailure = readRunnerFailure(resultFile);
       const exitCode = result?.code;
       const tail = resultTail(processError || result);
+      const resultFilePresent = fs.existsSync(resultFile);
+      const snapshotFilePresent = fs.existsSync(outputAbsolute);
       let error = processError;
       if (!error && runnerFailure) {
         error = new Error(runnerFailure);
@@ -245,6 +262,11 @@ async function discoverOneRenderedPage(seed, options) {
         error.code = 'BROWSER_DISCOVERY_SNAPSHOT_MISSING';
       }
       error.targetUrl = seed;
+      error.browser = browser;
+      error.runnerFailure = runnerFailure || null;
+      error.runnerExitCode = exitCode ?? null;
+      error.resultFilePresent = resultFilePresent;
+      error.snapshotFilePresent = snapshotFilePresent;
       writeFailureDiagnostic(failureFile, {
         at: new Date().toISOString(),
         code: error.code || null,
@@ -255,8 +277,8 @@ async function discoverOneRenderedPage(seed, options) {
         runnerExitCode: exitCode ?? null,
         runnerFailure: runnerFailure || null,
         outputExpected: outputForCypress,
-        resultFilePresent: fs.existsSync(resultFile),
-        snapshotFilePresent: fs.existsSync(outputAbsolute),
+        resultFilePresent,
+        snapshotFilePresent,
         terminalTail: tail || null,
       });
       error.diagnosticFile = failureFile;
@@ -264,7 +286,7 @@ async function discoverOneRenderedPage(seed, options) {
     }
 
     return {
-      page,
+      page: { ...page, discoveryBrowser: browser },
       runnerExitCode: result?.code ?? null,
       runnerWarning: processError ? processError.message : Number(result?.code || 0) !== 0 ? resultTail(result) || 'The page runtime exited after producing a grounded snapshot.' : null,
     };
@@ -290,7 +312,8 @@ async function discoverRenderedPages(urls = [], options = {}) {
 
   fs.mkdirSync(DISCOVERY_DIR, { recursive: true });
   const context = requestContext.current();
-  const browser = String(options.browser || process.env.AUTOMATION_BROWSER || 'chrome');
+  const browsers = discoveryBrowserCandidates(options);
+  const primaryBrowser = browsers[0];
   const pageScope = context.pageScope === 'STARTING_PAGE_ONLY' ? 'STARTING_PAGE_ONLY' : 'ALL_DISCOVERED_PAGES';
   const maxPages = Math.max(1, Math.min(Number(options.maxPages || numberEnv(process.env.CYPRESS_DISCOVERY_MAX_PAGES, 6)) || 6, 12));
   const pageLoadTimeoutMs = Math.max(10000, Math.min(numberEnv(process.env.BROWSER_DISCOVERY_PAGE_LOAD_TIMEOUT_MS, 30000), 60000));
@@ -317,15 +340,38 @@ async function discoverRenderedPages(urls = [], options = {}) {
     }
 
     try {
-      const discovered = await discoverOneRenderedPage(seed, {
-        context,
-        browser,
-        pageScope,
-        pageLoadTimeoutMs,
-        commandTimeoutMs,
-        pageBudgetMs: Math.max(5000, Math.min(pageBudgetDefault, remainingMs)),
-      });
-      const page = discovered.page;
+      let discovered = null;
+      let lastError = null;
+      let fallbackFrom = null;
+
+      for (let browserIndex = 0; browserIndex < browsers.length; browserIndex += 1) {
+        const browser = browsers[browserIndex];
+        const attemptRemainingMs = deadline - Date.now();
+        if (attemptRemainingMs < 5000) break;
+        try {
+          discovered = await discoverOneRenderedPage(seed, {
+            context,
+            browser,
+            pageScope,
+            pageLoadTimeoutMs,
+            commandTimeoutMs,
+            pageBudgetMs: Math.max(5000, Math.min(pageBudgetDefault, attemptRemainingMs)),
+          });
+          if (browserIndex > 0) fallbackFrom = primaryBrowser;
+          break;
+        } catch (err) {
+          lastError = err;
+          const hasNextBrowser = browserIndex + 1 < browsers.length;
+          if (!hasNextBrowser || !mayRetryWithFallbackBrowser(err)) throw err;
+        }
+      }
+
+      if (!discovered) throw lastError || new Error('Rendered discovery did not complete within its browser retry budget.');
+
+      const page = {
+        ...discovered.page,
+        ...(fallbackFrom ? { discoveryBrowserFallbackFrom: fallbackFrom } : {}),
+      };
       pages.push(page);
       if (discovered.runnerWarning) warnings.push(`${seed}: ${discovered.runnerWarning}`);
 
@@ -376,4 +422,6 @@ module.exports = {
   readRunnerFailure,
   stripTerminalFormatting,
   discoveryCliEnv,
+  discoveryBrowserCandidates,
+  mayRetryWithFallbackBrowser,
 };
