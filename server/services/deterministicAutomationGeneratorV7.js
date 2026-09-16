@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const v6 = require('./deterministicAutomationGeneratorV6');
 const v4 = require('./deterministicAutomationGeneratorV4');
+const { emitTraversalAction } = require('./virtualizedSuggestionTraversalEmitter');
 
 function js(value) { return JSON.stringify(value); }
 function hash(value) { return crypto.createHash('sha256').update(String(value || '')).digest('hex'); }
@@ -61,7 +62,7 @@ function emitEnterpriseAction(action) {
 }
 
 function emitAction(action) {
-  return emitEnterpriseAction(action) || v6.emitAction(action);
+  return emitTraversalAction(action) || emitEnterpriseAction(action) || v6.emitAction(action);
 }
 
 function emitAssertion(assertion) {
