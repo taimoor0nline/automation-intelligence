@@ -51,7 +51,10 @@ jobs:
           cat /tmp/testnexus-demo.log
           exit 1
 
-      - name: Verify rendered browser discovery writes a grounded snapshot
+      - name: Verify direct Chrome rendered discovery writes grounded browser evidence
+        run: npm run test:direct-chrome-discovery
+
+      - name: Verify primary rendered browser discovery writes a grounded snapshot
         run: npm run test:rendered-discovery
 
       - name: Run native browser capability lab
