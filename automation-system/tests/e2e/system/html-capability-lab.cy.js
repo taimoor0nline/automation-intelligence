@@ -150,7 +150,13 @@ describe('TestNexus HTML capability lab', () => {
   });
 
   it('CAP034 required readonly disabled and browser validity states', () => {
-    cy.get('#required-input').should('have.attr', 'required').and('have.attr', 'minlength', '2').and('have.attr', 'maxlength', '20').and('have.attr', 'pattern', '[A-Za-z ]+');
+    cy.get('#required-input').should(($input) => {
+      const input = $input[0];
+      expect(input.hasAttribute('required')).to.eq(true);
+      expect(input.getAttribute('minlength')).to.eq('2');
+      expect(input.getAttribute('maxlength')).to.eq('20');
+      expect(input.getAttribute('pattern')).to.eq('[A-Za-z ]+');
+    });
     cy.get('#readonly-input').should('have.attr', 'readonly');
     cy.get('#disabled-input').should('be.disabled');
     cy.get('#required-input').should(($el) => expect($el[0].checkValidity()).to.eq(false));
