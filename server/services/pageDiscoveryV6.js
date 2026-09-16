@@ -1,6 +1,7 @@
 const v5 = require('./pageDiscoveryV5');
 const requestContext = require('./requestContext');
 const { discoverRenderedPages } = require('./cypressPageDiscovery');
+const { discoverDirectRenderedPages, shouldUseDirectChromeFallback } = require('./directChromePageDiscovery');
 const { annotatePageDiscovery, buildWebCapabilityMatrix } = require('./webCapabilityMatrix');
 const { getSession } = require('../data/sessionStore');
 
@@ -157,21 +158,40 @@ async function discoverPages(urls, options = {}) {
   persistEffectiveScope(scope);
 
   const requireRendered = boolEnv(process.env.CYPRESS_RENDERED_DISCOVERY_REQUIRED, true);
+  const effectiveSeeds = scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds;
   let rendered = [];
+  let discoveryError = null;
   try {
-    rendered = (await discoverRenderedPages(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds, options)).map(normalizeRenderedPage);
+    rendered = (await discoverRenderedPages(effectiveSeeds, options)).map(normalizeRenderedPage);
   } catch (err) {
-    persistDiscoveryStatus({ failure: err });
-    if (requireRendered) {
-      err.message = `Rendered browser discovery failed. TestNexus will not invent selectors or downgrade to brittle static DOM assumptions. ${err.message}`;
-      persistDiscoveryStatus({ failure: err });
-      throw err;
+    discoveryError = err;
+    if (shouldUseDirectChromeFallback(err)) {
+      try {
+        rendered = (await discoverDirectRenderedPages(effectiveSeeds, options)).map(normalizeRenderedPage);
+        discoveryError = null;
+      } catch (directErr) {
+        directErr.message = `The primary rendered-discovery transport failed at browser infrastructure level (${err.code || 'BROWSER_DISCOVERY_FAILED'}), and the direct Chrome rendered-discovery transport also failed. ${directErr.message}`;
+        directErr.primaryDiscoveryFailure = {
+          code: err.code || 'BROWSER_DISCOVERY_FAILED',
+          message: String(err.message || 'Primary rendered discovery failed.'),
+        };
+        discoveryError = directErr;
+      }
     }
-    console.warn(`[discovery] Rendered browser discovery unavailable; using static fallback: ${err.message}`);
+
+    if (discoveryError) {
+      persistDiscoveryStatus({ failure: discoveryError });
+      if (requireRendered) {
+        discoveryError.message = `Rendered browser discovery failed. TestNexus will not invent selectors or downgrade to brittle static DOM assumptions. ${discoveryError.message}`;
+        persistDiscoveryStatus({ failure: discoveryError });
+        throw discoveryError;
+      }
+      console.warn(`[discovery] Rendered browser discovery unavailable; using static fallback: ${discoveryError.message}`);
+    }
   }
 
   if (!rendered.length) {
-    const fallback = attachMatrix(await staticFallback(scope === 'STARTING_PAGE_ONLY' ? [seeds[0]] : seeds), scope);
+    const fallback = attachMatrix(await staticFallback(effectiveSeeds), scope);
     persistDiscoveryStatus({ complete: false, pages: fallback, warnings: ['Rendered discovery was unavailable; static evidence was used only because strict rendered discovery was explicitly disabled.'] });
     return fallback;
   }
