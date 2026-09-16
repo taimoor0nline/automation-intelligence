@@ -14,10 +14,18 @@ assert.equal(config.e2e.includeShadowDom, true, 'open Shadow DOM support must re
 const previousDiscovery = process.env.CYPRESS_DISCOVERY_ENABLED;
 const previousLiveStream = process.env.AUTOMATION_LIVE_STREAM;
 const previousFakeMedia = process.env.AUTOMATION_FAKE_MEDIA_PERMISSIONS;
+const previousBaseUrl = process.env.AUTOMATION_BASE_URL;
 try {
   process.env.CYPRESS_DISCOVERY_ENABLED = 'true';
   process.env.AUTOMATION_LIVE_STREAM = 'true';
   process.env.AUTOMATION_FAKE_MEDIA_PERMISSIONS = 'true';
+  process.env.AUTOMATION_BASE_URL = 'https://academy.ibsservices.co';
+
+  // Reload the config after setting discovery mode. Hidden discovery visits an absolute
+  // URL and must never anchor Cypress's own /__/ runner to the external AUT origin.
+  delete require.cache[require.resolve(configPath)];
+  const discoveryConfig = require(configPath);
+  assert.strictEqual(discoveryConfig.e2e.baseUrl, null, 'hidden discovery must not configure an external Cypress baseUrl');
 
   let beforeBrowserLaunch = null;
   const on = (event, handler) => {
@@ -27,7 +35,7 @@ try {
     env: {},
     browser: { name: 'chrome' },
   };
-  config.e2e.setupNodeEvents(on, runtimeConfig);
+  discoveryConfig.e2e.setupNodeEvents(on, runtimeConfig);
   assert.equal(typeof beforeBrowserLaunch, 'function', 'before:browser:launch hook must be registered');
 
   for (const browser of [
@@ -46,6 +54,9 @@ try {
   else process.env.AUTOMATION_LIVE_STREAM = previousLiveStream;
   if (previousFakeMedia === undefined) delete process.env.AUTOMATION_FAKE_MEDIA_PERMISSIONS;
   else process.env.AUTOMATION_FAKE_MEDIA_PERMISSIONS = previousFakeMedia;
+  if (previousBaseUrl === undefined) delete process.env.AUTOMATION_BASE_URL;
+  else process.env.AUTOMATION_BASE_URL = previousBaseUrl;
+  delete require.cache[require.resolve(configPath)];
 }
 
 console.log('automation-config-smoke: PASS');
