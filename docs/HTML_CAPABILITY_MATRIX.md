@@ -60,8 +60,8 @@ Status terminology:
 | ARIA combobox/listbox/option relationships | READY | `aria-controls`, `aria-owns`, `aria-autocomplete`, `aria-activedescendant`, `aria-multiselectable`, `aria-selected` captured |
 | selected-option state | READY | `aria-selected=true` assertion on associated listbox options |
 | exact selected multi-option vector | READY | `ASSERT_SELECTED_SUGGESTIONS_EQUALS` |
-| chips/tags rendered after multi-select | OBSERVE/READY via normal elements | chips are discoverable/assertable; dedicated remove-chip/clear-all actions are a remaining refinement |
-| virtualized listbox | PARTIAL | search-driven selection works when the requested option is rendered after the query; generic bounded scroll-through virtualization remains backlog |
+| chips/tags rendered after multi-select | READY | semantic chip removal and clear-all are supported through `REMOVE_SELECTED_TAG` and `CLEAR_SELECTED_TAGS`; `ASSERT_SELECTED_TAG_PRESENT`, `ASSERT_SELECTED_TAG_ABSENT`, and `ASSERT_NO_SELECTED_TAGS` verify selected-tag state. Remove/clear controls must be tied to the same listbox relationship. |
+| virtualized listbox | READY | bounded deterministic traversal uses the real rendered scroll container, native browser scrolling, repaint settling and exact re-querying. `SCROLL_SUGGESTIONS_TO_VALUE` renders an offscreen evidenced option and `SELECT_SUGGESTION_BY_TRAVERSAL` centers, re-queries and normally clicks the exact option without force-clicking or guessing. Traversal is bounded to the configured maximum (24 by default). |
 | framework-specific widgets | READY when semantic | no library-specific selector contract; React/Vue/Angular/Select2/MUI/Ant-style widgets work when rendered semantics expose a deterministic editable control + listbox/options relation |
 
 ### Anti-invention rules for suggestions
@@ -74,6 +74,8 @@ For suggestion/dropdown generation, AI may use an option/value only when it is s
 4. a deterministic substring/prefix used only to search for a grounded final option.
 
 AI-provided labels, CSS classes, likely country/customer names, or invented search results are never treated as evidence. If a dynamic option is unknown until runtime and was not explicitly supplied by the user, the case remains blocked/repairable.
+
+Virtualized traversal does not weaken this rule. Scrolling is only a deterministic mechanism for finding an already grounded/approved value; it is never permission to invent an option that discovery, the story, or approved test data did not establish.
 
 ## Content, semantics and element state
 
@@ -104,6 +106,7 @@ AI-provided labels, CSS classes, likely country/customer names, or invented sear
 | hover | READY | deterministic hover surface |
 | focus/blur | READY | focusable rendered elements only |
 | scroll into view | READY | discovered element only |
+| bounded virtualized list traversal | READY | actual scrollable list node is discovered at runtime; native scrolling + bounded repaint/re-query loop; exact option selection uses normal actionability, never `force: true` |
 | keyboard Enter/Escape/arrows/Home/End/Backspace/Delete | READY/PARTIAL | deterministic special-key support; Tab/modifier/native-key coverage remains a refinement |
 | native HTML5 element drag/drop | READY | draggable source + evidenced drop target + DataTransfer |
 | file drag/drop | READY/PARTIAL | real file drag/drop on evidenced file-drop targets; modern delegated drop zones without explicit evidence may be conservatively rejected |
@@ -114,7 +117,7 @@ AI-provided labels, CSS classes, likely country/customer names, or invented sear
 
 ## Assertions and browser state
 
-The deterministic assertion catalog covers element existence/visibility/layout, text/HTML, form values and state, checked state, native selected values, semantic suggestion/listbox state, required/readonly/validity, attributes/properties/classes/CSS/ARIA, collection counts, URL/path/query/hash/origin/host/protocol, title/document language/meta, cookies, localStorage/sessionStorage, network request/response observations, accessibility violations, downloads, console/runtime errors, window-open observations, page timing/resource limits, viewport, visual regression, Web Vitals, database named-query assertions, WebSocket/SSE messages, clipboard writes, downloaded-document content extraction and deterministic browser permission state.
+The deterministic assertion catalog covers element existence/visibility/layout, text/HTML, form values and state, checked state, native selected values, semantic suggestion/listbox state, selected chip/tag presence/absence, required/readonly/validity, attributes/properties/classes/CSS/ARIA, collection counts, URL/path/query/hash/origin/host/protocol, title/document language/meta, cookies, localStorage/sessionStorage, network request/response observations, accessibility violations, downloads, console/runtime errors, window-open observations, page timing/resource limits, viewport, visual regression, Web Vitals, database named-query assertions, WebSocket/SSE messages, clipboard writes, downloaded-document content extraction and deterministic browser permission state.
 
 ## Advanced configured capabilities
 
@@ -137,7 +140,9 @@ The deterministic assertion catalog covers element existence/visibility/layout, 
 
 ## Remaining capability backlog
 
-The meaningful generic gaps are now: chip/tag remove and clear-all as dedicated semantic actions; bounded scrolling for virtualized listboxes without search; richer evidence for framework/delegated file-drop zones; Tab/modifier/native-key coverage; pointer/touch drag and gestures; recursive same-origin iframe discovery; specialized media actions/assertions; dedicated popover/dialog semantics where they add value; checkbox `indeterminate`; first-class JavaScript alert/confirm/prompt handling; and any closed-shadow/cross-origin/native-device case that inherently needs instrumentation or an adapter.
+The meaningful generic gaps are now: richer evidence for framework/delegated file-drop zones; Tab/modifier/native-key coverage; pointer/touch drag and gestures; recursive same-origin iframe discovery; specialized media actions/assertions; dedicated popover/dialog semantics where they add value; checkbox `indeterminate`; first-class JavaScript alert/confirm/prompt handling; and any closed-shadow/cross-origin/native-device case that inherently needs instrumentation or an adapter.
+
+Virtualized list traversal and semantic selected-tag remove/clear are no longer backlog items; they are covered by CAP054–CAP059 and the deterministic traversal emitter regression.
 
 ## Local verification
 
@@ -147,7 +152,7 @@ Start the capability target in terminal A:
 npm run start:demo-app
 ```
 
-Open `http://localhost:4000/capabilities.html` if you want to inspect the target controls manually.
+Open `http://localhost:4000/capabilities.html` and `http://localhost:4000/searchable-advanced.html` if you want to inspect the target controls manually.
 
 In terminal B, verify deterministic contracts first:
 
@@ -155,6 +160,7 @@ In terminal B, verify deterministic contracts first:
 npm run test:html-native-controls
 npm run test:html-capability-contract
 npm run test:searchable-suggestions
+npm run test:virtualized-traversal-emitter
 npm run test:capabilities
 ```
 
@@ -165,6 +171,6 @@ npm run test:html-capability-lab
 npm run test:searchable-suggestions-lab
 ```
 
-The native lab contains `CAP001`–`CAP043`. The searchable-suggestion lab contains `CAP044`–`CAP053` covering search suggestions, searchable single select, searchable multi-select, async suggestions, no-results, Enter selection, Escape collapse and semantic ARIA relationships.
+The native lab contains `CAP001`–`CAP043`. The searchable-suggestion lab contains `CAP044`–`CAP059`: `CAP044`–`CAP053` cover search suggestions, searchable single select, searchable multi-select, async suggestions, no-results, Enter selection, Escape collapse and semantic ARIA relationships; `CAP054`–`CAP055` cover bounded virtualized traversal/rendering and exact selection; `CAP056`–`CAP059` cover semantic selected-tag remove, dynamic remove-pattern reuse, clear-all, and same-listbox relationship enforcement.
 
 A failure name identifies the exact capability that needs investigation. Do not weaken a validator merely to make a lab test pass; fix the deterministic contract or mark the capability PARTIAL/NOT YET.
