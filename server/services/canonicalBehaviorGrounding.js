@@ -218,16 +218,119 @@ function normalizeOperationBuckets(ir = {}) {
   };
 }
 
+
+const LOCATION_ASSERTION_OPERATIONS = new Set([
+  'ASSERT_PATH_EQUALS','ASSERT_PATH_INCLUDES','ASSERT_URL_EQUALS','ASSERT_URL_INCLUDES','ASSERT_URL_NOT_INCLUDES',
+  'ASSERT_URL_CONTAINS','ASSERT_QUERY_INCLUDES','ASSERT_QUERY_PARAM_EQUALS','ASSERT_QUERY_PARAM_ABSENT',
+  'ASSERT_HASH_EQUALS','ASSERT_HASH_INCLUDES','ASSERT_ORIGIN_EQUALS','ASSERT_HOST_EQUALS','ASSERT_PROTOCOL_EQUALS',
+]);
+
+function normalizeNavigationAssertionShapes(assertions = []) {
+  const normalized = [];
+  const changes = [];
+  for (const source of assertions || []) {
+    const assertion = { ...source };
+    const operation = String(assertion.operation || '').trim().toUpperCase();
+    const path = clean(assertion.path, 1200);
+    const url = clean(assertion.url ?? assertion.value, 1500);
+    if (operation === 'ASSERT_URL_EQUALS' && !url && path.startsWith('/')) {
+      delete assertion.url;
+      delete assertion.value;
+      assertion.operation = 'ASSERT_PATH_EQUALS';
+      assertion.path = path;
+      changes.push({
+        from: 'ASSERT_URL_EQUALS',
+        to: 'ASSERT_PATH_EQUALS',
+        path,
+      });
+    }
+    normalized.push(assertion);
+  }
+  return { assertions: normalized, changes };
+}
+
+function locationRequirementIsExplicit(text, expectedPath) {
+  const requirement = String(text || '').toLowerCase();
+  const expected = clean(expectedPath, 1200).toLowerCase();
+  if (!expected) return false;
+  if (requirement.includes(expected)) return true;
+  const leaf = expected.split('/').filter(Boolean).pop();
+  if (!leaf) return false;
+  const readable = leaf.replace(/[-_]+/g, '[\\s_-]*');
+  return new RegExp(`\\b(?:stay|stays|remain|remains|keep|keeps|still)\\b[^.\\n]{0,80}\\b${readable}\\b`, 'i').test(requirement);
+}
+
+function validationOutcomeAssertion(assertion = {}, byRef = new Map()) {
+  const operation = String(assertion.operation || '').trim().toUpperCase();
+  if (['ASSERT_INVALID','ASSERT_VALID','ASSERT_REQUIRED','ASSERT_VALUE_EMPTY','ASSERT_VALUE_NOT_EMPTY'].includes(operation)) return true;
+  const element = byRef.get(clean(assertion.elementRef, 180));
+  if (!element) return false;
+  const signature = identity(element);
+  return element.kind === 'validation-error' || /error|validation|required/.test(signature);
+}
+
+function removeRedundantUngroundedLocationAssertions(assertions = [], actions = [], byRef = new Map(), {
+  plannedUnit = null,
+  story = '',
+  objective = '',
+} = {}) {
+  const scenario = String(plannedUnit?.scenarioType || '').toLowerCase();
+  const negativeIntent = scenario === 'negative' || /\\b(?:invalid|empty|missing|required|reject|rejected|validation|negative)\\b/i.test(String(objective || ''));
+  if (!negativeIntent) return { assertions, removed: [] };
+
+  let currentPath = null;
+  let submitSeen = false;
+  for (const action of actions || []) {
+    const operation = String(action?.operation || '').trim().toUpperCase();
+    if (operation === 'NAVIGATE') {
+      const candidate = clean(action.path ?? action.value, 1200);
+      if (candidate.startsWith('/')) currentPath = candidate.split('?')[0] || '/';
+      continue;
+    }
+    if (submitElementForAction(action, byRef)) submitSeen = true;
+  }
+  if (!submitSeen || !currentPath) return { assertions, removed: [] };
+
+  const nonLocation = (assertions || []).filter((assertion) => !LOCATION_ASSERTION_OPERATIONS.has(String(assertion?.operation || '').trim().toUpperCase()));
+  if (!nonLocation.length || !nonLocation.some((assertion) => validationOutcomeAssertion(assertion, byRef))) {
+    return { assertions, removed: [] };
+  }
+
+  const requirementText = `${clean(story, 6000)} ${clean(objective, 2000)}`;
+  const removed = [];
+  const kept = [];
+  for (const assertion of assertions || []) {
+    const operation = String(assertion?.operation || '').trim().toUpperCase();
+    const expectedPath = operation === 'ASSERT_PATH_EQUALS' ? clean(assertion.path ?? assertion.value, 1200).split('?')[0] : '';
+    if (expectedPath === currentPath && !locationRequirementIsExplicit(requirementText, expectedPath)) {
+      removed.push({ ...assertion });
+      continue;
+    }
+    kept.push(assertion);
+  }
+  return { assertions: kept, removed };
+}
+
 function normalizeBehavioralIr(ir, { registry = {}, plannedUnit = null, story = '' } = {}) {
   const elements = Array.isArray(registry?.elements) ? registry.elements : [];
   const byRef = new Map(elements.map((item) => [item.elementRef, item]));
   const buckets = normalizeOperationBuckets(ir);
   const actions = buckets.actions;
-  const assertions = buckets.assertions;
+  let assertions = buckets.assertions;
   const notes = [];
   const unresolved = [];
   const objective = clean(plannedUnit?.objective || plannedUnit?.rationale || ir?.objective, 2000);
   const timingText = `${objective} ${clean(story, 6000)}`;
+
+  const shapeNormalization = normalizeNavigationAssertionShapes(assertions);
+  assertions = shapeNormalization.assertions;
+  if (shapeNormalization.changes.length) {
+    notes.push({
+      code: 'NAVIGATION_ASSERTION_SHAPE_NORMALIZED',
+      message: 'A navigation assertion used a path field with URL-equality semantics. TestNexus normalized it to the matching path assertion before strict validation.',
+      changes: shapeNormalization.changes,
+    });
+  }
 
   if (buckets.relocatedAssertions.length) {
     notes.push({
@@ -280,6 +383,20 @@ function normalizeBehavioralIr(ir, { registry = {}, plannedUnit = null, story = 
     });
   }
 
+  const locationNormalization = removeRedundantUngroundedLocationAssertions(assertions, actions, byRef, {
+    plannedUnit,
+    story,
+    objective,
+  });
+  assertions = locationNormalization.assertions;
+  if (locationNormalization.removed.length) {
+    notes.push({
+      code: 'REDUNDANT_UNGROUNDED_LOCATION_ASSERTION_REMOVED',
+      message: 'Removed a same-page location assertion after negative form submission because the user-authored requirement did not require that location and another grounded validation assertion already proves the intended behavior.',
+      removedAssertions: locationNormalization.removed,
+    });
+  }
+
   return {
     ir: {
       ...ir,
@@ -304,4 +421,7 @@ module.exports = {
   validationBearing,
   isSubmitElement,
   groupKey,
+  normalizeNavigationAssertionShapes,
+  removeRedundantUngroundedLocationAssertions,
+  locationRequirementIsExplicit,
 };
