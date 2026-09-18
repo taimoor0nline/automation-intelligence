@@ -183,7 +183,10 @@ function normalizeAssertion(raw, index, errors, story) {
   if (['ASSERT_ATTR_EQUALS','ASSERT_ATTR_CONTAINS','ASSERT_PROP_EQUALS','ASSERT_CSS_EQUALS','ASSERT_ARIA_EQUALS'].includes(operation)) out.value = clean(assertion.value, 1500);
   if (['ASSERT_CLASS_INCLUDES','ASSERT_CLASS_NOT_INCLUDES'].includes(operation)) out.className = clean(assertion.className ?? assertion.value, 300);
 
-  if (operation === 'ASSERT_URL_EQUALS') out.url = clean(assertion.url ?? assertion.value, 1500);
+  if (operation === 'ASSERT_URL_EQUALS') {
+    out.url = clean(assertion.url ?? assertion.value, 1500);
+    if (!out.url) errors.push('ASSERT_URL_EQUALS requires url.');
+  }
   if (['ASSERT_URL_INCLUDES','ASSERT_URL_NOT_INCLUDES','ASSERT_URL_CONTAINS','ASSERT_PATH_INCLUDES','ASSERT_QUERY_INCLUDES'].includes(operation)) out.fragment = clean(assertion.fragment ?? assertion.path ?? assertion.value, 1200);
   if (operation === 'ASSERT_PATH_EQUALS') {
     out.path = clean(assertion.path ?? assertion.value, 1200);
