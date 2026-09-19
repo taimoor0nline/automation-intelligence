@@ -19,14 +19,14 @@
   <div class="grid">
     <aside class="panel pad">
       <div class="section-head"><div><h2>1. Define the journey</h2><div class="sub">Credentials stay in memory and are injected only into the automation runtime. They are not sent to Qwen.</div></div></div>
-      <div class="field"><label>Target URL</label><input id="targetUrl" value="http://localhost:4000/"></div>
+      <div class="field"><label>Target URL</label><input id="targetUrl" value="https://academy.demoibsservices.com"></div>
       <div class="field"><label>Known pages (optional)</label><input id="additionalPaths" value="" placeholder="/feedback, /profile"><small>Optional same-origin page hints. The demo can also discover simple same-origin route hints from the starting page.</small></div>
       <div class="two">
         <div class="field"><label>Environment</label><input id="environment" value="Test" readonly aria-readonly="true"></div>
         <div class="field"><label>Username</label><input id="username" value="admin" autocomplete="off"></div>
       </div>
       <div class="field"><label>Password</label><input id="password" type="password" value="admin123" autocomplete="off"></div>
-      <div class="field"><label>Business user story</label><textarea id="story">As a customer, I should be able to log in with valid credentials and submit feedback. Username and password are required. The feedback form must validate required fields, email format, age boundaries, website URL format and show a confirmation after successful submission.</textarea></div>
+      <div class="field"><label>Business user story</label><textarea id="story">As a user, test public pages, including the login and forgot-password pages, using negative testing only.</textarea></div>
       <button id="generateBtn" class="btn primary">Generate AI Test Cases</button>
       <div id="errorBox" class="errorbox"></div>
     </aside>
