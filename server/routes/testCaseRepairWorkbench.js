@@ -5,6 +5,10 @@ const { getSession } = require('../data/sessionStore');
 const { generateCanonicalBatch } = require('../services/canonicalTestGenerationServiceV3');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
 const { resolveRuntimeWorkflowContext } = require('../services/workflowRuntimeContext');
+const { parseAutomationScript } = require('../services/manualAutomationScript');
+const { validateCanonicalIr } = require('../services/canonicalTestIrV3');
+const { generateCypressPreviewFromPlan } = require('../services/deterministicAutomationGeneratorV6');
+const { attachStrictContract } = require('../services/strictCypressIntegration');
 
 function clean(value, max = 2000) {
   return String(value ?? '').trim().slice(0, max);
@@ -81,6 +85,8 @@ function clearApprovalSeal(session, id) {
   if (session.approvedContractSeals && typeof session.approvedContractSeals === 'object') {
     delete session.approvedContractSeals[id];
   }
+  session.approvedIds = (session.approvedIds || []).filter((item) => String(item).toUpperCase() !== String(id).toUpperCase());
+  session.generatedScript = null;
 }
 
 function upsert(session, candidate) {
@@ -173,8 +179,83 @@ async function regenerateCanonical(session, original, mode, instruction) {
   return assessed;
 }
 
+function manualScriptCandidate(session, original, script) {
+  const registry = session.canonicalElementRegistry;
+  if (!registry?.elements?.length) throw new Error('Rendered discovery is required before editing an Automation Script.');
+  const { actions, assertions } = parseAutomationScript(script, registry);
+  const plannedId = plannedIdFor(original);
+  const objective = baseObjective(original);
+  const workflow = resolveRuntimeWorkflowContext({
+    actorCatalog: session.testActors || [],
+    actorCredentialRefs: actorCredentialRefs(session),
+    workflowRequirements: session.workflowRequirements || null,
+  });
+  const ir = {
+    version: 1,
+    plannedId,
+    objective,
+    actions,
+    assertions,
+    behavioralGrounding: {
+      version: 1,
+      status: 'GROUNDED',
+      enrichments: [],
+      unresolved: [],
+    },
+  };
+  const checked = validateCanonicalIr(ir, {
+    registry,
+    plannedUnit: { plannedId, category: category(original), scenarioType: scenarioType(original), objective, rationale: objective },
+    story: session.story || '',
+    hasCredentials: Boolean(session.credentials?.username && session.credentials?.password),
+    actorCatalog: workflow.actorCatalog,
+    actorCredentialRefs: workflow.actorCredentialRefs,
+  });
+  if (!checked.ok) {
+    const error = new Error(checked.reason || (checked.errors || []).join('; ') || 'The manual Automation Script did not pass canonical validation.');
+    error.code = 'MANUAL_AUTOMATION_SCRIPT_INVALID';
+    error.validationErrors = checked.errors || [];
+    throw error;
+  }
+  const candidate = {
+    ...original,
+    id: original.id,
+    source: 'human-automation-script',
+    createdBy: 'human-repair-request',
+    steps: checked.display.steps,
+    expectedResults: checked.display.expectedResults,
+    canonicalIr: ir,
+    behavioralGrounding: ir.behavioralGrounding,
+    canonicalValidation: {
+      status: 'VALID',
+      plannedId,
+      registryHash: registry.registryHash,
+      actorRefs: checked.plan.actorRefs || [],
+      behavioralGrounding: ir.behavioralGrounding,
+    },
+    cypressPreview: generateCypressPreviewFromPlan(checked.plan, { id: original.id, title: original.title }),
+    _canonicalAutomationPlan: checked.plan,
+    generationStory: session.story || '',
+    automationReadiness: null,
+  };
+  const context = { ...assessmentContext(session), canonicalElementRegistry: registry };
+  const assessed = assessTestCases([candidate], context)[0];
+  const strict = attachStrictContract(assessed, context);
+  if (strict.automationReadiness?.status !== 'READY') {
+    const error = new Error(strict.automationReadiness?.reason || 'The manual script is not Automation Ready. Keep editing the original case.');
+    error.code = strict.automationReadiness?.reasonCode || 'MANUAL_AUTOMATION_SCRIPT_NOT_READY';
+    error.validationErrors = strict.automationReadiness?.reasons || [];
+    throw error;
+  }
+  strict.repairHistory = repairHistory(
+    original, 'MANUAL_AUTOMATION_SCRIPT', original.automationReadiness, strict.automationReadiness,
+    'Human-authored supported automation commands and assertions.'
+  );
+  return strict;
+}
+
 router.post('/api/test-cases/repair-workbench', async (req, res) => {
-  const { sessionId = 'default', testCase: rawTestCase = null, action = '', instruction = '', credentials = null } = req.body || {};
+  const { sessionId = 'default', testCase: rawTestCase = null, action = '', instruction = '', script = '', credentials = null } = req.body || {};
   const session = getSession(sessionId);
 
   try {
@@ -184,10 +265,13 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
     if (!original?.id) throw new Error('A valid test case is required for repair.');
 
     const mode = clean(action, 40).toLowerCase();
-    if (!['regenerate', 'rewrite-ai'].includes(mode)) throw new Error('Repair action must be regenerate or rewrite-ai.');
+    if (!['regenerate', 'rewrite-ai', 'manual-script'].includes(mode)) throw new Error('Repair action must be regenerate, rewrite-ai, or manual-script.');
     if (mode === 'rewrite-ai' && !clean(instruction, 1200)) throw new Error('Describe how the test should be rewritten.');
 
-    const candidate = await regenerateCanonical(session, original, mode, instruction);
+    const candidate = mode === 'manual-script'
+      ? manualScriptCandidate(session, original, script)
+      : await regenerateCanonical(session, original, mode, instruction);
+    if (res.destroyed || res.writableEnded) return;
     clearApprovalSeal(session, original.id);
     upsert(session, candidate);
 
@@ -200,8 +284,8 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
       requiresHumanReview: true,
       approvalReset: true,
       message: String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY'
-        ? `${candidate.id} was regenerated and validated. Human review is required before execution.`
-        : `${candidate.id} was regenerated, but remains blocked: ${candidate.automationReadiness?.reason || candidate.automationReadiness?.reasonCode || 'review required'}`,
+        ? `${candidate.id} has a validated new automation contract. Human review is required before execution.`
+        : `${candidate.id} remains blocked: ${candidate.automationReadiness?.reason || candidate.automationReadiness?.reasonCode || 'review required'}`,
     });
   } catch (err) {
     return res.status(422).json({
