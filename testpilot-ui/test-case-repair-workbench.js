@@ -49,9 +49,9 @@
         </div>
         <div class="repair-script-editor" id="repairScriptEditor">
           <strong>Write Automation Script · <span id="repairScriptCaseId"></span></strong>
-          <p>Use supported TestNexus automation commands, one per line. Use an elementRef or an exact selector from the rendered page. This is not arbitrary JavaScript. The server checks every action and assertion against discovered evidence and compiles the exact reviewed contract.</p>
-          <textarea id="repairScriptText" spellcheck="false" aria-label="Automation Script" placeholder="NAVIGATE /login&#10;TYPE #email invalid-email&#10;CLICK #sign-in&#10;ASSERT_INVALID #email"></textarea>
-          <p>Example: <code>NAVIGATE /login</code>, <code>TYPE #email invalid-email</code>, <code>CLEAR #password</code>, <code>TYPE_RUNTIME_CREDENTIAL #password password</code>, <code>CLICK #sign-in</code>, <code>ASSERT_INVALID #email</code>, <code>ASSERT_TEXT_CONTAINS #email-error Required</code>. Put assertions after all actions. Unsaved or unsupported commands are never executed.</p>
+          <p>Write Cypress-compatible <code>cy.*</code> commands, one statement per line, using exact selectors observed in rendered discovery. A supported subset is accepted; arbitrary JavaScript, test wrappers, callbacks, and undiscovered selectors are rejected. The server validates and compiles the same actions and assertions before human approval.</p>
+          <textarea id="repairScriptText" spellcheck="false" aria-label="Automation Script" placeholder="cy.visit(&quot;/login&quot;);&#10;cy.get(&quot;#email&quot;).type(&quot;invalid-email&quot;);&#10;cy.get(&quot;#sign-in&quot;).click();&#10;cy.get(&quot;#email&quot;).should(&quot;match&quot;, &quot;:invalid&quot;);"></textarea>
+          <p>Examples: <code>cy.visit("/login");</code> <code>cy.get("#email").type("invalid-email");</code> <code>cy.get("#sign-in").click();</code> <code>cy.get("#email").should("match", ":invalid");</code> Put final assertions after all actions. Only supported literal Cypress statements can be saved; unsupported commands will show a line-specific error and never execute.</p>
           <div class="repair-script-actions">
             <button type="button" class="btn ghost" data-repair-action="cancel-script">Back</button>
             <button type="button" class="btn secondary" data-repair-action="save-script">Validate &amp; Save Script</button>
@@ -241,22 +241,59 @@
   function editableScript(tc) {
     const ir = tc?.canonicalIr || {};
     const plan = tc?._canonicalAutomationPlan || tc?.automationReadiness?.automationPlan || {};
-    const code = (operation, data, compiled) => {
-      const op = String(operation || '').toUpperCase();
-      const target = data.elementRef || compiled?.elementRef || compiled?.selector || '';
-      const args = op === 'NAVIGATE' ? data.path : op === 'ASSERT_PATH_EQUALS' ? data.path :
-        op === 'ASSERT_URL_EQUALS' ? data.url :
-        ['ASSERT_PATH_INCLUDES','ASSERT_URL_INCLUDES'].includes(op) ? (data.fragment || data.path) :
-        op === 'TYPE_RUNTIME_CREDENTIAL' ? [target, data.credential].filter(Boolean).join(' ') :
-        ['TYPE','SELECT','ASSERT_VALUE_EQUALS','ASSERT_VALUE_CONTAINS'].includes(op) ? [target, data.value].filter(Boolean).join(' ') :
-        ['ASSERT_TEXT_EQUALS','ASSERT_TEXT_CONTAINS','ASSERT_TEXT_NOT_CONTAINS'].includes(op) ? [target, data.text].filter(Boolean).join(' ') :
-        target || '';
-      return [op, args].filter(Boolean).join(' ');
+    const q = value => JSON.stringify(String(value ?? ''));
+    const element = (data, compiled) => compiled?.selector || data?.selector || '';
+    const selector = (data, compiled) => element(data, compiled) ? 'cy.get(' + q(element(data, compiled)) + ')' : null;
+    const action = (data, compiled) => {
+      const target = selector(data, compiled);
+      const op = String(data.operation || '').toUpperCase();
+      if (op === 'NAVIGATE') return 'cy.visit(' + q(data.path) + ');';
+      if (op === 'RELOAD') return 'cy.reload();';
+      if (op === 'GO_BACK') return 'cy.go("back");';
+      if (op === 'GO_FORWARD') return 'cy.go("forward");';
+      if (op === 'TYPE_RUNTIME_CREDENTIAL') return '// Runtime credential action requires a runtime-safe authoring form; do not paste credentials into the script.';
+      if (!target) return '// ' + op + ' needs a discovered selector; write a cy.get(...) command manually.';
+      const method = {
+        TYPE:'type',CLEAR:'clear',CLICK:'click',DBLCLICK:'dblclick',
+        RIGHTCLICK:'rightclick',SELECT:'select',CHECK:'check',UNCHECK:'uncheck',
+        SUBMIT:'submit',FOCUS:'focus',BLUR:'blur',SCROLL_INTO_VIEW:'scrollIntoView',
+      }[op];
+      if (!method) return '// Unsupported projection for ' + op + '. Rewrite using the supported Cypress subset.';
+      return target + '.' + method + '(' + (['type','select'].includes(method) ? q(data.value) : '') + ');';
     };
-    const actions = (ir.actions || []).map((item, i) => code(item.operation, item, plan.actions?.[i]));
-    const assertions = (ir.assertions || []).map((item, i) => code(item.operation, item, plan.assertions?.[i]));
-    if (actions.length && assertions.length) return [...actions, '', ...assertions].join('\n');
-    return 'NAVIGATE /login\nTYPE #email invalid-email\nCLICK #sign-in\nASSERT_INVALID #email';
+    const assertion = (data, compiled) => {
+      const op = String(data.operation || '').toUpperCase();
+      if (op === 'ASSERT_PATH_EQUALS') return 'cy.location("pathname").should("eq", ' + q(data.path) + ');';
+      if (op === 'ASSERT_PATH_INCLUDES') return 'cy.location("pathname").should("include", ' + q(data.fragment) + ');';
+      if (op === 'ASSERT_URL_EQUALS') return 'cy.url().should("eq", ' + q(data.url) + ');';
+      if (op === 'ASSERT_URL_INCLUDES') return 'cy.url().should("include", ' + q(data.fragment) + ');';
+      const target = selector(data, compiled);
+      if (!target) return '// ' + op + ' needs a discovered selector; write a cy.get(...).should(...) assertion manually.';
+      const shorthand = {
+        ASSERT_VISIBLE:'be.visible',ASSERT_HIDDEN:'not.be.visible',
+        ASSERT_EXISTS:'exist',ASSERT_NOT_EXISTS:'not.exist',
+        ASSERT_ENABLED:'be.enabled',ASSERT_DISABLED:'be.disabled',
+        ASSERT_CHECKED:'be.checked',ASSERT_UNCHECKED:'not.be.checked',
+      }[op];
+      if (shorthand) return target + '.should(' + q(shorthand) + ');';
+      if (op === 'ASSERT_INVALID') return target + '.should("match", ":invalid");';
+      if (op === 'ASSERT_VALID') return target + '.should("match", ":valid");';
+      if (op === 'ASSERT_REQUIRED') return target + '.should("have.attr", "required");';
+      if (op === 'ASSERT_OPTIONAL') return target + '.should("not.have.attr", "required");';
+      if (op === 'ASSERT_VALUE_EMPTY') return target + '.should("have.value", "");';
+      if (op === 'ASSERT_VALUE_NOT_EMPTY') return target + '.should("not.have.value", "");';
+      if (op === 'ASSERT_TEXT_EMPTY') return target + '.should("have.text", "");';
+      const named = {
+        ASSERT_VALUE_EQUALS:'have.value',ASSERT_TEXT_EQUALS:'have.text',
+        ASSERT_TEXT_CONTAINS:'contain.text',ASSERT_TEXT_NOT_CONTAINS:'not.contain.text',
+      }[op];
+      if (named) return target + '.should(' + q(named) + ', ' + q(op.includes('TEXT') ? data.text : data.value) + ');';
+      return '// Unsupported projection for ' + op + '. Rewrite using the supported Cypress subset.';
+    };
+    const actions=(ir.actions || []).map((item,i)=>action(item,plan.actions?.[i]));
+    const assertions=(ir.assertions || []).map((item,i)=>assertion(item,plan.assertions?.[i]));
+    if(actions.length && assertions.length) return [...actions,'',...assertions].join('\n');
+    return '// Write Cypress commands using selectors observed in rendered discovery.\n// Example: cy.visit("/login");\n// cy.get("#email").type("bad-email");\n// cy.get("#email").should("match", ":invalid");';
   }
 
   function openAutomationRewrite() {
@@ -265,7 +302,7 @@
     document.getElementById('repairScriptEditor').classList.add('show');
     document.getElementById('repairScriptCaseId').textContent = tc.id || '';
     document.getElementById('repairScriptText').value = editableScript(tc);
-    setStatus('Edit the supported commands, then validate and save. The previous test remains unchanged if validation fails.', 'working');
+    setStatus('Edit supported Cypress syntax, then validate and save. The previous test remains unchanged if validation fails.', 'working');
     document.getElementById('repairScriptText').focus();
   }
 
