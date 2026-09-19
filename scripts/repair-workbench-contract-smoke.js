@@ -178,7 +178,7 @@ const humanScript = [
   'TYPE #email invalid-email',
   'CLICK #sign-in',
   'ASSERT_INVALID #email',
-].join('\\n');
+].join('\n');
 const manual = parseAutomationScript(humanScript, loginRegistry);
 assert.deepStrictEqual(manual.actions.map(item => item.operation), ['NAVIGATE','TYPE','CLICK']);
 assert.deepStrictEqual(manual.assertions.map(item => item.operation), ['ASSERT_INVALID']);
@@ -196,15 +196,15 @@ const manualChecked = validateCanonicalIr({
 });
 assert(manualChecked.ok, manualChecked.reason || JSON.stringify(manualChecked.errors || []));
 assert.throws(
-  () => parseAutomationScript('cy.visit("/login");\\ncy.get("#email").click();', loginRegistry),
+  () => parseAutomationScript('cy.visit("/login");\ncy.get("#email").click();', loginRegistry),
   /arbitrary JavaScript|not in the supported|supported uppercase/,
 );
 assert.throws(
-  () => parseAutomationScript('NAVIGATE /login\\nCLICK #invented\\nASSERT_INVALID #email', loginRegistry),
+  () => parseAutomationScript('NAVIGATE /login\nCLICK #invented\nASSERT_INVALID #email', loginRegistry),
   /not discovered/,
 );
 assert.throws(
-  () => parseAutomationScript('NAVIGATE /login\\nCLICK #sign-in', loginRegistry),
+  () => parseAutomationScript('NAVIGATE /login\nCLICK #sign-in', loginRegistry),
   /assertion is required/,
 );
 const repairUi = fs.readFileSync(path.resolve(__dirname, '..', 'testpilot-ui', 'test-case-repair-workbench.js'), 'utf8');
