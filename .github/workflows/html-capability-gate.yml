@@ -38,6 +38,12 @@ jobs:
           npm run test:searchable-suggestions
           npm run test:enterprise-execution-contract
 
+      - name: Verify Repair Workbench and human automation script
+        run: npm run test:repair-workbench-contract
+
+      - name: Preflight installed browser automation binary
+        run: ./automation-system/node_modules/.bin/cypress verify
+
       - name: Run deterministic capability regression suite
         run: npm run test:capabilities
 
