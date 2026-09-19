@@ -5,7 +5,7 @@ const { getSession } = require('../data/sessionStore');
 const { generateCanonicalBatch } = require('../services/canonicalTestGenerationServiceV3');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
 const { resolveRuntimeWorkflowContext } = require('../services/workflowRuntimeContext');
-const { parseAutomationScript } = require('../services/manualAutomationScript');
+const { parseCypressScript } = require('../services/cypressManualScript');
 const { validateCanonicalIr } = require('../services/canonicalTestIrV3');
 const { generateCypressPreviewFromPlan } = require('../services/deterministicAutomationGeneratorV6');
 const { attachStrictContract } = require('../services/strictCypressIntegration');
@@ -182,7 +182,7 @@ async function regenerateCanonical(session, original, mode, instruction) {
 function manualScriptCandidate(session, original, script) {
   const registry = session.canonicalElementRegistry;
   if (!registry?.elements?.length) throw new Error('Rendered discovery is required before editing an Automation Script.');
-  const { actions, assertions } = parseAutomationScript(script, registry);
+  const { actions, assertions } = parseCypressScript(script, registry);
   const plannedId = plannedIdFor(original);
   const objective = baseObjective(original);
   const workflow = resolveRuntimeWorkflowContext({
