@@ -1,7 +1,7 @@
 // Human-authored TestNexus automation commands. This is a constrained language,
 // not arbitrary JavaScript: every browser operation resolves to the canonical IR.
-const ACTIONS_WITH_ELEMENT = new Set(['TYPE','CLEAR','CLICK','SUBMIT','CHECK','UNCHECK','SELECT','FOCUS','BLUR','HOVER']);
-const ACTIONS_NO_ELEMENT = new Set(['RELOAD','GO_BACK','GO_FORWARD']);
+const ACTIONS_WITH_ELEMENT = new Set(['TYPE','TYPE_RUNTIME_CREDENTIAL','CLEAR','CLICK','SUBMIT','CHECK','UNCHECK','SELECT','FOCUS','BLUR','HOVER']);
+const ACTIONS_NO_ELEMENT = new Set(['RELOAD','GO_BACK','GO_FORWARD','LOGIN_VALID']);
 const ASSERTIONS_WITH_ELEMENT = new Set([
   'ASSERT_VISIBLE','ASSERT_HIDDEN','ASSERT_EXISTS','ASSERT_NOT_EXISTS',
   'ASSERT_INVALID','ASSERT_VALID','ASSERT_REQUIRED','ASSERT_OPTIONAL',
@@ -15,7 +15,7 @@ const ASSERTIONS_WITH_VALUE = new Set([
 const ASSERTIONS_WITH_LOCATION = new Set([
   'ASSERT_PATH_EQUALS','ASSERT_PATH_INCLUDES','ASSERT_URL_EQUALS','ASSERT_URL_INCLUDES',
 ]);
-const VALUE_ACTIONS = new Set(['TYPE','SELECT']);
+const VALUE_ACTIONS = new Set(['TYPE','TYPE_RUNTIME_CREDENTIAL','SELECT']);
 function fail(line, message) {
   const error = new Error(`Automation script line ${line}: ${message}`);
   error.code = 'MANUAL_AUTOMATION_SCRIPT_INVALID';
@@ -66,7 +66,10 @@ function parseAutomationScript(script, registry = {}) {
       const value = targetAndValue[2];
       if (VALUE_ACTIONS.has(operation) && !value) fail(line, `${operation} requires a value. Use CLEAR to empty a field.`);
       if (!VALUE_ACTIONS.has(operation) && value) fail(line, `${operation} takes only a control target.`);
-      actions.push(VALUE_ACTIONS.has(operation) ? { operation, elementRef, value } : { operation, elementRef });
+      if (operation === 'TYPE_RUNTIME_CREDENTIAL' && !['username','password'].includes(value)) fail(line, 'TYPE_RUNTIME_CREDENTIAL must specify username or password, not a literal secret.');
+      actions.push(operation === 'TYPE_RUNTIME_CREDENTIAL'
+        ? { operation, elementRef, credential: value }
+        : VALUE_ACTIONS.has(operation) ? { operation, elementRef, value } : { operation, elementRef });
       continue;
     }
     if (ASSERTIONS_WITH_ELEMENT.has(operation) || ASSERTIONS_WITH_VALUE.has(operation)) {
