@@ -16,8 +16,10 @@ const ASSERTIONS = Object.freeze({
   'be.checked':'ASSERT_CHECKED',
   'not.be.checked':'ASSERT_UNCHECKED',
   'have.value':'ASSERT_VALUE_EQUALS',
+  'not.have.value':'ASSERT_VALUE_NOT_EMPTY',
   'contain.text':'ASSERT_TEXT_CONTAINS',
   'include.text':'ASSERT_TEXT_CONTAINS',
+  'not.contain.text':'ASSERT_TEXT_NOT_CONTAINS',
   'have.text':'ASSERT_TEXT_EQUALS',
 });
 function failure(line, detail) {
@@ -101,10 +103,11 @@ function elementAssertion(method,args,elementRef,line) {
   if(name==='have.attr'&&value==='required')return {operation:'ASSERT_REQUIRED',elementRef};
   if(name==='not.have.attr'&&value==='required')return {operation:'ASSERT_OPTIONAL',elementRef};
   if(name==='have.value'&&value==='')return {operation:'ASSERT_VALUE_EMPTY',elementRef};
+  if(name==='not.have.value'&&value==='')return {operation:'ASSERT_VALUE_NOT_EMPTY',elementRef};
   if(name==='have.text'&&value==='')return {operation:'ASSERT_TEXT_EMPTY',elementRef};
   const operation=ASSERTIONS[name];
   if(!operation)failure(line,'Unsupported Cypress assertion '+JSON.stringify(name)+'.');
-  const takesValue=['have.value','have.text','contain.text','include.text'].includes(name);
+  const takesValue=['have.value','have.text','contain.text','include.text','not.contain.text','not.have.value'].includes(name);
   if((takesValue&&args.length!==2)||(!takesValue&&args.length!==1))failure(line,'Incorrect arguments for '+JSON.stringify(name)+'.');
   return {operation,elementRef,...(takesValue?(name.includes('text')?{text:value}:{value}):{})};
 }
