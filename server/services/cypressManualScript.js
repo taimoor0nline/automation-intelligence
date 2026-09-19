@@ -103,7 +103,10 @@ function elementAssertion(method,args,elementRef,line) {
   if(name==='have.attr'&&value==='required')return {operation:'ASSERT_REQUIRED',elementRef};
   if(name==='not.have.attr'&&value==='required')return {operation:'ASSERT_OPTIONAL',elementRef};
   if(name==='have.value'&&value==='')return {operation:'ASSERT_VALUE_EMPTY',elementRef};
-  if(name==='not.have.value'&&value==='')return {operation:'ASSERT_VALUE_NOT_EMPTY',elementRef};
+  if(name==='not.have.value') {
+    if(value!=='')failure(line,'Only .should("not.have.value", "") is supported; arbitrary inequality has a different meaning.');
+    return {operation:'ASSERT_VALUE_NOT_EMPTY',elementRef};
+  }
   if(name==='have.text'&&value==='')return {operation:'ASSERT_TEXT_EMPTY',elementRef};
   const operation=ASSERTIONS[name];
   if(!operation)failure(line,'Unsupported Cypress assertion '+JSON.stringify(name)+'.');
