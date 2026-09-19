@@ -43,9 +43,18 @@
         else if (text === 'delete') { btn.classList.add('review-icon-btn'); btn.innerHTML = icon.del; btn.title = 'Delete test case'; btn.setAttribute('aria-label','Delete test case'); }
       });
       caseCard.querySelectorAll('.readiness-actions button').forEach((btn) => {
+        // The canonical workbench owns its button and click handler. Do not
+        // overwrite it, rename it or create a MutationObserver feedback loop.
+        if (btn.matches('[data-repair-workbench]')) return;
         const text = (btn.textContent || '').trim().toLowerCase();
         if (text.includes('suggest assertion')) { btn.remove(); return; }
-        if (text.includes('fix with ai') || text.includes('repair')) { btn.classList.add('review-icon-btn'); btn.innerHTML = icon.repair; btn.title = 'Repair test case with AI'; btn.setAttribute('aria-label','Repair test case with AI'); }
+        if ((text.includes('fix with ai') || text.includes('repair')) && !btn.dataset.reviewIconDecorated) {
+          btn.dataset.reviewIconDecorated = 'true';
+          btn.classList.add('review-icon-btn');
+          btn.innerHTML = icon.repair;
+          btn.title = 'Repair test case';
+          btn.setAttribute('aria-label','Repair test case');
+        }
       });
       const actionBox = caseCard.querySelector('.readiness-actions');
       if (actionBox && !actionBox.children.length) actionBox.remove();
