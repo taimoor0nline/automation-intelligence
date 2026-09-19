@@ -4,6 +4,7 @@ const path = require('path');
 const { buildCanonicalElementRegistry } = require('../server/services/canonicalElementRegistry');
 const { normalizeBehavioralIr, normalizeOperationBuckets } = require('../server/services/canonicalBehaviorGrounding');
 const { validateCanonicalIr } = require('../server/services/canonicalTestIrV3');
+const { parseAutomationScript } = require('../server/services/manualAutomationScript');
 
 const page = {
   url: 'http://localhost:4000/repair-contract',
@@ -169,5 +170,49 @@ assert(
   explicitLocation.ir.assertions.some((item) => item.operation === 'ASSERT_PATH_EQUALS'),
   'Explicit user-authored location requirements must not be removed.'
 );
+
+// A human-authored script must be an executable canonical artifact, not text
+// copied into the legacy human-readable Steps/Expected Results textareas.
+const humanScript = [
+  'NAVIGATE /login',
+  'TYPE #email invalid-email',
+  'CLICK #sign-in',
+  'ASSERT_INVALID #email',
+].join('\\n');
+const manual = parseAutomationScript(humanScript, loginRegistry);
+assert.deepStrictEqual(manual.actions.map(item => item.operation), ['NAVIGATE','TYPE','CLICK']);
+assert.deepStrictEqual(manual.assertions.map(item => item.operation), ['ASSERT_INVALID']);
+assert.strictEqual(manual.actions[1].elementRef, email.elementRef);
+assert.strictEqual(manual.actions[2].elementRef, signIn.elementRef);
+assert.strictEqual(manual.assertions[0].elementRef, email.elementRef);
+const manualChecked = validateCanonicalIr({
+  version: 1, plannedId: 'P002', objective: 'Login page with invalid email to verify native validation',
+  ...manual,
+}, {
+  registry: loginRegistry,
+  story: 'Test login negative validation only.',
+  plannedUnit: { plannedId: 'P002', scenarioType: 'negative', objective: 'Login page with invalid email to verify native validation' },
+  hasCredentials: false,
+});
+assert(manualChecked.ok, manualChecked.reason || JSON.stringify(manualChecked.errors || []));
+assert.throws(
+  () => parseAutomationScript('cy.visit("/login");\\ncy.get("#email").click();', loginRegistry),
+  /arbitrary JavaScript|not in the supported|supported uppercase/,
+);
+assert.throws(
+  () => parseAutomationScript('NAVIGATE /login\\nCLICK #invented\\nASSERT_INVALID #email', loginRegistry),
+  /not discovered/,
+);
+assert.throws(
+  () => parseAutomationScript('NAVIGATE /login\\nCLICK #sign-in', loginRegistry),
+  /assertion is required/,
+);
+const repairUi = fs.readFileSync(path.resolve(__dirname, '..', 'testpilot-ui', 'test-case-repair-workbench.js'), 'utf8');
+const decoratedUi = fs.readFileSync(path.resolve(__dirname, '..', 'testpilot-ui', 'add-test-mode.js'), 'utf8');
+assert(repairUi.includes('data-repair-action="save-script"'), 'Manual script editor must have a real Validate & Save action.');
+assert(repairUi.includes("action: 'manual-script'"), 'Manual script editor must send a canonical manual-script request.');
+assert(!repairUi.includes("steps.value = seed.steps"), 'Manual automation script must never be pasted into human-readable Steps.');
+assert(decoratedUi.includes("btn.matches('[data-repair-workbench]')"), 'UI decorator must not mutate or remove the canonical Repair button.');
+assert(serverIndex.includes("test-case-repair-workbench.js"), 'The repair UI must be injected into the served application.');
 
 console.log('repair-workbench-contract-smoke: PASS');
