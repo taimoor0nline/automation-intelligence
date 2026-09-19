@@ -5,6 +5,7 @@ const { buildCanonicalElementRegistry } = require('../server/services/canonicalE
 const { normalizeBehavioralIr, normalizeOperationBuckets } = require('../server/services/canonicalBehaviorGrounding');
 const { validateCanonicalIr } = require('../server/services/canonicalTestIrV3');
 const { parseAutomationScript } = require('../server/services/manualAutomationScript');
+const { parseCypressScript } = require('../server/services/cypressManualScript');
 
 const page = {
   url: 'http://localhost:4000/repair-contract',
@@ -214,5 +215,67 @@ assert(repairUi.includes("action: 'manual-script'"), 'Manual script editor must 
 assert(!repairUi.includes("steps.value = seed.steps"), 'Manual automation script must never be pasted into human-readable Steps.');
 assert(decoratedUi.includes("btn.matches('[data-repair-workbench]')"), 'UI decorator must not mutate or remove the canonical Repair button.');
 assert(serverIndex.includes("test-case-repair-workbench.js"), 'The repair UI must be injected into the served application.');
+const repairRoute = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'routes', 'testCaseRepairWorkbench.js'), 'utf8');
+assert(repairRoute.includes('parseCypressScript(script, registry)'), 'The active manual script endpoint must use Cypress syntax rather than the legacy TestNexus DSL.');
+assert(repairUi.includes('cy.visit(') && repairUi.includes('cy.get('), 'The manual editor must show Cypress syntax.');
+
+// The public editor accepts native Cypress calls, not the legacy proprietary DSL.
+// They still compile into the grounded canonical contract; no arbitrary code runs.
+const cypressScript = [
+  'cy.visit("/login");',
+  'cy.get("#email").clear().type("invalid-email");',
+  'cy.get("#sign-in").click();',
+  'cy.get("#email").should("match", ":invalid");',
+].join('\n');
+const cypress = parseCypressScript(cypressScript, loginRegistry);
+assert.deepStrictEqual(cypress.actions.map(item => item.operation), ['NAVIGATE','CLEAR','TYPE','CLICK']);
+assert.deepStrictEqual(cypress.assertions.map(item => item.operation), ['ASSERT_INVALID']);
+assert.strictEqual(cypress.actions[2].elementRef, email.elementRef);
+assert.strictEqual(cypress.actions[3].elementRef, signIn.elementRef);
+const cypressChecked = validateCanonicalIr({
+  version: 1, plannedId: 'P002',
+  objective: 'Login page with invalid email to verify native validation',
+  ...cypress,
+}, {
+  registry: loginRegistry,
+  story: 'Test login negative validation only.',
+  plannedUnit: {
+    plannedId: 'P002', scenarioType: 'negative',
+    objective: 'Login page with invalid email to verify native validation',
+  },
+  hasCredentials: false,
+});
+assert(cypressChecked.ok, cypressChecked.reason || JSON.stringify(cypressChecked.errors || []));
+
+const emptyPassword = parseCypressScript([
+  'cy.visit("/login");',
+  'cy.get("#password").clear();',
+  'cy.get("#sign-in").click();',
+  'cy.get("#password").should("match", ":invalid");',
+].join('\n'), loginRegistry);
+assert.deepStrictEqual(emptyPassword.assertions.map(item => item.operation), ['ASSERT_INVALID']);
+const locationCheck = parseCypressScript([
+  'cy.visit("/login");',
+  'cy.get("#email").click();',
+  'cy.location("pathname").should("eq", "/login");',
+].join('\n'), loginRegistry);
+assert.strictEqual(locationCheck.assertions[0].operation,'ASSERT_PATH_EQUALS');
+
+assert.throws(
+  () => parseCypressScript('NAVIGATE /login\nTYPE #email invalid-email\nASSERT_INVALID #email', loginRegistry),
+  /Cypress cy\.\*/,
+);
+assert.throws(
+  () => parseCypressScript('cy.visit("/login");\ncy.get("#invented").click();\ncy.get("#email").should("be.visible");', loginRegistry),
+  /not a discovered control/,
+);
+assert.throws(
+  () => parseCypressScript('cy.visit("/login");\ncy.get("#email").then(($x) => {});', loginRegistry),
+  /Nested expressions|quoted string literal|Unsupported Cypress/,
+);
+assert.throws(
+  () => parseCypressScript('cy.visit("/login");\ncy.get("#sign-in").click();', loginRegistry),
+  /assertion is required/,
+);
 
 console.log('repair-workbench-contract-smoke: PASS');
