@@ -17,6 +17,11 @@
     .repair-contract-note{margin-top:13px;padding:9px 11px;border-radius:9px;background:#f8fafc;border:1px solid #e2e8f0;font-size:9.8px;line-height:1.5;color:#64748b}.repair-contract-note b{color:#334155}
     .readiness-actions .testnexus-repair-workbench-btn{font-weight:800}
     .repair-workbench [data-ai-repair-busy="true"]{opacity:.7;cursor:wait}
+    .repair-script-editor{display:none;margin-top:14px;border-top:1px solid #e2e8f0;padding-top:14px}
+    .repair-script-editor.show{display:block}
+    .repair-script-editor textarea{display:block;width:100%;min-height:265px;padding:12px;border:1px solid #cbd5e1;border-radius:9px;font:12px/1.6 Consolas,Monaco,monospace;white-space:pre;resize:vertical;tab-size:2}
+    .repair-script-editor p{font-size:11px;line-height:1.55;color:#475569}
+    .repair-script-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:9px;flex-wrap:wrap}
     @media(max-width:760px){.repair-paths{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
@@ -42,6 +47,16 @@
           <textarea id="repairAiInstruction" placeholder="Example: Keep the invalid-login intent, but verify the visible validation message instead of assuming a 4xx response."></textarea>
           <div class="actions"><button type="button" class="btn primary" data-repair-action="rewrite-ai">Rewrite with AI</button></div>
         </div>
+        <div class="repair-script-editor" id="repairScriptEditor">
+          <strong>Write Automation Script · <span id="repairScriptCaseId"></span></strong>
+          <p>Use supported TestNexus automation commands, one per line. Use an elementRef or an exact selector from the rendered page. This is not arbitrary JavaScript. The server checks every action and assertion against discovered evidence and compiles the exact reviewed contract.</p>
+          <textarea id="repairScriptText" spellcheck="false" aria-label="Automation Script" placeholder="NAVIGATE /login&#10;TYPE #email invalid-email&#10;CLICK #sign-in&#10;ASSERT_INVALID #email"></textarea>
+          <p>Example: <code>NAVIGATE /login</code>, <code>TYPE #email invalid-email</code>, <code>CLEAR #password</code>, <code>TYPE_RUNTIME_CREDENTIAL #password password</code>, <code>CLICK #sign-in</code>, <code>ASSERT_INVALID #email</code>, <code>ASSERT_TEXT_CONTAINS #email-error Required</code>. Put assertions after all actions. Unsaved or unsupported commands are never executed.</p>
+          <div class="repair-script-actions">
+            <button type="button" class="btn ghost" data-repair-action="cancel-script">Back</button>
+            <button type="button" class="btn secondary" data-repair-action="save-script">Validate &amp; Save Script</button>
+          </div>
+        </div>
         <div class="repair-workbench-status" id="repairWorkbenchStatus"></div>
         <div class="repair-contract-note"><b>Contract rule:</b> every repair invalidates the previous approval seal. The repaired case must pass deterministic readiness and exact automation-artifact validation, then be reviewed again before Run/Re-run can seal it for execution.</div>
       </div>
@@ -51,6 +66,7 @@
   let currentCaseId = '';
   let activeRepairController = null;
   let activeRepairTimeout = null;
+  let scriptSaving = false;
 
   function cases() {
     try { if (typeof testCases !== 'undefined' && Array.isArray(testCases)) return testCases; } catch {}
@@ -104,6 +120,8 @@
 
   function close() {
     cancelActiveRepair();
+    if (scriptSaving) return;
+    document.getElementById('repairScriptEditor').classList.remove('show');
     modal.classList.remove('show');
     setStatus('', '');
   }
@@ -114,9 +132,10 @@
     if (!tc) return;
     currentCaseId = String(tc.id || '').trim().toUpperCase();
     const readiness = tc.automationReadiness || {};
-    document.getElementById('repairWorkbenchTitle').textContent = `Repair ${tc.id || 'test case'}`;
+    document.getElementById('repairWorkbenchTitle').textContent = `${readiness.status === 'READY' ? 'Edit automation' : 'Repair'} ${tc.id || 'test case'}`;
     document.getElementById('repairWorkbenchSubtitle').textContent = tc.title || 'Choose how this test definition should be corrected.';
     document.getElementById('repairWorkbenchReason').textContent = `${String(readiness.status || 'BLOCKED').replaceAll('_',' ')} · ${readiness.reasonCode || 'REVIEW_REQUIRED'} — ${readiness.reason || 'The case is not currently executable.'}`;
+    document.getElementById('repairScriptEditor').classList.remove('show');
     document.getElementById('repairAiInstruction').value = '';
     cancelActiveRepair();
     setStatus('', '');
@@ -205,55 +224,88 @@
     }
   }
 
-  function extractEditableAutomation(tc) {
-    if (Array.isArray(tc?.cypressSteps) && Array.isArray(tc?.cypressAssertions)) {
-      return { steps: tc.cypressSteps, assertions: tc.cypressAssertions };
-    }
-    const lines = String(tc?.cypressPreview || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('cy.'));
-    const assertionPattern = /\.should\(|^cy\.(?:url|location|title)\(/;
-    const safeStepPattern = /^cy\.(?:visit|reload|go|viewport)\(|^cy\.get\(.+\)\.(?:clear|type|click|dblclick|rightclick|select|check|uncheck|focus|blur|submit|scrollIntoView|trigger)\(/;
-    const assertions = lines.filter((line) => assertionPattern.test(line));
-    const steps = lines.filter((line) => !assertionPattern.test(line) && safeStepPattern.test(line));
-    return { steps, assertions };
-  }
-
   function openHumanRewrite() {
     const { tc, index } = currentCaseInfo();
     if (!tc || index < 0) return;
+    if (typeof openEditor !== 'function') {
+      setStatus('The human test-case editor is not available. Refresh TestNexus and retry.', 'bad');
+      return;
+    }
     modal.classList.remove('show');
     setStatus('', '');
-    if (typeof openEditor !== 'function') return;
     openEditor(index);
-    const mode = document.getElementById('testCreationModeSelect');
-    if (mode) mode.value = '';
     const heading = document.getElementById('editorHeading');
     if (heading) heading.textContent = `Rewrite Test Case · ${tc.id || ''}`;
   }
 
+  function editableScript(tc) {
+    const ir = tc?.canonicalIr || {};
+    const plan = tc?._canonicalAutomationPlan || tc?.automationReadiness?.automationPlan || {};
+    const code = (operation, data, compiled) => {
+      const op = String(operation || '').toUpperCase();
+      const target = data.elementRef || compiled?.elementRef || compiled?.selector || '';
+      const args = op === 'NAVIGATE' ? data.path : op === 'ASSERT_PATH_EQUALS' ? data.path :
+        op === 'ASSERT_URL_EQUALS' ? data.url :
+        ['ASSERT_PATH_INCLUDES','ASSERT_URL_INCLUDES'].includes(op) ? (data.fragment || data.path) :
+        op === 'TYPE_RUNTIME_CREDENTIAL' ? [target, data.credential].filter(Boolean).join(' ') :
+        ['TYPE','SELECT','ASSERT_VALUE_EQUALS','ASSERT_VALUE_CONTAINS'].includes(op) ? [target, data.value].filter(Boolean).join(' ') :
+        ['ASSERT_TEXT_EQUALS','ASSERT_TEXT_CONTAINS','ASSERT_TEXT_NOT_CONTAINS'].includes(op) ? [target, data.text].filter(Boolean).join(' ') :
+        target || '';
+      return [op, args].filter(Boolean).join(' ');
+    };
+    const actions = (ir.actions || []).map((item, i) => code(item.operation, item, plan.actions?.[i]));
+    const assertions = (ir.assertions || []).map((item, i) => code(item.operation, item, plan.assertions?.[i]));
+    if (actions.length && assertions.length) return [...actions, '', ...assertions].join('\n');
+    return 'NAVIGATE /login\nTYPE #email invalid-email\nCLICK #sign-in\nASSERT_INVALID #email';
+  }
+
   function openAutomationRewrite() {
-    const { tc, index } = currentCaseInfo();
-    if (!tc || index < 0) return;
-    const seed = extractEditableAutomation(tc);
-    modal.classList.remove('show');
-    setStatus('', '');
-    if (typeof openEditor !== 'function') return;
-    openEditor(index);
-    const mode = document.getElementById('testCreationModeSelect');
-    if (mode) {
-      mode.value = 'manual';
-      mode.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    const steps = document.getElementById('editSteps');
-    const expected = document.getElementById('editExpected');
-    if (steps && seed.steps.length) steps.value = seed.steps.join('\n');
-    if (expected && seed.assertions.length) expected.value = seed.assertions.join('\n');
-    const heading = document.getElementById('editorHeading');
-    if (heading) heading.textContent = `Rewrite Test Case · Automation Script · ${tc.id || ''}`;
-    const hint = document.getElementById('testCreationModeHint');
-    if (hint) hint.textContent = 'Advanced rewrite: use only the supported automation command/assertion subset. Save converts this syntax back into the deterministic TestNexus contract and revalidates it before execution.';
-    if (!seed.steps.length || !seed.assertions.length) {
-      const help = document.getElementById('manualCypressHelp');
-      help?.classList.add('show');
+    const tc = currentCase();
+    if (!tc) return;
+    document.getElementById('repairScriptEditor').classList.add('show');
+    document.getElementById('repairScriptCaseId').textContent = tc.id || '';
+    document.getElementById('repairScriptText').value = editableScript(tc);
+    setStatus('Edit the supported commands, then validate and save. The previous test remains unchanged if validation fails.', 'working');
+    document.getElementById('repairScriptText').focus();
+  }
+
+  async function saveManualScript() {
+    const tc = currentCase();
+    if (!tc || scriptSaving || activeRepairController) return;
+    const script = document.getElementById('repairScriptText').value.trim();
+    if (!script) return setStatus('Enter at least one action and one assertion.', 'bad');
+    scriptSaving = true;
+    const button = modal.querySelector('[data-repair-action="save-script"]');
+    button.disabled = true;
+    button.textContent = 'Validating…';
+    setStatus('Validating the exact script against rendered evidence and the deterministic automation contract…', 'working');
+    try {
+      const sid = typeof sessionId !== 'undefined' ? sessionId : window.sessionId;
+      if (!sid) throw new Error('Session expired. Generate a new session before editing the automation.');
+      const response = await fetch('/api/test-cases/repair-workbench', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sid, testCase: { id: tc.id }, action: 'manual-script', script, credentials: credentials() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const reasons = (data.validationErrors || []).map((item) => item?.message || item).filter(Boolean);
+        throw new Error([data.reply, ...reasons].filter(Boolean).filter((item, index, array) => array.indexOf(item) === index).join(' · ') || 'Script validation failed.');
+      }
+      if (!data.testCase || !data.automationReady) throw new Error('The script was not Automation Ready; the original test remains unchanged.');
+      const list = cases();
+      const index = list.findIndex((item) => String(item?.id || '').toUpperCase() === String(tc.id || '').toUpperCase());
+      if (index < 0) throw new Error('The saved case is not in the current review list. Refresh this session.');
+      list[index] = data.testCase;
+      if (typeof renderCases === 'function') renderCases();
+      document.getElementById('repairScriptEditor').classList.remove('show');
+      setStatus(data.message || 'Validated script saved. Review the new test contract before execution.', 'ok');
+    } catch (err) {
+      setStatus(err.message || 'The script could not be validated. The original case was not modified.', 'bad');
+    } finally {
+      scriptSaving = false;
+      button.disabled = false;
+      button.textContent = 'Validate & Save Script';
     }
   }
 
@@ -265,6 +317,8 @@
     if (action === 'regenerate' || action === 'rewrite-ai') return void aiRepair(action);
     if (action === 'human') return openHumanRewrite();
     if (action === 'automation-script') return openAutomationRewrite();
+    if (action === 'cancel-script') { document.getElementById('repairScriptEditor').classList.remove('show'); return setStatus('', ''); }
+    if (action === 'save-script') return void saveManualScript();
   });
 
   window.openTestRepairWorkbench = open;
@@ -283,7 +337,17 @@
           : list[index];
         if (!tc) return;
         const status = String(tc?.automationReadiness?.status || 'NEEDS_PREFLIGHT').toUpperCase();
-        card.querySelectorAll('button[onclick*="repairCaseWithAI"],button[title="Repair test case with AI"]').forEach((button) => button.remove());
+        card.querySelectorAll('button[onclick*="repairCaseWithAI"],button[title="Repair test case with AI"]:not([data-repair-workbench])').forEach((button) => button.remove());
+        const caseActions = card.querySelector('.case-actions');
+        if (caseActions && !caseActions.querySelector('[data-script-edit]')) {
+          const scriptButton = document.createElement('button');
+          scriptButton.type = 'button';
+          scriptButton.className = 'btn ghost';
+          scriptButton.dataset.scriptEdit = '1';
+          scriptButton.textContent = 'Edit Automation Script';
+          scriptButton.addEventListener('click', () => { open(String(tc.id || cardId || index)); openAutomationRewrite(); });
+          caseActions.appendChild(scriptButton);
+        }
         if (status === 'READY' || status === 'NEEDS_PREFLIGHT') return;
         let actions = card.querySelector('.readiness-actions');
         if (!actions) {
