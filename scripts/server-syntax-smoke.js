@@ -6,6 +6,7 @@ const files = [
   'server/routes/run.js',
   'server/routes/testCaseRepairWorkbench.js',
   'server/services/manualAutomationScript.js',
+  'server/services/cypressManualScript.js',
   'testpilot-ui/test-case-repair-workbench.js',
   'testpilot-ui/add-test-mode.js',
   'server/services/deterministicAutomationGeneratorV6.js',
