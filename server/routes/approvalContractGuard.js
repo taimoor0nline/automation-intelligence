@@ -7,6 +7,7 @@ const { assessTestCases } = require('../services/testCaseFeasibility');
 const { stableHash, executionPlanShape, displayExpectationShape } = require('../services/startupIntegrityGuards');
 const executionGenerator = require('../services/deterministicAutomationGeneratorV7');
 const { validateGroundedScript } = require('../services/scriptValidator');
+const { isConfirmedCurrentReview } = require('../services/reviewContract');
 
 function configuredActorRefs(session) {
   return Object.entries(session.actorCredentials || {})
@@ -134,10 +135,26 @@ router.use((req, res, next) => {
     const body = req.body || {};
     const sessionId = body.sessionId || 'default';
     const session = getSession(sessionId);
-    const source = Array.isArray(body.reviewedTestCases) && body.reviewedTestCases.length
+    const submitted = Array.isArray(body.reviewedTestCases) && body.reviewedTestCases.length
       ? body.reviewedTestCases
       : session.testCases;
-    if (!Array.isArray(source) || !source.length) return next();
+    if (!Array.isArray(submitted) || !submitted.length) return next();
+
+    const authoritative = new Map((session.testCases || [])
+      .map((testCase) => [String(testCase?.id || '').toUpperCase(), testCase]));
+    const source = submitted.map((testCase) => {
+      const original = authoritative.get(String(testCase?.id || '').toUpperCase());
+      if (!original?.review) return testCase;
+      // Never trust a browser-supplied confirmed flag, canonical IR, approval
+      // or altered expectation: a reviewed edit is sourced from the server.
+      if (stableHash(testCase.canonicalIr) !== stableHash(original.canonicalIr)
+          || stableHash(displayExpectationShape(testCase)) !== stableHash(displayExpectationShape(original))) {
+        const error = new Error(`Reviewed case ${testCase.id} differs from the saved draft. Reopen and confirm its latest version.`);
+        error.code = 'REVIEWED_CONTRACT_CLIENT_MISMATCH';
+        throw error;
+      }
+      return original;
+    });
 
     const assessed = assessTestCases(source, {
       pageDiscoveries: session.pageDiscoveries || [],
@@ -152,6 +169,15 @@ router.use((req, res, next) => {
     for (const testCase of assessed) {
       const selected = !approved.size || approved.has(String(testCase.id || '').toUpperCase());
       if (!selected || !testCase?.canonicalIr) continue;
+
+      if (!isConfirmedCurrentReview(testCase)) {
+        return res.status(422).json({
+          reply: `Execution blocked for ${testCase.id}: the edited draft must be reviewed and explicitly confirmed after validation.`,
+          code: 'HUMAN_REVIEW_CONFIRMATION_REQUIRED',
+          testCaseId: testCase.id,
+          review: testCase.review || null,
+        });
+      }
 
       if (testCase?.automationReadiness?.status !== 'READY') {
         return res.status(422).json({
