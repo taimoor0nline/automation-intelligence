@@ -278,4 +278,74 @@ assert.throws(
   /assertion is required/,
 );
 
-console.log('repair-workbench-contract-smoke: PASS');
+const { contractReviewHash, isConfirmedCurrentReview } = require('../server/services/reviewContract');
+const reviewedCase = {
+  canonicalIr: { actions: [{ operation: 'NAVIGATE', path: '/login' }], assertions: [{ operation: 'ASSERT_INVALID', elementRef: email.elementRef }] },
+  expectedResults: ['Email is invalid'],
+  automationReadiness: {
+    automationPlan: { actions: [], assertions: [], registryHash: loginRegistry.registryHash },
+    cypressContract: { scriptHash: 'a'.repeat(64) },
+  },
+};
+const reviewedHash = contractReviewHash(reviewedCase);
+assert.equal(isConfirmedCurrentReview({ ...reviewedCase, review: {
+  status: 'PENDING_REVIEW', revision: 1, contractHash: reviewedHash,
+}}), false, 'A validated draft must not be executable before a separate human confirmation.');
+assert.equal(isConfirmedCurrentReview({ ...reviewedCase, review: {
+  status: 'CONFIRMED', revision: 1, confirmedAt: new Date().toISOString(), contractHash: reviewedHash,
+}}), true, 'A confirmed and unchanged canonical contract may proceed to the regular approval seal.');
+assert.equal(isConfirmedCurrentReview({
+  ...reviewedCase,
+  expectedResults: ['Something else'],
+  review: { status: 'CONFIRMED', confirmedAt: new Date().toISOString(), contractHash: reviewedHash },
+}), false, 'Editing expectations after confirmation must revoke the reviewed contract.');
+
+const persistedRoute = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'routes', 'testCaseRepairWorkbench.js'), 'utf8');
+const approvalGuard = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'routes', 'approvalContractGuard.js'), 'utf8');
+assert(persistedRoute.includes("persistence.persistReviewedCase(sessionId, session, candidate)"), 'A saved human edit must await persistence before returning success.');
+assert(persistedRoute.includes("mode === 'confirm'"), 'The human must have a separate confirm action after validation.');
+assert(approvalGuard.includes('isConfirmedCurrentReview(testCase)'), 'Execution must block unconfirmed or changed human-edited contracts.');
+assert(repairUi.includes('data-repair-action="confirm"'), 'The repair workbench must expose Confirm Reviewed Contract.');
+assert(repairUi.includes('expectedRevision:'), 'The UI must pass revision checks to prevent stale edits.');
+
+(async () => {
+  const db = require('../server/db');
+  const persistence = require('../server/services/persistenceService');
+  const original = { configured: db.isConfigured, withTransaction: db.withTransaction };
+  const statements = [];
+  try {
+    db.isConfigured = () => true;
+    db.withTransaction = async (work) => work({
+      query: async (sql, params) => { statements.push({ sql, params }); return { rows: [], rowCount: 1 }; },
+    });
+    const savedCase = {
+      ...reviewedCase,
+      id: 'TC002', title: 'Negative login validation', type: 'negative', priority: 'medium',
+      testCategory: 'FUNCTIONAL', source: 'human-automation-script',
+      review: { status: 'PENDING_REVIEW', revision: 1, contractHash: reviewedHash, confirmedAt: null },
+    };
+    const session = {
+      state: 'GENERATED', story: 'Negative login test', targetUrl: 'https://example.test/login',
+      targetType: 'WEB', testCases: [savedCase], pageDiscoveries: [], approvedIds: [],
+      automationReadiness: { ready: 1, total: 1 }, readinessValidated: true,
+      testActors: [], actorCredentials: {},
+    };
+    assert.equal(await persistence.persistReviewedCase('review-persistence-smoke', session, savedCase), true);
+    assert.deepStrictEqual(statements.map((item) =>
+      item.sql.includes('insert into test_sessions') ? 'session'
+        : item.sql.includes('insert into test_cases') ? 'case'
+        : item.sql.includes('insert into canonical_test_ir') ? 'canonical'
+        : 'unexpected'
+    ), ['session', 'case', 'canonical'], 'DB mode must save review, case and IR in one PostgreSQL transaction.');
+    const sessionPayload = JSON.parse(statements[0].params.at(-1));
+    const casePayload = JSON.parse(statements[1].params.at(-1));
+    assert.equal(sessionPayload.testCases[0].review.status, 'PENDING_REVIEW');
+    assert.equal(casePayload.review.revision, 1);
+    assert.equal(sessionPayload.actorCredentials, undefined, 'Runtime credentials must never be persisted in session JSON.');
+  } finally {
+    db.isConfigured = original.configured;
+    db.withTransaction = original.withTransaction;
+  }
+  console.log('repair-workbench-contract-smoke: PASS');
+})().catch((err) => { console.error(err); process.exitCode = 1; });
+
