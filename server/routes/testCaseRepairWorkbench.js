@@ -9,6 +9,8 @@ const { parseCypressScript } = require('../services/cypressManualScript');
 const { validateCanonicalIr } = require('../services/canonicalTestIrV3');
 const { generateCypressPreviewFromPlan } = require('../services/deterministicAutomationGeneratorV6');
 const { attachStrictContract } = require('../services/strictCypressIntegration');
+const { stableHash, executionPlanShape, displayExpectationShape } = require('../services/startupIntegrityGuards');
+const persistence = require('../services/persistenceService');
 
 function clean(value, max = 2000) {
   return String(value ?? '').trim().slice(0, max);
@@ -32,7 +34,7 @@ function assessmentContext(session) {
 
 function findCase(session, raw) {
   const id = clean(raw?.id, 20).toUpperCase();
-  return (session.testCases || []).find((item) => String(item?.id || '').toUpperCase() === id) || raw || null;
+  return (session.testCases || []).find((item) => String(item?.id || '').toUpperCase() === id) || null;
 }
 
 function plannedIdFor(testCase) {
@@ -222,6 +224,7 @@ function manualScriptCandidate(session, original, script) {
     id: original.id,
     source: 'human-automation-script',
     createdBy: 'human-repair-request',
+    manualCypressScript: script,
     steps: checked.display.steps,
     expectedResults: checked.display.expectedResults,
     canonicalIr: ir,
@@ -254,38 +257,130 @@ function manualScriptCandidate(session, original, script) {
   return strict;
 }
 
+function contractReviewHash(testCase) {
+  // The human confirms both authored intent and the exact compiled assertions.
+  return stableHash({
+    ir: testCase.canonicalIr,
+    compiled: executionPlanShape(testCase.automationReadiness?.automationPlan || {}),
+    display: displayExpectationShape(testCase),
+    executableHash: testCase.automationReadiness?.cypressContract?.scriptHash || null,
+  });
+}
+
+function markPendingReview(original, candidate) {
+  return {
+    ...candidate,
+    review: {
+      status: 'PENDING_REVIEW',
+      revision: (Number(original?.review?.revision) || 0) + 1,
+      contractHash: contractReviewHash(candidate),
+      confirmedAt: null,
+    },
+  };
+}
+
+function confirmReview(session, original, revision, expectedHash) {
+  const review = original?.review;
+  if (review?.status !== 'PENDING_REVIEW') {
+    const error = new Error('This case has no pending edited contract to confirm. Save and validate an edit first.');
+    error.code = 'REVIEW_NOT_PENDING'; throw error;
+  }
+  if (Number(revision) !== review.revision || !expectedHash || expectedHash !== review.contractHash) {
+    const error = new Error('This case changed after you opened it. Refresh its review and confirm the current version.');
+    error.code = 'REVIEW_VERSION_CONFLICT'; throw error;
+  }
+  const context = { ...assessmentContext(session), canonicalElementRegistry: session.canonicalElementRegistry };
+  const assessed = attachStrictContract(assessTestCases([original], context)[0], context);
+  const freshHash = contractReviewHash(assessed);
+  if (assessed.automationReadiness?.status !== 'READY'
+      || freshHash !== review.contractHash) {
+    const error = new Error('The current automation contract no longer matches the validated draft. Edit and revalidate before confirmation.');
+    error.code = 'REVIEW_CONTRACT_CHANGED'; throw error;
+  }
+  return {
+    ...assessed,
+    review: { ...review, status: 'CONFIRMED', confirmedAt: new Date().toISOString(), contractHash: freshHash },
+  };
+}
+
 router.post('/api/test-cases/repair-workbench', async (req, res) => {
-  const { sessionId = 'default', testCase: rawTestCase = null, action = '', instruction = '', script = '', credentials = null } = req.body || {};
+  const { sessionId = 'default', testCase: rawTestCase = null, action = '', instruction = '', script = '', credentials = null, expectedRevision = 0, reviewHash = '' } = req.body || {};
   const session = getSession(sessionId);
 
   try {
     if (session.state === 'IDLE' || !session.story) throw new Error('Generate the initial test suite before repairing a test case.');
     updateCredentials(session, credentials);
     const original = findCase(session, rawTestCase);
-    if (!original?.id) throw new Error('A valid test case is required for repair.');
+    if (!original?.id) {
+      const error = new Error('The test case does not exist in this session. Refresh your cases before editing.');
+      error.code = 'TEST_CASE_NOT_IN_SESSION'; throw error;
+    }
 
     const mode = clean(action, 40).toLowerCase();
-    if (!['regenerate', 'rewrite-ai', 'manual-script'].includes(mode)) throw new Error('Repair action must be regenerate, rewrite-ai, or manual-script.');
+    if (!['regenerate', 'rewrite-ai', 'manual-script', 'confirm'].includes(mode)) {
+      throw new Error('Repair action must be regenerate, rewrite-ai, manual-script, or confirm.');
+    }
     if (mode === 'rewrite-ai' && !clean(instruction, 1200)) throw new Error('Describe how the test should be rewritten.');
-
-    const candidate = mode === 'manual-script'
-      ? manualScriptCandidate(session, original, script)
-      : await regenerateCanonical(session, original, mode, instruction);
+    if (Number(expectedRevision) !== (Number(original.review?.revision) || 0)) {
+      const error = new Error('Another edit changed this case. Refresh it before saving.');
+      error.code = 'REVIEW_VERSION_CONFLICT'; throw error;
+    }
+    if (req.user?.sub && session.createdBy && String(session.createdBy) !== String(req.user.sub)
+        && String(req.user.role || '').toUpperCase() !== 'MANAGER') {
+      const error = new Error('The current user does not own this test session.');
+      error.code = 'SESSION_ACCESS_DENIED'; throw error;
+    }
+    const candidate = mode === 'confirm'
+      ? confirmReview(session, original, expectedRevision, reviewHash)
+      : markPendingReview(
+        original,
+        mode === 'manual-script'
+          ? manualScriptCandidate(session, original, script)
+          : await regenerateCanonical(session, original, mode, instruction)
+      );
     if (res.destroyed || res.writableEnded) return;
-    clearApprovalSeal(session, original.id);
+    // Prevent delayed AI repairs from overwriting a newer manual edit.
+    if (findCase(session, rawTestCase) !== original) {
+      const error = new Error('The case changed while AI was preparing the rewrite. Refresh and retry.');
+      error.code = 'REVIEW_VERSION_CONFLICT'; throw error;
+    }
+    const prior = {
+      testCases: session.testCases,
+      approvedIds: session.approvedIds,
+      approvedContractSeals: session.approvedContractSeals,
+      generatedScript: session.generatedScript,
+      automationReadiness: session.automationReadiness,
+      readinessValidated: session.readinessValidated,
+    };
+    if (mode !== 'confirm') clearApprovalSeal(session, original.id);
     upsert(session, candidate);
-
+    let persisted = false;
+    try {
+      persisted = await persistence.persistReviewedCase(sessionId, session, candidate);
+    } catch (error) {
+      if (require('../db').isRequired()) {
+        Object.assign(session, prior);
+        const persistenceError = new Error('The review was not saved in PostgreSQL; the previous case remains unchanged. ' + error.message);
+        persistenceError.code = 'REVIEW_PERSISTENCE_FAILED';
+        throw persistenceError;
+      }
+      console.warn('[repair-workbench] optional PostgreSQL edit persistence failed:', error.message);
+    }
     return res.json({
       ok: true,
       action: mode,
       testCase: candidate,
+      persisted,
+      review: candidate.review,
       automationReadiness: candidate.automationReadiness,
       automationReady: String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY',
-      requiresHumanReview: true,
-      approvalReset: true,
-      message: String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY'
-        ? `${candidate.id} has a validated new automation contract. Human review is required before execution.`
-        : `${candidate.id} remains blocked: ${candidate.automationReadiness?.reason || candidate.automationReadiness?.reasonCode || 'review required'}`,
+      requiresHumanReview: mode !== 'confirm',
+      approvalReset: mode !== 'confirm',
+      message: mode === 'confirm'
+        ? `${candidate.id} review confirmed. You may now explicitly approve its exact executable artifact for execution.`
+        : String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY'
+          ? `${candidate.id} was validated and saved as a draft. Confirm the reviewed contract before execution.`
+          : `${candidate.id} remains blocked: ${candidate.automationReadiness?.reason || candidate.automationReadiness?.reasonCode || 'review required'}`,
     });
   } catch (err) {
     return res.status(422).json({
