@@ -283,11 +283,11 @@ const runtimeCredentialScript = parseCypressScript([
   'cy.visit("/login");',
   'cy.get("#password").type(Cypress.env("password"));',
   'cy.get("#email").should("match", ":invalid");',
-].join('\\n'), loginRegistry);
+].join('\n'), loginRegistry);
 assert.strictEqual(runtimeCredentialScript.actions[1].operation, 'TYPE_RUNTIME_CREDENTIAL');
 assert.strictEqual(runtimeCredentialScript.actions[1].credential, 'password');
 assert.throws(
-  () => parseCypressScript('cy.visit("/login");\\ncy.get("#password").type(Cypress.env("arbitrary"));\\ncy.get("#email").should("match", ":invalid");', loginRegistry),
+  () => parseCypressScript('cy.visit("/login");\ncy.get("#password").type(Cypress.env("arbitrary"));\ncy.get("#email").should("match", ":invalid");', loginRegistry),
   /quoted string literal|expressions|Unsupported/,
 );
 
