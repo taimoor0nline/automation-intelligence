@@ -85,6 +85,7 @@ function repairHistory(testCase, action, priorReadiness, resultReadiness, instru
 
 function clearApprovalSeal(session, id) {
   if (session.approvedContractSeals && typeof session.approvedContractSeals === 'object') {
+    session.approvedContractSeals = { ...session.approvedContractSeals };
     delete session.approvedContractSeals[id];
   }
   session.approvedIds = (session.approvedIds || []).filter((item) => String(item).toUpperCase() !== String(id).toUpperCase());
@@ -94,7 +95,7 @@ function clearApprovalSeal(session, id) {
 function upsert(session, candidate) {
   const id = String(candidate?.id || '').toUpperCase();
   const index = (session.testCases || []).findIndex((item) => String(item?.id || '').toUpperCase() === id);
-  if (index >= 0) session.testCases[index] = candidate;
+  if (index >= 0) session.testCases = session.testCases.map((item, i) => i === index ? candidate : item);
   else session.testCases = [...(session.testCases || []), candidate];
   session.automationReadiness = readinessSummary(session.testCases || []);
   session.readinessValidated = true;
