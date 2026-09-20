@@ -24,9 +24,10 @@ async function persistPlan(sessionId, plan) {
   return true;
 }
 
-async function persistCaseIr(sessionId, testCase) {
+async function persistCaseIr(sessionId, testCase, client = null) {
   if (!enabled() || !testCase?.canonicalIr || !testCase?.id) return false;
-  await db.query(
+  const query = client ? client.query.bind(client) : db.query;
+  await query(
     `insert into canonical_test_ir(session_id,external_case_id,planned_id,ir_version,ir_json,validation_json,updated_at)
      values($1,$2,$3,$4,$5::jsonb,$6::jsonb,now())
      on conflict(session_id,external_case_id) do update set
@@ -82,7 +83,15 @@ function applyLoadedArtifacts(session, artifacts) {
   if (artifacts.cases?.size && Array.isArray(session.testCases)) {
     session.testCases = session.testCases.map((testCase) => {
       const stored = artifacts.cases.get(String(testCase?.id || '').toUpperCase());
-      return stored ? { ...testCase, ...stored } : testCase;
+      // session_json/case_json is the authoritative latest reviewed draft.
+      // A delayed old canonical row must never restore an obsolete approved
+      // execution seal over a newer, unapproved manual edit.
+      if (!stored) return testCase;
+      return {
+        ...testCase,
+        canonicalIr: testCase.canonicalIr || stored.canonicalIr,
+        canonicalValidation: testCase.canonicalValidation || stored.canonicalValidation,
+      };
     });
   }
   return session;
