@@ -96,6 +96,7 @@ function buildSafeSessionPayload(session = {}) {
 
 async function persistSession(sessionId, session, context = {}) {
   if (!enabled()) return null;
+  const query = context.client ? context.client.query.bind(context.client) : db.query;
   const projectId = context.projectId || session.projectId || null;
   const userId = context.userId || session.createdBy || null;
   const repositoryId = context.repositoryId || session.repositoryId || null;
@@ -103,7 +104,7 @@ async function persistSession(sessionId, session, context = {}) {
   const targetType = safeSession.targetType;
   const apiTargetId = safeSession.apiTargetId;
   const apiOperationIds = safeSession.apiOperationIds;
-  await db.query(
+  await query(
     `insert into test_sessions(id,project_id,created_by,state,story,target_url,environment,ai_model_tier,repository_id,target_type,api_target_id,api_operation_ids,session_json)
      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)
      on conflict(id) do update set project_id=excluded.project_id, state=excluded.state, story=excluded.story,
@@ -115,9 +116,9 @@ async function persistSession(sessionId, session, context = {}) {
   return true;
 }
 
-async function persistTestCases(sessionId, testCases = []) {
+async function persistTestCases(sessionId, testCases = [], client = null) {
   if (!enabled()) return;
-  await db.withTransaction(async (client) => {
+  const work = async (connection) => {
     for (const tc of testCases) {
       const testCategory = categoryOf(tc);
       const scenarioType = scenarioTypeOf(tc);
@@ -131,7 +132,7 @@ async function persistTestCases(sessionId, testCases = []) {
         securitySubcategory: security.subcategory,
         severity: security.severity,
       };
-      await client.query(
+      await connection.query(
         `insert into test_cases(session_id,external_case_id,title,type,test_category,priority,security_subcategory,severity,source,case_json)
          values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
          on conflict(session_id,external_case_id) do update set
@@ -141,7 +142,9 @@ async function persistTestCases(sessionId, testCases = []) {
         [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, security.subcategory, security.severity, tc.source || null, JSON.stringify(normalizedCase)]
       );
     }
-  });
+  };
+  if (client) await work(client);
+  else await db.withTransaction(work);
 }
 
 async function persistRun({ sessionId, session, runNumber, summary, approvedIds, userId }) {
@@ -259,11 +262,30 @@ async function loadSession(sessionId) {
   };
 }
 
+async function persistReviewedCase(sessionId, session, testCase) {
+  // DB disabled is a hard no-op. DB enabled saves session, case and canonical IR
+  // in the same transaction before a successful Save/Confirm response.
+  if (!enabled()) return false;
+  const canonical = require('./canonicalArtifactStore');
+  await db.withTransaction(async (client) => {
+    await persistSession(sessionId, session, {
+      projectId: session.projectId,
+      repositoryId: session.repositoryId,
+      userId: session.createdBy,
+      client,
+    });
+    await persistTestCases(sessionId, [testCase], client);
+    await canonical.persistCaseIr(sessionId, testCase, client);
+  });
+  return true;
+}
+
 module.exports = {
   enabled,
   buildSafeSessionPayload,
   persistSession,
   persistTestCases,
+  persistReviewedCase,
   persistRun,
   persistAnalyses,
   latestRunId,
