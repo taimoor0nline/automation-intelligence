@@ -55,7 +55,7 @@
           <strong>Write Automation Script · <span id="repairScriptCaseId"></span></strong>
           <p>Write Cypress-compatible <code>cy.*</code> commands, one statement per line, using exact selectors observed in rendered discovery. A supported subset is accepted; arbitrary JavaScript, test wrappers, callbacks, and undiscovered selectors are rejected. The server validates and compiles the same actions and assertions before human approval.</p>
           <textarea id="repairScriptText" spellcheck="false" aria-label="Automation Script" placeholder="cy.visit(&quot;/login&quot;);&#10;cy.get(&quot;#email&quot;).type(&quot;invalid-email&quot;);&#10;cy.get(&quot;#sign-in&quot;).click();&#10;cy.get(&quot;#email&quot;).should(&quot;match&quot;, &quot;:invalid&quot;);"></textarea>
-          <p>Examples: <code>cy.visit("/login");</code> <code>cy.get("#email").type("invalid-email");</code> <code>cy.get("#sign-in").click();</code> <code>cy.get("#email").should("match", ":invalid");</code> Put final assertions after all actions. Only supported literal Cypress statements can be saved; unsupported commands will show a line-specific error and never execute.</p>
+          <p>Examples: <code>cy.visit("/login");</code> <code>cy.get("#email").type("invalid-email");</code> <code>cy.get("#sign-in").click();</code> <code>cy.get("#email").should("match", ":invalid");</code> Put final assertions after all actions. Only supported literal Cypress statements and allowlisted <code>Cypress.env("username"|"password")</code> credential references can be saved. Unsupported commands will show a line-specific error and never execute.</p>
           <div class="repair-script-actions">
             <button type="button" class="btn ghost" data-repair-action="cancel-script">Back</button>
             <button type="button" class="btn secondary" data-repair-action="save-script">Validate &amp; Save Script</button>
@@ -269,7 +269,9 @@
       if (op === 'RELOAD') return 'cy.reload();';
       if (op === 'GO_BACK') return 'cy.go("back");';
       if (op === 'GO_FORWARD') return 'cy.go("forward");';
-      if (op === 'TYPE_RUNTIME_CREDENTIAL') return 'cy.unsupported("Runtime credential action needs an approved credential mapping; do not paste credentials.");';
+      if (op === 'TYPE_RUNTIME_CREDENTIAL') return target
+        ? target + '.type(Cypress.env(' + q(data.credential) + '));'
+        : 'cy.unsupported("Runtime credential requires a grounded control selector.");';
       if (!target) return 'cy.unsupported(' + q(op + ' requires a discovered selector; rewrite this statement manually') + ');';
       const method = {
         TYPE:'type',CLEAR:'clear',CLICK:'click',DBLCLICK:'dblclick',
