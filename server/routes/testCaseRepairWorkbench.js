@@ -185,6 +185,12 @@ async function regenerateCanonical(session, original, mode, instruction) {
 function manualScriptCandidate(session, original, script) {
   const registry = session.canonicalElementRegistry;
   if (!registry?.elements?.length) throw new Error('Rendered discovery is required before editing an Automation Script.');
+  const runtimeSecret = String(session.credentials?.password || '');
+  if (runtimeSecret.length >= 4 && script.includes(runtimeSecret)) {
+    const error = new Error('The script contains the configured runtime password. Use the allowlisted Cypress.env("password") reference rather than storing secrets in a test definition.');
+    error.code = 'RUNTIME_SECRET_IN_SCRIPT';
+    throw error;
+  }
   const { actions, assertions } = parseCypressScript(script, registry);
   const plannedId = plannedIdFor(original);
   const objective = baseObjective(original);
