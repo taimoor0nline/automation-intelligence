@@ -45,6 +45,8 @@ function splitArgs(text,line) {
   raw.push(text.slice(start));
   return raw.map(arg=>{
     const value=arg.trim(),q=value[0];
+    const runtime = value.match(/^Cypress\.env\(\s*(['"])(username|password)\1\s*\)$/);
+    if (runtime) return { runtimeCredential: runtime[2] };
     if((q!=="'"&&q!=='"')||value.at(-1)!==q||value.length<2)failure(line,'Use quoted string literal arguments only; expressions, callbacks and variables are not supported.');
     const middle=value.slice(1,-1);let result='';
     for(let i=0;i<middle.length;i++){
@@ -61,7 +63,7 @@ function splitArgs(text,line) {
 function readCall(source,start,line) {
   const head=source.slice(start).match(/^([A-Za-z]\w*)\(/);
   if(!head)failure(line,'Use supported Cypress calls, such as cy.get("#email").type("x").');
-  const name=head[1];let at=start+head[0].length,quote='',escaped=false;
+  const name=head[1];let at=start+head[0].length,quote='',escaped=false,depth=0;
   const begin=at;
   for(;at<source.length;at++){
     const ch=source[at];
@@ -72,8 +74,11 @@ function readCall(source,start,line) {
       continue;
     }
     if(ch==="'"||ch==='"'){quote=ch;continue;}
-    if(ch==='(')failure(line,'Nested expressions and callbacks are not supported.');
-    if(ch===')')return {name,args:splitArgs(source.slice(begin,at),line),next:at+1};
+    if(ch==='('){depth++;continue;}
+    if(ch===')') {
+      if(depth){depth--;continue;}
+      return {name,args:splitArgs(source.slice(begin,at),line),next:at+1};
+    }
   }
   failure(line,'Missing closing parenthesis.');
 }
@@ -145,6 +150,7 @@ function parseCypressScript(script,registry={}) {
     }
     if(root.name==='visit'){
       if(inAssertions||chain.length||root.args.length!==1)failure(line,'cy.visit takes one URL/path and cannot follow assertions.');
+      if(typeof root.args[0]!=='string')failure(line,'cy.visit requires a literal path or URL.');
       const path=pagePath(root.args[0],registry,line);currentPath=path.split('?')[0]||'/';
       actions.push({operation:'NAVIGATE',path});return;
     }
@@ -162,7 +168,7 @@ function parseCypressScript(script,registry={}) {
       for(const item of chain){inAssertions=true;assertions.push(locationAssertion(kind,item.name,item.args,line));}
       return;
     }
-    if(root.name!=='get'||root.args.length!==1||!root.args[0])failure(line,'Use cy.get("discovered selector") for element operations.');
+    if(root.name!=='get'||root.args.length!==1||typeof root.args[0]!=='string'||!root.args[0])failure(line,'Use cy.get("discovered selector") for element operations.');
     if(!chain.length)failure(line,'cy.get() needs an action or assertion.');
     const elementRef=targetFor(root.args[0],currentPath,registry,line);
     for(const item of chain){
@@ -175,7 +181,11 @@ function parseCypressScript(script,registry={}) {
       const hasValue=WITH_VALUE.has(item.name);
       if((hasValue&&item.args.length!==1)||(!hasValue&&item.args.length!==0))failure(line,'Incorrect arguments for '+item.name+'.');
       if(hasValue&&!item.args[0])failure(line,'Use .clear() for empty values.');
-      actions.push(hasValue?{operation,elementRef,value:item.args[0]}:{operation,elementRef});
+      const runtime = item.args[0]?.runtimeCredential;
+      if(runtime && item.name!=='type')failure(line,'Runtime credentials are only allowed in .type(Cypress.env("username"|"password")).');
+      actions.push(runtime
+        ? {operation:'TYPE_RUNTIME_CREDENTIAL',elementRef,credential:runtime}
+        : hasValue?{operation,elementRef,value:item.args[0]}:{operation,elementRef});
     }
   });
   if(!actions.length)failure(1,'At least one browser action is required.');
