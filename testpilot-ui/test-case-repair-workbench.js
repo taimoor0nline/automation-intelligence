@@ -78,7 +78,8 @@
   let confirming = false;
   function syncReviewConfirm() {
     const review = currentCase()?.review || {};
-    document.getElementById('repairReviewConfirm').classList.toggle('show', review.status === 'PENDING_REVIEW');
+    document.getElementById('repairReviewConfirm').classList.toggle('show',
+      review.status === 'PENDING_REVIEW' && currentCase()?.automationReadiness?.status === 'READY');
   }
 
   function cases() {
