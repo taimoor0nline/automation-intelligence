@@ -318,6 +318,34 @@ assert(persistedRoute.includes("persistence.persistReviewedCase(sessionId, sessi
 assert(persistedRoute.includes("mode === 'confirm'"), 'The human must have a separate confirm action after validation.');
 assert(approvalGuard.includes('isConfirmedCurrentReview(testCase)'), 'Execution must block unconfirmed or changed human-edited contracts.');
 assert(repairUi.includes('data-repair-action="confirm"'), 'The repair workbench must expose Confirm Reviewed Contract.');
+
+// One Edit icon per canonical case: no competing card-level script/repair buttons.
+// Clicking the single edit action must open the canonical workbench, not the
+// human-readable legacy editor that would discard the compiled contract.
+assert(
+  repairUi.includes("card.querySelectorAll('[data-script-edit],[data-repair-workbench]').forEach((button) => button.remove())"),
+  'Duplicate Edit Automation Script / Repair buttons must not be added to case cards.'
+);
+assert(
+  repairUi.includes("edit.removeAttribute('onclick')") && repairUi.includes("edit.dataset.editCase"),
+  'Canonical cases must rebind the existing pencil edit action to the workbench.'
+);
+assert(
+  repairUi.includes("open(edit.dataset.editCase)") &&
+  repairUi.includes("casesRoot.addEventListener('click'"),
+  'The single pencil action must open the canonical editor after every case redraw.'
+);
+assert(
+  !repairUi.includes("scriptButton.textContent = 'Edit Automation Script'"),
+  'A second Edit Automation Script button must not appear beside the pencil icon.'
+);
+assert(
+  repairUi.includes('data-repair-action="automation-script"') &&
+  repairUi.includes('data-repair-action="regenerate"') &&
+  repairUi.includes('data-repair-action="rewrite-ai"'),
+  'One edit workbench must offer manual Cypress editing and both AI editing paths.'
+);
+
 assert(repairUi.includes('expectedRevision:'), 'The UI must pass revision checks to prevent stale edits.');
 
 (async () => {
