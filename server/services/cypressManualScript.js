@@ -100,6 +100,7 @@ function pagePath(url,registry,line) {
   return parsed.pathname+parsed.search;
 }
 function elementAssertion(method,args,elementRef,line) {
+  if(args.some(value=>typeof value!=='string'))failure(line,'Runtime credential expressions are only supported in .type().');
   if(method!=='should'&&method!=='and')failure(line,'Only .should() and .and() can follow an assertion.');
   const [name,value]=args;
   if(typeof name!=='string')failure(line,'An assertion name is required.');
@@ -120,6 +121,7 @@ function elementAssertion(method,args,elementRef,line) {
   return {operation,elementRef,...(takesValue?(name.includes('text')?{text:value}:{value}):{})};
 }
 function locationAssertion(kind,method,args,line) {
+  if(args.some(value=>typeof value!=='string'))failure(line,'Runtime credential expressions are only supported in .type().');
   if(method!=='should'&&method!=='and')failure(line,'A location check requires .should() or .and().');
   if(args.length!==2)failure(line,'Location assertions require a comparison and expected value.');
   const [comparison,value]=args;
