@@ -43,7 +43,7 @@
         <div class="repair-blocked-reason" id="repairWorkbenchReason"></div>
         <div class="repair-paths">
           <div class="repair-path"><h4>Regenerate with AI</h4><p>Keep the test's current business intent/category/scenario, but regenerate its canonical actions and assertions from the current rendered application evidence.</p><button type="button" class="btn ghost" data-repair-action="regenerate">Regenerate</button></div>
-          <div class="repair-path"><h4>Rewrite Test</h4><p>Open the normal human test-case editor and rewrite the title, steps and expected results yourself. Saving triggers deterministic readiness again.</p><button type="button" class="btn ghost" data-repair-action="human">Rewrite Manually</button></div>
+          <div class="repair-path"><h4>Rewrite Test</h4><p>Edit this case using the reviewed Cypress-compatible script editor. Human-readable legacy steps cannot silently replace a validated canonical contract.</p><button type="button" class="btn ghost" data-repair-action="human">Rewrite Manually</button></div>
           <div class="repair-path"><h4>Edit Automation Script</h4><p>Advanced authoring using the supported automation command/assertion subset. Selectors and routes still have to match discovered evidence; arbitrary JavaScript is not executed.</p><button type="button" class="btn ghost" data-repair-action="automation-script">Edit Automation Script</button></div>
         </div>
         <div class="repair-ai-rewrite">
@@ -237,6 +237,12 @@
   function openHumanRewrite() {
     const { tc, index } = currentCaseInfo();
     if (!tc || index < 0) return;
+    if (tc.canonicalIr) {
+      // Legacy text-field saves do not compile or persist canonical IR and
+      // must never silently change an already validated generated contract.
+      openAutomationRewrite();
+      return;
+    }
     if (typeof openEditor !== 'function') {
       setStatus('The human test-case editor is not available. Refresh TestNexus and retry.', 'bad');
       return;
