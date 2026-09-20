@@ -11,7 +11,7 @@
     .repair-workbench-head strong{display:block;font-size:14px;color:#0f172a}.repair-workbench-head span{display:block;margin-top:4px;font-size:10.5px;line-height:1.45;color:#64748b}
     .repair-workbench-close{border:0;background:transparent;font-size:22px;line-height:1;color:#64748b;cursor:pointer;padding:2px 5px}
     .repair-workbench-body{padding:16px 18px}.repair-blocked-reason{padding:10px 12px;border:1px solid #fed7aa;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:10.5px;line-height:1.5;margin-bottom:14px}
-    .repair-paths{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.repair-path{border:1px solid #dbe3ef;border-radius:12px;padding:13px;background:#fff}.repair-path h4{margin:0 0 5px;font-size:11.5px;color:#1e293b}.repair-path p{margin:0 0 10px;font-size:10px;line-height:1.5;color:#64748b}.repair-path .btn{width:100%;justify-content:center}
+    .repair-paths{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.repair-path{border:1px solid #dbe3ef;border-radius:12px;padding:13px;background:#fff}.repair-path h4{margin:0 0 5px;font-size:11.5px;color:#1e293b}.repair-path p{margin:0 0 10px;font-size:10px;line-height:1.5;color:#64748b}.repair-path .btn{width:100%;justify-content:center}
     .repair-ai-rewrite{margin-top:12px;padding-top:12px;border-top:1px solid #eef2f7}.repair-ai-rewrite label{display:block;font-size:10.5px;font-weight:800;color:#334155;margin-bottom:5px}.repair-ai-rewrite textarea{width:100%;min-height:74px;border:1px solid #cbd5e1;border-radius:9px;padding:9px 10px;font:11px/1.45 inherit;resize:vertical}.repair-ai-rewrite .actions{display:flex;justify-content:flex-end;margin-top:8px}
     .repair-workbench-status{display:none;margin-top:12px;padding:9px 11px;border-radius:9px;font-size:10.5px;line-height:1.45}.repair-workbench-status.show{display:block}.repair-workbench-status.ok{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0}.repair-workbench-status.bad{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}.repair-workbench-status.working{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
     .repair-contract-note{margin-top:13px;padding:9px 11px;border-radius:9px;background:#f8fafc;border:1px solid #e2e8f0;font-size:9.8px;line-height:1.5;color:#64748b}.repair-contract-note b{color:#334155}
@@ -36,15 +36,14 @@
   modal.innerHTML = `
     <div class="repair-workbench" role="dialog" aria-modal="true" aria-labelledby="repairWorkbenchTitle">
       <div class="repair-workbench-head">
-        <div><strong id="repairWorkbenchTitle">Repair blocked test case</strong><span id="repairWorkbenchSubtitle">Choose how this test definition should be corrected.</span></div>
+        <div><strong id="repairWorkbenchTitle">Edit test case</strong><span id="repairWorkbenchSubtitle">Choose AI regeneration, AI-assisted rewriting, or manual script editing.</span></div>
         <button type="button" class="repair-workbench-close" aria-label="Close repair workbench">×</button>
       </div>
       <div class="repair-workbench-body">
         <div class="repair-blocked-reason" id="repairWorkbenchReason"></div>
         <div class="repair-paths">
           <div class="repair-path"><h4>Regenerate with AI</h4><p>Keep the test's current business intent/category/scenario, but regenerate its canonical actions and assertions from the current rendered application evidence.</p><button type="button" class="btn ghost" data-repair-action="regenerate">Regenerate</button></div>
-          <div class="repair-path"><h4>Rewrite Test</h4><p>Edit this case using the reviewed Cypress-compatible script editor. Human-readable legacy steps cannot silently replace a validated canonical contract.</p><button type="button" class="btn ghost" data-repair-action="human">Rewrite Manually</button></div>
-          <div class="repair-path"><h4>Edit Automation Script</h4><p>Advanced authoring using the supported automation command/assertion subset. Selectors and routes still have to match discovered evidence; arbitrary JavaScript is not executed.</p><button type="button" class="btn ghost" data-repair-action="automation-script">Edit Automation Script</button></div>
+          <div class="repair-path"><h4>Edit Script Manually</h4><p>Edit the Cypress-compatible script using selectors and routes grounded in the rendered application. Validate, review and confirm before execution.</p><button type="button" class="btn ghost" data-repair-action="automation-script">Open Script Editor</button></div>
         </div>
         <div class="repair-ai-rewrite">
           <label for="repairAiInstruction">Or tell AI exactly how to rewrite this case</label>
@@ -146,8 +145,8 @@
     if (!tc) return;
     currentCaseId = String(tc.id || '').trim().toUpperCase();
     const readiness = tc.automationReadiness || {};
-    document.getElementById('repairWorkbenchTitle').textContent = `${readiness.status === 'READY' ? 'Edit automation' : 'Repair'} ${tc.id || 'test case'}`;
-    document.getElementById('repairWorkbenchSubtitle').textContent = tc.title || 'Choose how this test definition should be corrected.';
+    document.getElementById('repairWorkbenchTitle').textContent = `Edit test case · ${tc.id || ''}`;
+    document.getElementById('repairWorkbenchSubtitle').textContent = tc.title || 'AI regeneration, AI rewrite or manual script editing';
     document.getElementById('repairWorkbenchReason').textContent = `${String(readiness.status || 'BLOCKED').replaceAll('_',' ')} · ${readiness.reasonCode || 'REVIEW_REQUIRED'} — ${readiness.reason || 'The case is not currently executable.'}`;
     document.getElementById('repairScriptEditor').classList.remove('show');
     document.getElementById('repairAiInstruction').value = '';
@@ -233,26 +232,6 @@
       activeRepairController = null;
       setAiBusy(false);
     }
-  }
-
-  function openHumanRewrite() {
-    const { tc, index } = currentCaseInfo();
-    if (!tc || index < 0) return;
-    if (tc.canonicalIr) {
-      // Legacy text-field saves do not compile or persist canonical IR and
-      // must never silently change an already validated generated contract.
-      openAutomationRewrite();
-      return;
-    }
-    if (typeof openEditor !== 'function') {
-      setStatus('The human test-case editor is not available. Refresh TestNexus and retry.', 'bad');
-      return;
-    }
-    modal.classList.remove('show');
-    setStatus('', '');
-    openEditor(index);
-    const heading = document.getElementById('editorHeading');
-    if (heading) heading.textContent = `Rewrite Test Case · ${tc.id || ''}`;
   }
 
   function editableScript(tc) {
@@ -415,7 +394,6 @@
     if (!button) return;
     const action = button.dataset.repairAction;
     if (action === 'regenerate' || action === 'rewrite-ai') return void aiRepair(action);
-    if (action === 'human') return openHumanRewrite();
     if (action === 'automation-script') return openAutomationRewrite();
     if (action === 'cancel-script') { document.getElementById('repairScriptEditor').classList.remove('show'); return setStatus('', ''); }
     if (action === 'save-script') return void saveManualScript();
@@ -438,33 +416,20 @@
           : list[index];
         if (!tc) return;
         const status = String(tc?.automationReadiness?.status || 'NEEDS_PREFLIGHT').toUpperCase();
-        card.querySelectorAll('button[onclick*="repairCaseWithAI"],button[title="Repair test case with AI"]:not([data-repair-workbench])').forEach((button) => button.remove());
-        const caseActions = card.querySelector('.case-actions');
-        if (caseActions && !caseActions.querySelector('[data-script-edit]')) {
-          const scriptButton = document.createElement('button');
-          scriptButton.type = 'button';
-          scriptButton.className = 'btn ghost';
-          scriptButton.dataset.scriptEdit = '1';
-          scriptButton.textContent = 'Edit Automation Script';
-          scriptButton.addEventListener('click', () => { open(String(tc.id || cardId || index)); openAutomationRewrite(); });
-          caseActions.appendChild(scriptButton);
+        // One card-level Edit entry point. AI-generated canonical cases open the
+        // same workbench for AI regeneration, AI rewrite and manual script edits.
+        // Human-only legacy cases keep their existing human-readable editor.
+        card.querySelectorAll('[data-script-edit],[data-repair-workbench]').forEach((button) => button.remove());
+        if (tc.canonicalIr) {
+          card.querySelectorAll('button[onclick*="repairCaseWithAI"],button[title="Repair test case with AI"]').forEach((button) => button.remove());
+          const edit = card.querySelector('.case-actions button[onclick*="openEditor("], .case-actions button[data-edit-case]');
+          if (edit) {
+            edit.removeAttribute('onclick');
+            edit.dataset.editCase = String(tc.id || cardId);
+            edit.title = 'Edit test case · AI or automation script';
+            edit.setAttribute('aria-label', 'Edit test case · AI or automation script');
+          }
         }
-        if (status === 'READY' || status === 'NEEDS_PREFLIGHT') return;
-        let actions = card.querySelector('.readiness-actions');
-        if (!actions) {
-          actions = document.createElement('div');
-          actions.className = 'readiness-actions';
-          card.querySelector('.readiness')?.appendChild(actions);
-        }
-        if (!actions || actions.querySelector('[data-repair-workbench]')) return;
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'btn ghost testnexus-repair-workbench-btn';
-        button.dataset.repairWorkbench = '1';
-        button.textContent = 'Repair';
-        button.title = 'Regenerate or rewrite this blocked test case';
-        button.addEventListener('click', () => open(String(tc.id || cardId || index)));
-        actions.prepend(button);
       });
     } finally {
       decorating = false;
@@ -472,7 +437,18 @@
   }
 
   const casesRoot = document.getElementById('cases');
-  if (casesRoot) new MutationObserver(() => setTimeout(decorateBlockedCases, 0)).observe(casesRoot, { childList: true, subtree: true });
+  // Delegate on the stable container: redraws replace every case card, but
+  // never the handler. Do not route through the legacy editor's text-only save.
+  if (casesRoot) {
+    casesRoot.addEventListener('click', (event) => {
+      const edit = event.target.closest('button[data-edit-case]');
+      if (!edit || !casesRoot.contains(edit)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      open(edit.dataset.editCase);
+    }, true);
+    new MutationObserver(() => setTimeout(decorateBlockedCases, 0)).observe(casesRoot, { childList: true, subtree: true });
+  }
 
   // readiness.js still owns the historical inline handler. Route it into this
   // workbench after all page scripts finish loading so there is one repair path.
