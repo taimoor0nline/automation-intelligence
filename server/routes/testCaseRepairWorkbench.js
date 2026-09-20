@@ -9,7 +9,7 @@ const { parseCypressScript } = require('../services/cypressManualScript');
 const { validateCanonicalIr } = require('../services/canonicalTestIrV3');
 const { generateCypressPreviewFromPlan } = require('../services/deterministicAutomationGeneratorV6');
 const { attachStrictContract } = require('../services/strictCypressIntegration');
-const { stableHash, executionPlanShape, displayExpectationShape } = require('../services/startupIntegrityGuards');
+const { contractReviewHash } = require('../services/reviewContract');
 const persistence = require('../services/persistenceService');
 
 function clean(value, max = 2000) {
@@ -256,16 +256,6 @@ function manualScriptCandidate(session, original, script) {
     'Human-authored supported automation commands and assertions.'
   );
   return strict;
-}
-
-function contractReviewHash(testCase) {
-  // The human confirms both authored intent and the exact compiled assertions.
-  return stableHash({
-    ir: testCase.canonicalIr,
-    compiled: executionPlanShape(testCase.automationReadiness?.automationPlan || {}),
-    display: displayExpectationShape(testCase),
-    executableHash: testCase.automationReadiness?.cypressContract?.scriptHash || null,
-  });
 }
 
 function markPendingReview(original, candidate) {
