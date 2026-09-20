@@ -22,6 +22,10 @@
     .repair-script-editor textarea{display:block;width:100%;min-height:265px;padding:12px;border:1px solid #cbd5e1;border-radius:9px;font:12px/1.6 Consolas,Monaco,monospace;white-space:pre;resize:vertical;tab-size:2}
     .repair-script-editor p{font-size:11px;line-height:1.55;color:#475569}
     .repair-script-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:9px;flex-wrap:wrap}
+    .repair-confirm{display:none;margin-top:12px;padding:12px;border:1px solid #a7f3d0;border-radius:10px;background:#ecfdf5}
+    .repair-confirm.show{display:block}
+    .repair-confirm p{font-size:11px;line-height:1.5;color:#166534;margin:0 0 9px}
+    .repair-confirm .btn{font-size:11px}
     @media(max-width:760px){.repair-paths{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
@@ -57,6 +61,10 @@
             <button type="button" class="btn secondary" data-repair-action="save-script">Validate &amp; Save Script</button>
           </div>
         </div>
+        <div class="repair-confirm" id="repairReviewConfirm">
+          <p><b>Human confirmation required.</b> Review the updated steps, expected results and compiled automation before approving this new contract. Validation does not execute or approve a test.</p>
+          <button type="button" class="btn primary" data-repair-action="confirm">Confirm Reviewed Contract</button>
+        </div>
         <div class="repair-workbench-status" id="repairWorkbenchStatus"></div>
         <div class="repair-contract-note"><b>Contract rule:</b> every repair invalidates the previous approval seal. The repaired case must pass deterministic readiness and exact automation-artifact validation, then be reviewed again before Run/Re-run can seal it for execution.</div>
       </div>
@@ -67,6 +75,11 @@
   let activeRepairController = null;
   let activeRepairTimeout = null;
   let scriptSaving = false;
+  let confirming = false;
+  function syncReviewConfirm() {
+    const review = currentCase()?.review || {};
+    document.getElementById('repairReviewConfirm').classList.toggle('show', review.status === 'PENDING_REVIEW');
+  }
 
   function cases() {
     try { if (typeof testCases !== 'undefined' && Array.isArray(testCases)) return testCases; } catch {}
@@ -140,6 +153,7 @@
     cancelActiveRepair();
     setStatus('', '');
     modal.classList.add('show');
+    syncReviewConfirm();
   }
 
   function credentials() {
@@ -177,7 +191,7 @@
       const response = await fetch('/api/test-cases/repair-workbench', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sid, testCase: tc, action, instruction, credentials: credentials() }),
+        body: JSON.stringify({ sessionId: sid, testCase: { id: tc.id }, action, instruction, credentials: credentials(), expectedRevision: Number(tc.review?.revision) || 0 }),
         signal: controller.signal,
       });
       const data = await response.json().catch(() => ({}));
@@ -195,16 +209,12 @@
       list[index] = data.testCase;
       currentCaseId = String(data.testCase.id || currentCaseId).toUpperCase();
       if (typeof renderCases === 'function') renderCases();
+      syncReviewConfirm();
 
       if (data.automationReady) {
         setStatus(data.message || 'Repair validated. Review the new case before execution.', 'ok');
-        setTimeout(() => {
-          if (!modal.classList.contains('show')) return;
-          modal.classList.remove('show');
-          setStatus('', '');
-          const card = Array.from(document.querySelectorAll('#cases .case')).find((item) => String(item.querySelector('.case-check')?.value || '').toUpperCase() === currentCaseId);
-          card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 900);
+        // Keep the dialog open so the human can explicitly confirm the new
+        // contract. Closing it used to hide the required review step.
       } else {
         setStatus(data.message || 'The rewritten case is still blocked. The repair controls remain active so you can retry, rewrite manually, or edit the automation script.', 'bad');
       }
@@ -239,6 +249,7 @@
   }
 
   function editableScript(tc) {
+    if (tc?.manualCypressScript) return tc.manualCypressScript;
     const ir = tc?.canonicalIr || {};
     const plan = tc?._canonicalAutomationPlan || tc?.automationReadiness?.automationPlan || {};
     const q = value => JSON.stringify(String(value ?? ''));
@@ -251,14 +262,14 @@
       if (op === 'RELOAD') return 'cy.reload();';
       if (op === 'GO_BACK') return 'cy.go("back");';
       if (op === 'GO_FORWARD') return 'cy.go("forward");';
-      if (op === 'TYPE_RUNTIME_CREDENTIAL') return '// Runtime credential action requires a runtime-safe authoring form; do not paste credentials into the script.';
-      if (!target) return '// ' + op + ' needs a discovered selector; write a cy.get(...) command manually.';
+      if (op === 'TYPE_RUNTIME_CREDENTIAL') return 'cy.unsupported("Runtime credential action needs an approved credential mapping; do not paste credentials.");';
+      if (!target) return 'cy.unsupported(' + q(op + ' requires a discovered selector; rewrite this statement manually') + ');';
       const method = {
         TYPE:'type',CLEAR:'clear',CLICK:'click',DBLCLICK:'dblclick',
         RIGHTCLICK:'rightclick',SELECT:'select',CHECK:'check',UNCHECK:'uncheck',
         SUBMIT:'submit',FOCUS:'focus',BLUR:'blur',SCROLL_INTO_VIEW:'scrollIntoView',
       }[op];
-      if (!method) return '// Unsupported projection for ' + op + '. Rewrite using the supported Cypress subset.';
+      if (!method) return 'cy.unsupported(' + q('Rewrite unsupported operation: ' + op) + ');';
       return target + '.' + method + '(' + (['type','select'].includes(method) ? q(data.value) : '') + ');';
     };
     const assertion = (data, compiled) => {
@@ -288,7 +299,7 @@
         ASSERT_TEXT_CONTAINS:'contain.text',ASSERT_TEXT_NOT_CONTAINS:'not.contain.text',
       }[op];
       if (named) return target + '.should(' + q(named) + ', ' + q(op.includes('TEXT') ? data.text : data.value) + ');';
-      return '// Unsupported projection for ' + op + '. Rewrite using the supported Cypress subset.';
+      return 'cy.unsupported(' + q('Rewrite unsupported assertion: ' + op) + ');';
     };
     const actions=(ir.actions || []).map((item,i)=>action(item,plan.actions?.[i]));
     const assertions=(ir.assertions || []).map((item,i)=>assertion(item,plan.assertions?.[i]));
@@ -322,7 +333,7 @@
       const response = await fetch('/api/test-cases/repair-workbench', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sid, testCase: { id: tc.id }, action: 'manual-script', script, credentials: credentials() }),
+        body: JSON.stringify({ sessionId: sid, testCase: { id: tc.id }, action: 'manual-script', script, credentials: credentials(), expectedRevision: Number(tc.review?.revision) || 0 }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -335,6 +346,7 @@
       if (index < 0) throw new Error('The saved case is not in the current review list. Refresh this session.');
       list[index] = data.testCase;
       if (typeof renderCases === 'function') renderCases();
+      syncReviewConfirm();
       document.getElementById('repairScriptEditor').classList.remove('show');
       setStatus(data.message || 'Validated script saved. Review the new test contract before execution.', 'ok');
     } catch (err) {
@@ -343,6 +355,48 @@
       scriptSaving = false;
       button.disabled = false;
       button.textContent = 'Validate & Save Script';
+    }
+  }
+
+  async function confirmReviewedContract() {
+    const tc = currentCase();
+    if (!tc || confirming || scriptSaving || activeRepairController) return;
+    if (tc.review?.status !== 'PENDING_REVIEW') return setStatus('Save and validate the script before confirming it.', 'bad');
+    const button = modal.querySelector('[data-repair-action="confirm"]');
+    confirming = true;
+    button.disabled = true;
+    button.textContent = 'Confirming…';
+    setStatus('Verifying that the reviewed draft and compiled contract have not changed…', 'working');
+    try {
+      const sid = typeof sessionId !== 'undefined' ? sessionId : window.sessionId;
+      if (!sid) throw new Error('Session expired. Reopen the saved test session before confirming.');
+      const response = await fetch('/api/test-cases/repair-workbench', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: sid,
+          testCase: { id: tc.id },
+          action: 'confirm',
+          expectedRevision: tc.review.revision,
+          reviewHash: tc.review.contractHash,
+          credentials: credentials(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.testCase) throw new Error(data.reply || 'Review confirmation failed.');
+      const list = cases();
+      const index = list.findIndex((item) => String(item?.id || '').toUpperCase() === String(tc.id || '').toUpperCase());
+      if (index < 0) throw new Error('The saved case is no longer visible in this session.');
+      list[index] = data.testCase;
+      if (typeof renderCases === 'function') renderCases();
+      syncReviewConfirm();
+      setStatus(data.message || 'Contract confirmed. You may proceed to human approval and execution.', 'ok');
+    } catch (err) {
+      setStatus(err.message || 'Review could not be confirmed.', 'bad');
+    } finally {
+      confirming = false;
+      button.disabled = false;
+      button.textContent = 'Confirm Reviewed Contract';
     }
   }
 
@@ -356,6 +410,7 @@
     if (action === 'automation-script') return openAutomationRewrite();
     if (action === 'cancel-script') { document.getElementById('repairScriptEditor').classList.remove('show'); return setStatus('', ''); }
     if (action === 'save-script') return void saveManualScript();
+    if (action === 'confirm') return void confirmReviewedContract();
   });
 
   window.openTestRepairWorkbench = open;
