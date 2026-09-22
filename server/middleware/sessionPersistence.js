@@ -1,4 +1,5 @@
 const persistence = require('../services/persistenceService');
+const db = require('../db');
 const canonicalArtifacts = require('../services/canonicalArtifactStore');
 const behaviorRuleStore = require('../services/behaviorRuleStore');
 const { getSession, hydrateSession, isHydrated, markHydrated } = require('../data/sessionStore');
@@ -16,7 +17,14 @@ async function saveNormalizedRun(sessionId, session, userId) {
 
 async function sessionPersistence(req, res, next) {
   const sessionId = resolveSessionId(req);
-  if (!sessionId || !persistence.enabled()) return next();
+  if (!sessionId) return next();
+  if (db.isEnabled() && !persistence.enabled()) {
+    return res.status(503).json({
+      reply: 'Persistent mode is enabled, but DATABASE_URL is not configured.',
+      code: 'PERSISTENT_MODE_NOT_CONFIGURED',
+    });
+  }
+  if (!persistence.enabled()) return next();
 
   try {
     if (!isHydrated(sessionId)) {
@@ -42,6 +50,12 @@ async function sessionPersistence(req, res, next) {
     }
   } catch (err) {
     console.error('[session-persistence] rehydrate failed', err);
+    if (db.isEnabled()) {
+      return res.status(503).json({
+        reply: 'Persistent session state could not be loaded from PostgreSQL. No in-memory fallback was used.',
+        code: 'PERSISTENT_SESSION_REHYDRATION_FAILED',
+      });
+    }
   }
 
   const requestUserId = req.user?.sub || null;
