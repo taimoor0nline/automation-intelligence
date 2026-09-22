@@ -15,6 +15,7 @@ const canonicalArtifacts = require('../services/canonicalArtifactStore');
 const persistence = require('../services/persistenceService');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
 const { validateStoryDiscoveryCompatibility, mismatchMessage } = require('../services/storyDiscoveryCompatibility');
+const { ensurePendingReview } = require('../services/reviewContract');
 
 const jobs = new Map();
 const MAX_CASE_LIMIT = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 6) || 6, 250));
@@ -569,9 +570,10 @@ async function runGeneration(job, input) {
     await readinessPool.drain();
 
     const cases = slots.filter(Boolean).sort((a, b) => a.id.localeCompare(b.id));
-    session.testCases = cases;
-    session.automationReadiness = readinessSummary(cases);
-    session.readinessValidated = cases.every((tc) => Boolean(tc?.automationReadiness));
+    const reviewedCases = cases.map((testCase) => ensurePendingReview(testCase));
+    session.testCases = reviewedCases;
+    session.automationReadiness = readinessSummary(reviewedCases);
+    session.readinessValidated = reviewedCases.every((tc) => Boolean(tc?.automationReadiness));
     session.state = 'AWAITING_APPROVAL';
     await persistCanonicalStage(job, session, 'all');
 
