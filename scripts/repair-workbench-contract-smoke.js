@@ -278,7 +278,7 @@ assert.throws(
   /assertion is required/,
 );
 
-const { contractReviewHash, isConfirmedCurrentReview } = require('../server/services/reviewContract');
+const { contractReviewHash, ensurePendingReview, isConfirmedCurrentReview } = require('../server/services/reviewContract');
 const runtimeCredentialScript = parseCypressScript([
   'cy.visit("/login");',
   'cy.get("#password").type(Cypress.env("password"));',
@@ -299,6 +299,12 @@ const reviewedCase = {
     cypressContract: { scriptHash: 'a'.repeat(64) },
   },
 };
+const initialReview = ensurePendingReview(reviewedCase);
+assert.equal(initialReview.review.status, 'PENDING_REVIEW', 'AI-generated canonical tests must enter explicit human review.');
+assert.equal(initialReview.review.revision, 1);
+assert.equal(initialReview.review.contractHash, contractReviewHash(reviewedCase));
+assert.equal(isConfirmedCurrentReview(reviewedCase), false, 'An unreviewed canonical test must never be executable.');
+
 const reviewedHash = contractReviewHash(reviewedCase);
 assert.equal(isConfirmedCurrentReview({ ...reviewedCase, review: {
   status: 'PENDING_REVIEW', revision: 1, contractHash: reviewedHash,
