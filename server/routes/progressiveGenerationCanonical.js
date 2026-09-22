@@ -146,7 +146,14 @@ function trimJobs() {
 }
 
 async function persistSessionBase(job, session) {
-  if (!persistence.enabled()) return false;
+  if (!persistence.enabled()) {
+    if (db.isEnabled()) {
+      const error = new Error('Persistent mode is enabled, but DATABASE_URL is not configured.');
+      error.code = 'PERSISTENT_MODE_NOT_CONFIGURED';
+      throw error;
+    }
+    return false;
+  }
   try {
     await persistence.persistSession(job.sessionId, session, {
       projectId: session.projectId,
@@ -155,14 +162,21 @@ async function persistSessionBase(job, session) {
     });
     return true;
   } catch (err) {
-    if (db.isRequired()) throw err;
+    if (db.isEnabled()) throw err;
     emit(job, 'PERSISTENCE_WARNING', { stage: 'session', message: err.message });
     return false;
   }
 }
 
 async function persistCanonicalStage(job, session, stage, cases = []) {
-  if (!canonicalArtifacts.enabled()) return;
+  if (!canonicalArtifacts.enabled()) {
+    if (db.isEnabled()) {
+      const error = new Error('Persistent mode is enabled, but canonical PostgreSQL persistence is not configured.');
+      error.code = 'PERSISTENT_MODE_NOT_CONFIGURED';
+      throw error;
+    }
+    return;
+  }
   try {
     await persistSessionBase(job, session);
     if (stage === 'registry') await canonicalArtifacts.persistRegistry(job.sessionId, session.canonicalElementRegistry);
@@ -176,7 +190,7 @@ async function persistCanonicalStage(job, session, stage, cases = []) {
       await persistence.persistTestCases(job.sessionId, session.testCases || []);
     }
   } catch (err) {
-    if (db.isRequired()) throw err;
+    if (db.isEnabled()) throw err;
     emit(job, 'PERSISTENCE_WARNING', { stage: `canonical-${stage}`, message: err.message });
   }
 }
