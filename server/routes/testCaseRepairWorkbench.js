@@ -11,6 +11,7 @@ const { generateCypressPreviewFromPlan } = require('../services/deterministicAut
 const { attachStrictContract } = require('../services/strictCypressIntegration');
 const { contractReviewHash } = require('../services/reviewContract');
 const persistence = require('../services/persistenceService');
+const db = require('../db');
 
 function clean(value, max = 2000) {
   return String(value ?? '').trim().slice(0, max);
@@ -353,15 +354,22 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
     upsert(session, candidate);
     let persisted = false;
     try {
+      if (db.isEnabled() && !persistence.enabled()) {
+        const configurationError = new Error('Persistent mode is enabled, but DATABASE_URL is not configured. The previous case remains unchanged.');
+        configurationError.code = 'PERSISTENT_MODE_NOT_CONFIGURED';
+        throw configurationError;
+      }
       persisted = await persistence.persistReviewedCase(sessionId, session, candidate);
     } catch (error) {
-      if (require('../db').isRequired()) {
+      if (db.isEnabled()) {
         Object.assign(session, prior);
-        const persistenceError = new Error('The review was not saved in PostgreSQL; the previous case remains unchanged. ' + error.message);
-        persistenceError.code = 'REVIEW_PERSISTENCE_FAILED';
+        const persistenceError = new Error('The review was not durably saved in PostgreSQL; the previous case remains unchanged. ' + error.message);
+        persistenceError.code = error.code === 'PERSISTENT_MODE_NOT_CONFIGURED'
+          ? error.code
+          : 'REVIEW_PERSISTENCE_FAILED';
         throw persistenceError;
       }
-      console.warn('[repair-workbench] optional PostgreSQL edit persistence failed:', error.message);
+      throw error;
     }
     return res.json({
       ok: true,
