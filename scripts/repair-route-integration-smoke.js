@@ -82,6 +82,15 @@ async function post(path, body) {
 async function testMode(mode, number) {
   const id = 'repair-flow-' + mode + '-' + number;
   const session = seed(id);
+
+  // AI-generated canonical cases are never executable merely because they are
+  // Automation Ready. Explicit human review/confirmation is a separate gate.
+  const unreviewed = await post('/api/test-runs/start', {
+    sessionId: id, approvedIds: ['TC001'], reviewedTestCases: [session.testCases[0]],
+  });
+  assert.equal(unreviewed.status, 422, JSON.stringify(unreviewed.body));
+  assert.equal(unreviewed.body.code, 'HUMAN_REVIEW_CONFIRMATION_REQUIRED');
+
   const save = await post('/api/test-cases/repair-workbench', {
     sessionId: id, action: 'manual-script', testCase: { id: 'TC001' }, script, expectedRevision: 0,
   });
@@ -123,11 +132,13 @@ async function testMode(mode, number) {
 
 (async () => {
   await new Promise(resolve => server.listening ? resolve() : server.on('listening', resolve));
-  const previous = { isConfigured: db.isConfigured, withTransaction: db.withTransaction };
+  const previous = { isEnabled: db.isEnabled, isConfigured: db.isConfigured, withTransaction: db.withTransaction };
   try {
+    db.isEnabled = () => false;
     db.isConfigured = () => false;
     await testMode('session-only', 1);
     const writes = [];
+    db.isEnabled = () => true;
     db.isConfigured = () => true;
     db.withTransaction = async fn => fn({ query: async (sql, params) => {
       writes.push({ sql, params }); return { rows: [], rowCount: 1 };
@@ -135,7 +146,22 @@ async function testMode(mode, number) {
     await testMode('database', 2);
     assert(writes.some(entry => entry.sql.includes('insert into canonical_test_ir')));
     assert(writes.some(entry => entry.sql.includes('insert into test_sessions')));
+    // If persistent mode is explicitly selected but cannot be configured, Save
+    // must fail and the in-memory contract must remain unchanged.
+    db.isConfigured = () => false;
+    const missingDbSession = seed('repair-flow-persistent-missing-db');
+    const missingDb = await post('/api/test-cases/repair-workbench', {
+      sessionId: 'repair-flow-persistent-missing-db',
+      action: 'manual-script',
+      testCase: { id: 'TC001' },
+      script,
+      expectedRevision: 0,
+    });
+    assert.equal(missingDb.status, 422, JSON.stringify(missingDb.body));
+    assert.equal(missingDb.body.code, 'PERSISTENT_MODE_NOT_CONFIGURED');
+    assert.equal(missingDbSession.testCases[0].manualCypressScript, undefined);
   } finally {
+    db.isEnabled = previous.isEnabled;
     db.isConfigured = previous.isConfigured;
     db.withTransaction = previous.withTransaction;
     server.close();
