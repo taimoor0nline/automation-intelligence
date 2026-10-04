@@ -596,7 +596,10 @@ async function runGeneration(job, input) {
       databaseMode: canonicalArtifacts.enabled() ? 'POSTGRESQL_AND_SESSION' : 'SESSION_ONLY',
       registryHash: registry.registryHash,
       feature,
-      cases,
+      // Return the authoritative review-bearing cases. The browser must receive
+      // the same revision/hash that is stored in session/DB so a user can either
+      // confirm the AI draft as-is or edit it before confirmation.
+      cases: reviewedCases,
       automationReadiness: session.automationReadiness,
       pageCount: pages.length,
       totalGenerated: cases.length,
