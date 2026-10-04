@@ -215,6 +215,20 @@ assert(repairUi.includes("action: 'manual-script'"), 'Manual script editor must 
 assert(!repairUi.includes("steps.value = seed.steps"), 'Manual automation script must never be pasted into human-readable Steps.');
 assert(decoratedUi.includes("btn.matches('[data-repair-workbench]')"), 'UI decorator must not mutate or remove the canonical Repair button.');
 assert(serverIndex.includes("test-case-repair-workbench.js"), 'The repair UI must be injected into the served application.');
+const progressiveGeneration = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'routes', 'progressiveGenerationCanonical.js'), 'utf8');
+assert(
+  progressiveGeneration.includes('const reviewedCases = cases.map((testCase) => ensurePendingReview(testCase));'),
+  'AI-generated canonical cases must be marked PENDING_REVIEW after readiness validation.'
+);
+assert(
+  progressiveGeneration.includes('cases: reviewedCases'),
+  'GENERATION_COMPLETED must return the authoritative review-bearing cases so the browser receives the current revision/hash.'
+);
+assert(
+  progressiveGeneration.indexOf('await readinessPool.drain();') < progressiveGeneration.indexOf('const reviewedCases = cases.map'),
+  'Human-review hashes must be created only after deterministic readiness has finished.'
+);
+
 const repairRoute = fs.readFileSync(path.resolve(__dirname, '..', 'server', 'routes', 'testCaseRepairWorkbench.js'), 'utf8');
 assert(repairRoute.includes('parseCypressScript(script, registry)'), 'The active manual script endpoint must use Cypress syntax rather than the legacy TestNexus DSL.');
 assert(repairUi.includes('cy.visit(') && repairUi.includes('cy.get('), 'The manual editor must show Cypress syntax.');
