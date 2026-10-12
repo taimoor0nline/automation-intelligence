@@ -45,7 +45,7 @@ Password: admin123
 The feedback API intentionally keeps two application defects so the automation has genuine failures to detect:
 
 - age `17` is incorrectly accepted although the UI/specification says 18–100;
-- a website such as `abc` is incorrectly accepted although the field requires a valid URL.
+- a website such as `abc` is incorrectly accepted although the field requires a valid URL
 
 For the current five-case demonstration, once the real login and feedback controls are discovered, the demo calibrates the reviewed set to a predictable shape:
 
