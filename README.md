@@ -140,7 +140,7 @@ AI TestPilot:    http://localhost:5000
 ## Suggested story
 
 ```text
-As a customer, I should be able to log in with valid credentials and submit feedback.
+As a customer, I should be able to log in with valid credentials and submit feedback
 Username and password are required. The feedback form must validate required fields,
 email format, age boundaries, website URL format and show a confirmation after
 successful submission.
