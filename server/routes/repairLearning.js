@@ -125,9 +125,10 @@ router.post('/api/test-cases/repair-learning/validate', async (req, res) => {
     };
     let restoredCase = null;
     const attempt = learning.recordEvaluation(session, key, scope, outcome);
-    // A regression failure is harmful until proven otherwise. Never leave a
-    // rejected candidate active: restore the known pre-edit contract automatically.
-    if (!outcome.ok) {
+    const autoRolledBack = learning.shouldAutoRollback(scope, run, outcome);
+    // Only a complete browser-observed failure establishes a harmful correction.
+    // Infrastructure failures keep the draft blocked and allow safe retries.
+    if (autoRolledBack) {
       restoredCase = learning.rollback(session, key, {
         automatic: true, reason: outcome.reason || run?.error || 'Browser regression did not pass',
       });
@@ -140,16 +141,19 @@ router.post('/api/test-cases/repair-learning/validate', async (req, res) => {
     }
     return res.status(outcome.ok ? 200 : 422).json({
       ok: outcome.ok,
-      code: outcome.ok ? 'REPAIR_REGRESSION_VERIFIED' : 'REPAIR_AUTO_ROLLED_BACK',
+      code: outcome.ok ? 'REPAIR_REGRESSION_VERIFIED'
+        : autoRolledBack ? 'REPAIR_AUTO_ROLLED_BACK' : 'REPAIR_REGRESSION_REJECTED',
       status: attempt.status, reason: outcome.reason || null, results: outcome.results,
       testedIds: scope.expectedIds, impactedIds: attempt.impactedIds,
       changedDependencies: scope.impact?.changedDependencies || null,
-      verifiedAt: attempt.verifiedAt, autoRolledBack: !outcome.ok,
+      verifiedAt: attempt.verifiedAt, autoRolledBack,
       testCase: restoredCase,
-      requiresHumanReview: !outcome.ok,
+      requiresHumanReview: autoRolledBack,
       note: outcome.ok
         ? 'Only browser-verified repairs enter reusable learning memory.'
-        : 'Cypress regression failed. The previous version was automatically restored as an unapproved draft.',
+        : autoRolledBack
+          ? 'Cypress observed a real regression. The previous version was automatically restored as an unapproved draft.'
+          : 'Regression evidence is incomplete or infrastructure failed. The candidate remains blocked; retry validation.',
     });
   } catch (error) { return problem(res, error); }
   finally { active.delete(sessionId); }
