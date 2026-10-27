@@ -81,6 +81,11 @@ function resetSession(id) {
   // Shared rules are application knowledge and must survive test-generation iterations.
   // They are copied into the new run session even when PostgreSQL is disabled.
   if (previous) {
+    // Generating a new suite must not detach it from its authorized project
+    // or accidentally make verified history available under another project.
+    session.projectId = previous.projectId || null;
+    session.repositoryId = previous.repositoryId || null;
+    session.createdBy = previous.createdBy || null;
     session.behaviorRules = Array.isArray(previous.behaviorRules) ? previous.behaviorRules.map((rule) => ({ ...rule })) : [];
     session.behaviorRuleConflicts = Array.isArray(previous.behaviorRuleConflicts) ? previous.behaviorRuleConflicts.map((item) => ({ ...item })) : [];
     session.behaviorRuleRegistryVersion = previous.behaviorRuleRegistryVersion || 1;
