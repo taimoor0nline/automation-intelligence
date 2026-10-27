@@ -9,6 +9,7 @@ const executionGenerator = require('../services/deterministicAutomationGenerator
 const { validateGroundedScript } = require('../services/scriptValidator');
 const { isConfirmedCurrentReview } = require('../services/reviewContract');
 const { gateCheck } = require('../services/repairLearning');
+const { isRegressionBusy } = require('../services/isolatedRegressionRunner');
 
 function configuredActorRefs(session) {
   return Object.entries(session.actorCredentials || {})
@@ -131,6 +132,7 @@ function isExecutionApprovalRequest(req) {
 
 router.use((req, res, next) => {
   if (!isExecutionApprovalRequest(req)) return next();
+  if (isRegressionBusy()) return res.status(409).json({ reply: 'Repair regression validation is active. Complete it before starting a normal browser run.', code: 'REGRESSION_ENGINE_BUSY' });
 
   try {
     const body = req.body || {};
