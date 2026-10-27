@@ -16,6 +16,7 @@ const persistence = require('../services/persistenceService');
 const { assessTestCases, readinessSummary } = require('../services/testCaseFeasibility');
 const { validateStoryDiscoveryCompatibility, mismatchMessage } = require('../services/storyDiscoveryCompatibility');
 const { ensurePendingReview } = require('../services/reviewContract');
+const repairMemory = require('../services/repairLearningMemory');
 
 const jobs = new Map();
 const MAX_CASE_LIMIT = Math.max(1, Math.min(Number(process.env.AI_TEST_CASE_COUNT || 6) || 6, 250));
@@ -294,6 +295,15 @@ async function runGeneration(job, input) {
       databaseMode: canonicalArtifacts.enabled() ? 'POSTGRESQL_AND_SESSION' : 'SESSION_ONLY',
     });
     await persistCanonicalStage(job, session, 'registry');
+    // Fetch only previously verified patterns within the current project/origin.
+    // A database error degrades to no hints; it must never weaken canonical checks.
+    let verifiedRepairPatterns = [];
+    try {
+      verifiedRepairPatterns = await repairMemory.retrieveVerifiedMemory(session, { sessionId: job.sessionId });
+    } catch (error) {
+      console.warn('[test-generation] Verified learning memory unavailable:', error.message);
+    }
+    emit(job, 'VERIFIED_REPAIR_MEMORY_LOADED', { count: verifiedRepairPatterns.length, advisoryOnly: true });
 
     const compatibility = validateStoryDiscoveryCompatibility(input.story, compact);
     session.storyDiscoveryCompatibility = compatibility;
@@ -437,7 +447,16 @@ async function runGeneration(job, input) {
           const generated = await withBatchTimeout(generateCanonicalBatch({
             story: input.story,
             registry,
-            plannedUnits: batch.units,
+            plannedUnits: batch.units.map((unit) => {
+              const hints = repairMemory.findMatchingHints({
+                records: verifiedRepairPatterns, session,
+                testCase: { title: unit.rationale || unit.objective, type: unit.scenarioType, testCategory: unit.category },
+                objective: unit.rationale || unit.objective,
+              });
+              return hints.length
+                ? { ...unit, objective: String(unit.objective || unit.rationale || '') + repairMemory.describeHints(hints) }
+                : unit;
+            }),
             environment: 'Test',
             excludeTitles: existingTitles(),
             modelTier: input.aiModelTier,
