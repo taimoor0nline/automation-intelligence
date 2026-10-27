@@ -55,10 +55,14 @@ function dependencies(tc, registry) {
 function dependencyGraph(session, original = null) {
   const registry = session.canonicalElementRegistry;
   const cases = session.testCases || [];
-  const nodes = cases.map((testCase) => ({
-    caseId: id(testCase.id),
-    dependencies: dependencies(testCase, registry),
-  }));
+  const nodes = cases.map((testCase) => {
+    // The original dependency is critical: a renamed selector must still connect
+    // with tests that depend on the old selector. Do not discard it after editing.
+    const current = dependencies(testCase, registry);
+    const before = original && id(original.id) === id(testCase.id)
+      ? dependencies(original, registry) : [];
+    return { caseId: id(testCase.id), dependencies: [...new Set([...current, ...before])].sort() };
+  });
   if (original && !nodes.some((node) => node.caseId === id(original.id))) {
     nodes.push({ caseId: id(original.id), dependencies: dependencies(original, registry) });
   }
@@ -72,9 +76,27 @@ function dependencyGraph(session, original = null) {
 function impactedCases(session, caseId, original = null) {
   const graph = dependencyGraph(session, original);
   const key = id(caseId);
-  const directlyConnected = graph.edges.filter((edge) => edge.from === key || edge.to === key)
-    .map((edge) => edge.from === key ? edge.to : edge.from);
-  return { graph, impactedIds: [...new Set([key, ...directlyConnected])].sort() };
+  // Connected component, not only direct neighbors: shared workflows span
+  // multiple pages/forms and can regress through chained dependencies.
+  const reached = new Set([key]), pending = [key], explanations = {};
+  while (pending.length) {
+    const current = pending.shift();
+    for (const edge of graph.edges) {
+      const next = edge.from === current ? edge.to : edge.to === current ? edge.from : null;
+      if (!next) continue;
+      if (!explanations[next]) explanations[next] = [];
+      explanations[next] = [...new Set([...explanations[next], ...edge.shared])].sort();
+      if (!reached.has(next)) { reached.add(next); pending.push(next); }
+    }
+  }
+  const before = original ? dependencies(original, session.canonicalElementRegistry) : [];
+  const after = dependencies((session.testCases || []).find((tc) => id(tc.id) === key), session.canonicalElementRegistry);
+  return {
+    graph,
+    impactedIds: [...reached].sort(),
+    changedDependencies: { removed: before.filter((d) => !after.includes(d)), added: after.filter((d) => !before.includes(d)) },
+    reasonsByCase: explanations,
+  };
 }
 function getAttempt(session, caseId) {
   return session.repairLearning?.[id(caseId)] || null;
@@ -83,18 +105,28 @@ function createAttempt(session, original, candidate) {
   if (!session.repairLearning) session.repairLearning = {};
   const key = id(original.id);
   const prior = getAttempt(session, key);
-  const { impactedIds } = impactedCases(session, key, original);
+  const baselineOriginal = prior && prior.status !== 'VALIDATED' && prior.originalSnapshot
+    ? prior.originalSnapshot : original;
+  const { impactedIds, changedDependencies, reasonsByCase } = impactedCases(session, key, baselineOriginal);
   session.repairLearning[key] = {
     attemptId: crypto.randomUUID(),
     status: 'PENDING_VALIDATION',
     caseId: key,
     revision: Number(candidate.review?.revision) || 0,
-    originalHash: contractIdentity(original),
+    originalHash: contractIdentity(baselineOriginal),
     candidateHash: contractIdentity(candidate),
-    originalSnapshot: clone(original),
+    originalSnapshot: clone(baselineOriginal),
+    // Intent is not taken from untrusted runtime errors; it is already the reviewed
+    // test objective. Equivalent scenarios may use different TC numbers.
+    intent: String(baselineOriginal.canonicalIr?.objective || baselineOriginal.coverageRationale || baselineOriginal.title || '').slice(0, 600),
+    testCategory: String(baselineOriginal.testCategory || baselineOriginal.category || ''),
+    scenarioType: String(baselineOriginal.type || ''),
+    projectId: session.projectId || null,
     failureSignature: failureSignature(session, key),
     targetOrigin: originFor(session),
     impactedIds,
+    changedDependencies,
+    reasonsByCase,
     createdAt: timestamp(),
     previousAttemptId: prior?.attemptId || null,
     verifiedAt: null,
@@ -124,7 +156,18 @@ function suiteToValidate(session, caseId) {
   if (baseline.some((test) => !id(test.testCaseId)))
     throw Object.assign(new Error('A previously executed test has no trustworthy case identifier; regression cannot silently skip it.'), { code: 'REGRESSION_BASELINE_UNIDENTIFIED' });
   const caseMap = new Map((session.testCases || []).map((tc) => [id(tc.id), tc]));
-  const selected = new Set([id(caseId)]);
+  const impacted = impactedCases(session, caseId, attempt.originalSnapshot);
+  const selected = new Set(impacted.impactedIds);
+  const baselineById = new Map(baseline.map((test) => [id(test.testCaseId), test]));
+  // Impacted tests that never passed a baseline cannot prove "no regression".
+  // Require them to be executed before accepting a change; never skip silently.
+  for (const impactedId of impacted.impactedIds) {
+    if (impactedId === id(caseId)) continue;
+    if (!baselineById.has(impactedId))
+      throw Object.assign(new Error('Run a clean baseline for impacted test ' + impactedId + ' before validating this repair.'), { code: 'REGRESSION_IMPACT_BASELINE_MISSING' });
+    if (baselineById.get(impactedId)?.pass !== true)
+      throw Object.assign(new Error('Impacted test ' + impactedId + ' was not passing in the previous run.'), { code: 'REGRESSION_IMPACT_BASELINE_FAILED' });
+  }
   for (const result of baseline) {
     const key = id(result.testCaseId);
     if (!key) continue;
@@ -147,7 +190,7 @@ function suiteToValidate(session, caseId) {
     throw Object.assign(new Error('Baseline contains duplicate case results.'), { code: 'REGRESSION_DUPLICATE_BASELINE' });
   const identities = Object.fromEntries(suites.map((tc) => [id(tc.id), contractIdentity(tc)]));
   const baselineRunNumber = session.lastResults?.runNumber || null;
-  return { candidate, attempt, cases: suites, baselineRunNumber, identities, expectedIds: [...selected].sort() };
+  return { candidate, attempt, cases: suites, baselineRunNumber, identities, expectedIds: [...selected].sort(), impact: impacted };
 }
 function verifyExecution(expectedIds, run) {
   if (!run?.ok || !run.summary || !Array.isArray(run.summary.tests)) return { ok: false, reason: run?.error || 'No complete browser execution results.', results: [] };
@@ -171,6 +214,11 @@ function gateCheck(session, testCase) {
   if (!attempt) return { ok: true };
   if (attempt.status !== 'VALIDATED' || attempt.candidateHash !== contractIdentity(testCase))
     return { ok: false, code: 'REPAIR_REGRESSION_GATE_REQUIRED', reason: 'Repair requires a successful isolated full-baseline regression run.' };
+  const verified = attempt.verification;
+  if (!verified || !Array.isArray(verified.results) || !verified.results.length ||
+      Object.keys(verified.identities || {}).length !== verified.results.length ||
+      !verified.results.every((result) => result.pass === true))
+    return { ok: false, code: 'REPAIR_REGRESSION_EVIDENCE_MISSING', reason: 'The validated repair has no complete passing execution evidence.' };
   if (attempt.verification?.baselineRunNumber !== (session.lastResults?.runNumber || null)) {
     // A later normal execution that passed the same complete tested scope strengthens
     // the evidence instead of invalidating it. Any missing or failing case blocks.
@@ -210,6 +258,10 @@ function recordEvaluation(session, caseId, scope, outcome) {
       memoryId: crypto.randomUUID(),
       attemptId: attempt.attemptId,
       caseId: id(caseId),
+      projectId: attempt.projectId || null,
+      intent: attempt.intent,
+      testCategory: attempt.testCategory,
+      scenarioType: attempt.scenarioType,
       targetOrigin: attempt.targetOrigin,
       failureSignature: attempt.failureSignature,
       originalHash: attempt.originalHash,
@@ -223,7 +275,7 @@ function recordEvaluation(session, caseId, scope, outcome) {
   }
   return attempt;
 }
-function rollback(session, caseId) {
+function rollback(session, caseId, options = {}) {
   const key = id(caseId);
   const attempt = getAttempt(session, key);
   if (!attempt?.originalSnapshot) throw Object.assign(new Error('A prior version is not available.'), { code: 'REPAIR_ROLLBACK_UNAVAILABLE' });
@@ -243,11 +295,20 @@ function rollback(session, caseId) {
   session.approvedIds = (session.approvedIds || []).filter((value) => id(value) !== key);
   if (session.approvedContractSeals) delete session.approvedContractSeals[key];
   session.generatedScript = null;
+  const failedEvidence = attempt.verification;
   attempt.status = 'ROLLED_BACK';
+  attempt.rollbackMode = options.automatic ? 'AUTOMATIC_REGRESSION_FAILURE' : 'MANUAL';
+  attempt.rollbackReason = String(options.reason || failedEvidence?.reason || '').slice(0, 500) || null;
+  attempt.rejectedCandidateHash = attempt.candidateHash;
   attempt.candidateHash = contractIdentity(restored);
   attempt.verifiedAt = null;
-  attempt.verification = null;
+  attempt.verification = options.automatic ? failedEvidence : null;
   attempt.rolledBackAt = timestamp();
+  // A rollback revokes validated learning: a reverted repair must never
+  // influence future tests or persist as a successful memory.
+  session.validatedRepairMemory = (session.validatedRepairMemory || []).filter((memory) =>
+    memory.attemptId !== attempt.attemptId);
+  session.automationReadiness = { ...(session.automationReadiness || {}), ready: (session.testCases || []).filter((tc) => tc.automationReadiness?.status === 'READY').length };
   return restored;
 }
 module.exports = { hash, contractIdentity, originFor, unchangedRequirements, failureSignature, dependencies, dependencyGraph, impactedCases, getAttempt, createAttempt, eligibleForValidation, suiteToValidate, verifyExecution, gateCheck, repairPattern, recordEvaluation, rollback };
