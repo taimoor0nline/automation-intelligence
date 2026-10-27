@@ -5,6 +5,7 @@ const { spawn, execFile } = require('child_process');
 const { randomUUID } = require('crypto');
 const { generateDeterministicAutomation } = require('./deterministicAutomationGeneratorV7');
 const { validateGroundedScript } = require('./scriptValidator');
+const { hasActiveExecutions } = require('./singleSpecRunner');
 
 const projectDir = path.resolve(__dirname, '..', '..', 'automation-system');
 const configFile = path.join(projectDir, 'engine.config.js');
@@ -67,7 +68,7 @@ function runCli(args, env, timeoutMs) {
 }
 async function executeIsolatedRegression(session, cases) {
   if (busy) return { ok: false, error: 'Another repair regression run is already executing.', code: 'REGRESSION_ENGINE_BUSY' };
-  if (session.state === 'RUNNING') return { ok: false, error: 'A normal run is already executing in this session.', code: 'REGRESSION_SESSION_BUSY' };
+  if (session.state === 'RUNNING' || hasActiveExecutions()) return { ok: false, error: 'A normal browser execution is active. Regression must wait for isolated runner access.', code: 'REGRESSION_SESSION_BUSY' };
   if (!Array.isArray(cases) || !cases.length) return { ok: false, error: 'No validated cases supplied.', code: 'REGRESSION_EMPTY' };
   if (!fs.existsSync(cypressBin)) return { ok: false, error: 'The Cypress automation engine is not installed.', code: 'REGRESSION_ENGINE_MISSING' };
   busy = true;
