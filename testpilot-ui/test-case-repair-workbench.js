@@ -64,6 +64,14 @@
           <p><b>Human confirmation required.</b> Review the updated steps, expected results and compiled automation before approving this new contract. Validation does not execute or approve a test.</p>
           <button type="button" class="btn primary" data-repair-action="confirm">Confirm Reviewed Contract</button>
         </div>
+        <div id="repairLearningPanel" hidden class="repair-contract-note">
+          <strong>Repair learning &amp; regression protection</strong>
+          <p id="repairLearningState" style="margin:5px 0 10px"></p>
+          <div class="repair-script-actions">
+            <button class="btn secondary" type="button" data-repair-action="validate-regression">Run Regression Gate</button>
+            <button class="btn ghost" type="button" data-repair-action="rollback-regression">Restore Previous Version</button>
+          </div>
+        </div>
         <div class="repair-workbench-status" id="repairWorkbenchStatus"></div>
         <div class="repair-contract-note"><b>Contract rule:</b> every repair invalidates the previous approval seal. The repaired case must pass deterministic readiness and exact automation-artifact validation, then be reviewed again before Run/Re-run can seal it for execution.</div>
       </div>
@@ -154,6 +162,7 @@
     setStatus('', '');
     modal.classList.add('show');
     syncReviewConfirm();
+      void refreshRepairLearning();
   }
 
   function credentials() {
@@ -210,6 +219,7 @@
       currentCaseId = String(data.testCase.id || currentCaseId).toUpperCase();
       if (typeof renderCases === 'function') renderCases();
       syncReviewConfirm();
+      void refreshRepairLearning();
 
       if (data.automationReady) {
         setStatus(data.message || 'Repair validated. Review the new case before execution.', 'ok');
@@ -335,6 +345,7 @@
       list[index] = data.testCase;
       if (typeof renderCases === 'function') renderCases();
       syncReviewConfirm();
+      void refreshRepairLearning();
       document.getElementById('repairScriptEditor').classList.remove('show');
       setStatus(data.message || 'Validated script saved. Review the new test contract before execution.', 'ok');
     } catch (err) {
@@ -378,6 +389,7 @@
       list[index] = data.testCase;
       if (typeof renderCases === 'function') renderCases();
       syncReviewConfirm();
+      void refreshRepairLearning();
       setStatus(data.message || 'Contract confirmed. You may proceed to human approval and execution.', 'ok');
     } catch (err) {
       setStatus(err.message || 'Review could not be confirmed.', 'bad');
@@ -386,6 +398,61 @@
       button.disabled = false;
       button.textContent = 'Confirm Reviewed Contract';
     }
+  }
+
+  let regressionBusy = false;
+  async function refreshRepairLearning() {
+    const panel = document.getElementById('repairLearningPanel');
+    const tc = currentCase();
+    const sid = typeof sessionId !== 'undefined' ? sessionId : window.sessionId;
+    if (!tc || !sid) { panel.hidden = true; return; }
+    try {
+      const response = await fetch('/api/test-cases/repair-learning/' + encodeURIComponent(sid) + '/' + encodeURIComponent(tc.id));
+      const data = await response.json();
+      if (currentCaseId !== String(tc.id).toUpperCase() || !response.ok || !data.attempt) { panel.hidden = true; return; }
+      panel.hidden = false;
+      document.getElementById('repairLearningState').textContent =
+        'Status: ' + data.attempt.status.replaceAll('_', ' ') + '. Related cases: ' +
+        data.impactedIds.join(', ') + '. The regression gate checks the full previous execution scope. ' +
+        (data.approvalGate?.ok ? 'Verified: execution requires explicit approval.' : 'Execution is blocked.');
+      panel.querySelector('[data-repair-action="validate-regression"]').disabled =
+        regressionBusy || tc.review?.status !== 'CONFIRMED' || data.attempt.status === 'VALIDATED';
+      panel.querySelector('[data-repair-action="rollback-regression"]').disabled = regressionBusy;
+    } catch { panel.hidden = true; }
+  }
+  async function performRegressionAction(action) {
+    const tc = currentCase();
+    const sid = typeof sessionId !== 'undefined' ? sessionId : window.sessionId;
+    if (!tc || !sid || regressionBusy) return;
+    const validate = action === 'validate-regression';
+    if (validate && tc.review?.status !== 'CONFIRMED') return setStatus('Confirm the reviewed contract first.', 'bad');
+    const warning = validate
+      ? 'Run Cypress regression tests on the configured Test application? They may change test data.'
+      : 'Restore the previous test version as an unapproved draft? Another regression check will be required.';
+    if (!window.confirm(warning)) return;
+    regressionBusy = true;
+    setStatus(validate ? 'Executing isolated regression validation…' : 'Restoring previous test contract…', 'working');
+    void refreshRepairLearning();
+    try {
+      const response = await fetch('/api/test-cases/repair-learning/' + (validate ? 'validate' : 'rollback'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sid, testCaseId: tc.id, confirmTargetSideEffects: validate }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.reason || data.reply || 'The operation was rejected.');
+      if (data.testCase) {
+        const list = cases();
+        const index = list.findIndex((item) => String(item?.id || '').toUpperCase() === currentCaseId);
+        if (index >= 0) list[index] = data.testCase;
+        if (typeof renderCases === 'function') renderCases();
+        syncReviewConfirm();
+      void refreshRepairLearning();
+      }
+      setStatus(validate
+        ? 'Regression verified for ' + data.testedIds.join(', ') + '. The correction can now be explicitly approved.'
+        : 'Previous version restored. Confirm its review and run a new regression gate before approval.', 'ok');
+    } catch (err) { setStatus(err.message || 'Regression action failed. Existing approval remains blocked.', 'bad'); }
+    finally { regressionBusy = false; void refreshRepairLearning(); }
   }
 
   modal.addEventListener('click', (event) => {
@@ -398,6 +465,7 @@
     if (action === 'cancel-script') { document.getElementById('repairScriptEditor').classList.remove('show'); return setStatus('', ''); }
     if (action === 'save-script') return void saveManualScript();
     if (action === 'confirm') return void confirmReviewedContract();
+    if (action === 'validate-regression' || action === 'rollback-regression') return void performRegressionAction(action);
   });
 
   window.openTestRepairWorkbench = open;
