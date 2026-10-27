@@ -412,8 +412,10 @@
       if (currentCaseId !== String(tc.id).toUpperCase() || !response.ok || !data.attempt) { panel.hidden = true; return; }
       panel.hidden = false;
       document.getElementById('repairLearningState').textContent =
-        'Status: ' + data.attempt.status.replaceAll('_', ' ') + '. Related cases: ' +
-        data.impactedIds.join(', ') + '. The regression gate checks the full previous execution scope. ' +
+        'Status: ' + data.attempt.status.replaceAll('_', ' ') + '. Impacted cases: ' +
+        data.impactedIds.join(', ') + '. Changed selectors/dependencies: ' +
+        [...(data.changedDependencies?.removed || []), ...(data.changedDependencies?.added || [])].slice(0, 5).join(', ') +
+        '. The regression gate checks the full previous execution scope. ' +
         (data.approvalGate?.ok ? 'Verified: execution requires explicit approval.' : 'Execution is blocked.');
       panel.querySelector('[data-repair-action="validate-regression"]').disabled =
         regressionBusy || tc.review?.status !== 'CONFIRMED' || data.attempt.status === 'VALIDATED';
@@ -439,7 +441,8 @@
         body: JSON.stringify({ sessionId: sid, testCaseId: tc.id, confirmTargetSideEffects: validate }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.ok) throw new Error(data.reason || data.reply || 'The operation was rejected.');
+      // A failed regression deliberately returns HTTP 422 with the automatically
+      // restored case. Apply that safe version before displaying the error.
       if (data.testCase) {
         const list = cases();
         const index = list.findIndex((item) => String(item?.id || '').toUpperCase() === currentCaseId);
@@ -448,9 +451,16 @@
         syncReviewConfirm();
       void refreshRepairLearning();
       }
-      setStatus(validate
-        ? 'Regression verified for ' + data.testedIds.join(', ') + '. The correction can now be explicitly approved.'
-        : 'Previous version restored. Confirm its review and run a new regression gate before approval.', 'ok');
+      if (data.autoRolledBack) {
+        setStatus('Regression failed: ' + (data.reason || 'one or more tests failed') +
+          '. The previous test version was automatically restored as a draft; it is not approved.', 'bad');
+      } else if (!response.ok || !data.ok) {
+        throw new Error(data.reason || data.reply || 'The operation was rejected.');
+      } else {
+        setStatus(validate
+          ? 'Regression verified for ' + data.testedIds.join(', ') + '. The correction can now be explicitly approved.'
+          : 'Previous version restored. Confirm its review and run a new regression gate before approval.', 'ok');
+      }
     } catch (err) { setStatus(err.message || 'Regression action failed. Existing approval remains blocked.', 'bad'); }
     finally { regressionBusy = false; void refreshRepairLearning(); }
   }
