@@ -121,6 +121,8 @@ function suiteToValidate(session, caseId) {
   const baseline = session.lastResults?.summary?.tests || [];
   if (!baseline.length && (session.testCases || []).length !== 1)
     throw Object.assign(new Error('No previous suite baseline exists. Run the unaffected confirmed cases first, then verify the repair.'), { code: 'REGRESSION_BASELINE_MISSING' });
+  if (baseline.some((test) => !id(test.testCaseId)))
+    throw Object.assign(new Error('A previously executed test has no trustworthy case identifier; regression cannot silently skip it.'), { code: 'REGRESSION_BASELINE_UNIDENTIFIED' });
   const caseMap = new Map((session.testCases || []).map((tc) => [id(tc.id), tc]));
   const selected = new Set([id(caseId)]);
   for (const result of baseline) {
