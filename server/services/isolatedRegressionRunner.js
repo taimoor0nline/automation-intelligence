@@ -6,6 +6,7 @@ const { randomUUID } = require('crypto');
 const { generateDeterministicAutomation } = require('./deterministicAutomationGeneratorV7');
 const { validateGroundedScript } = require('./scriptValidator');
 const { hasActiveExecutions } = require('./singleSpecRunner');
+const browserLease = require('./browserExecutionLease');
 
 const projectDir = path.resolve(__dirname, '..', '..', 'automation-system');
 const configFile = path.join(projectDir, 'engine.config.js');
@@ -73,7 +74,9 @@ async function executeIsolatedRegression(session, cases) {
   if (!fs.existsSync(cypressBin)) return { ok: false, error: 'The Cypress automation engine is not installed.', code: 'REGRESSION_ENGINE_MISSING' };
   busy = true;
   let temp = null;
+  let lease = null;
   try {
+    lease = browserLease.acquire('REPAIR_REGRESSION', 'repair-' + randomUUID());
     const generated = generateDeterministicAutomation(cases);
     const login = loginSelectorsFromPages(session.pageDiscoveries);
     const hasCredentials = Boolean(session.credentials?.username && session.credentials?.password);
@@ -108,6 +111,7 @@ async function executeIsolatedRegression(session, cases) {
       AUTOMATION_SCREENSHOT_EACH_TEST: 'false',
       AUTOMATION_TEST_COMPLETION_PAUSE_MS: '0',
       AUTOMATION_VIDEO: 'false',
+      CYPRESS_DISCOVERY_ENABLED: 'false',
       AUTOMATION_SCREENSHOT_ON_FAILURE: 'false',
       TEST_USERNAME: session.credentials?.username || '',
       TEST_PASSWORD: session.credentials?.password || '',
@@ -145,6 +149,7 @@ async function executeIsolatedRegression(session, cases) {
     return { ok: false, error: String(error.message || error), code: 'REGRESSION_EXECUTION_ERROR' };
   } finally {
     if (temp) fs.rmSync(temp, { recursive: true, force: true });
+    browserLease.release(lease);
     busy = false;
   }
 }
