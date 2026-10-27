@@ -69,6 +69,18 @@ function session(cases) {
     ] },
   });
   assert.equal(broken.ok, false);
+  assert.equal(learning.shouldAutoRollback(scope, {
+    ok: true, summary: { tests: [
+      { testCaseId: 'TC001', pass: true, state: 'passed' },
+      { testCaseId: 'TC002', pass: true, state: 'passed' },
+      { testCaseId: 'TC003', pass: false, state: 'failed' },
+    ] },
+  }, broken), true, 'A complete observed browser regression triggers automatic rollback.');
+  assert.equal(learning.shouldAutoRollback(scope, { ok: false, error: 'Browser crashed' }, broken), false,
+    'Infrastructure failures cannot be mislabelled as harmful fixes.');
+  assert.equal(learning.shouldAutoRollback(scope, { ok: true, summary: { tests: [
+    { testCaseId: 'TC001', pass: true, state: 'passed' },
+  ] } }, broken), false, 'Incomplete evidence must never trigger automatic rollback.');
   learning.recordEvaluation(s, 'TC001', scope, broken);
   const reverted = learning.rollback(s, 'TC001', { automatic: true, reason: broken.reason });
   assert.equal(reverted.canonicalIr.actions[0].elementRef, 'old-ref', 'Automatic rollback must restore previous selector.');
@@ -108,7 +120,10 @@ function session(cases) {
   }).length, 0, 'Application-origin boundary is strict.');
   assert.equal(memory.findMatchingHints({
     records, session: { ...s, canonicalElementRegistry: { elements: [{ elementRef: 'old-ref' }] } }, testCase: nextTest,
-  }).length, 0, 'A stale selector must not be reused.');
+  }).length, 0, 'A stale replacement selector must not be reused.');
+  assert.equal(memory.findMatchingHints({
+    records, session: { ...s, canonicalElementRegistry: { elements: [{ elementRef: 'new-ref' }] } }, testCase: nextTest,
+  }).length, 1, 'An old selector may disappear, while the verified replacement remains grounded.');
   assert.equal(memory.findMatchingHints({
     records: records.map((record) => ({ ...record, approval: 'AI_ONLY' })), session: s, testCase: nextTest,
   }).length, 0, 'Unverified suggestions cannot be retrieved.');
