@@ -426,6 +426,11 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
     }
     return { ok: true, runId, specPath: prepared.specPath, summary: summarized.summary, artifacts: summarized.artifacts, error: null };
   } catch (err) {
+    // A failed acquisition never owns a browser. Do not run cleanup against
+    // another request's active Cypress process when the shared engine is busy.
+    if (err?.code === 'AUTOMATION_ENGINE_BUSY') {
+      return { ok: false, cancelled: false, runId, specPath: null, summary: null, artifacts: null, error: err.message };
+    }
     const cancelled = err?.code === "AUTOMATION_CANCELLED";
     if (cancelled) console.log(`[single-spec-runner] ${runId} cancelled by user request.`);
     else console.error("[single-spec-runner] Automation execution failed:", err);
