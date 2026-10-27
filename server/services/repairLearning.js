@@ -144,7 +144,7 @@ function suiteToValidate(session, caseId) {
   if (new Set(initialCases).size !== initialCases.length)
     throw Object.assign(new Error('Baseline contains duplicate case results.'), { code: 'REGRESSION_DUPLICATE_BASELINE' });
   const identities = Object.fromEntries(suites.map((tc) => [id(tc.id), contractIdentity(tc)]));
-  const baselineRunNumber = session.lastResults.runNumber || null;
+  const baselineRunNumber = session.lastResults?.runNumber || null;
   return { candidate, attempt, cases: suites, baselineRunNumber, identities, expectedIds: [...selected].sort() };
 }
 function verifyExecution(expectedIds, run) {
