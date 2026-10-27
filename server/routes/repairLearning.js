@@ -34,6 +34,7 @@ async function eventQuery(client, sessionId, session, attempt, outcome) {
       JSON.stringify({
         verifiedAt: attempt.verifiedAt,
         impactedIds: attempt.impactedIds,
+        repairPattern: attempt.repairPattern || null,
         validation: attempt.verification ? {
           baselineRunNumber: attempt.verification.baselineRunNumber,
           results: attempt.verification.results,
