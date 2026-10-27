@@ -28,12 +28,14 @@ function groundedPattern(raw, registry) {
   const pattern = raw?.repairPattern;
   if (!pattern || !Array.isArray(pattern.before) || !Array.isArray(pattern.after)) return null;
   const available = new Set((registry?.elements || []).map((element) => String(element.elementRef || '')).filter(Boolean));
-  const normalize = (parts) => parts.slice(0, 40).map((step) => ({
+  const normalize = (parts, requireCurrentGrounding) => parts.slice(0, 40).map((step) => ({
     operation: String(step?.operation || '').replace(/[^A-Z0-9_]/gi, '').toUpperCase().slice(0, 60),
     elementRef: String(step?.elementRef || '').slice(0, 180),
-  })).filter((step) => step.operation && (!step.elementRef || available.has(step.elementRef)));
-  const before = normalize(pattern.before);
-  const after = normalize(pattern.after);
+  })).filter((step) => step.operation && (!requireCurrentGrounding || !step.elementRef || available.has(step.elementRef)));
+  // The failed selector may have disappeared. Only the repaired target must
+  // still be present and grounded in the current rendered discovery.
+  const before = normalize(pattern.before, false);
+  const after = normalize(pattern.after, true);
   // Do not partially replay an old pattern whose references disappeared.
   if (before.length !== pattern.before.length || after.length !== pattern.after.length || !after.length) return null;
   return { before, after };
