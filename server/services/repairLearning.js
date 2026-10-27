@@ -203,6 +203,7 @@ function recordEvaluation(session, caseId, scope, outcome) {
     validatedAt: timestamp(),
   };
   if (outcome.ok) {
+    attempt.repairPattern = repairPattern(attempt.originalSnapshot, scope.candidate);
     const memory = {
       memoryId: crypto.randomUUID(),
       attemptId: attempt.attemptId,
