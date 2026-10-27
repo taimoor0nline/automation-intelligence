@@ -202,7 +202,7 @@ function verifyExecution(expectedIds, run) {
     seen.add(key);
   }
   const missing = expectedIds.filter((key) => !seen.has(key));
-  const failed = tests.filter((test) => test.pass !== true).map((test) => id(test.testCaseId));
+  const failed = tests.filter((test) => test.pass !== true || String(test.state || '').toLowerCase() !== 'passed').map((test) => id(test.testCaseId));
   return {
     ok: missing.length === 0 && failed.length === 0 && tests.length === expectedIds.length,
     reason: missing.length ? 'Missing execution results: ' + missing.join(', ') : failed.length ? 'Regression failure: ' + failed.join(', ') : null,
