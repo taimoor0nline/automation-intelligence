@@ -12,6 +12,7 @@ const { attachStrictContract } = require('../services/strictCypressIntegration')
 const { contractReviewHash } = require('../services/reviewContract');
 const persistence = require('../services/persistenceService');
 const db = require('../db');
+const repairLearning = require('../services/repairLearning');
 
 function clean(value, max = 2000) {
   return String(value ?? '').trim().slice(0, max);
@@ -349,9 +350,11 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
       generatedScript: session.generatedScript,
       automationReadiness: session.automationReadiness,
       readinessValidated: session.readinessValidated,
+      repairLearning: session.repairLearning ? JSON.parse(JSON.stringify(session.repairLearning)) : {},
     };
     if (mode !== 'confirm') clearApprovalSeal(session, original.id);
     upsert(session, candidate);
+    if (mode !== 'confirm') repairLearning.createAttempt(session, original, candidate);
     let persisted = false;
     try {
       if (db.isEnabled() && !persistence.enabled()) {
@@ -381,6 +384,7 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
       automationReady: String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY',
       requiresHumanReview: mode !== 'confirm',
       approvalReset: mode !== 'confirm',
+      regressionGate: repairLearning.gateCheck(session, candidate),
       message: mode === 'confirm'
         ? `${candidate.id} review confirmed. You may now explicitly approve its exact executable artifact for execution.`
         : String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY'
