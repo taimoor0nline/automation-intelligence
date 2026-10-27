@@ -119,7 +119,8 @@ function eligibleForValidation(session, caseId) {
 function suiteToValidate(session, caseId) {
   const { candidate, attempt } = eligibleForValidation(session, caseId);
   const baseline = session.lastResults?.summary?.tests || [];
-  if (!baseline.length) throw Object.assign(new Error('Run the original approved suite before repairing it; no baseline execution exists.'), { code: 'REGRESSION_BASELINE_MISSING' });
+  if (!baseline.length && (session.testCases || []).length !== 1)
+    throw Object.assign(new Error('No previous suite baseline exists. Run the unaffected confirmed cases first, then verify the repair.'), { code: 'REGRESSION_BASELINE_MISSING' });
   const caseMap = new Map((session.testCases || []).map((tc) => [id(tc.id), tc]));
   const selected = new Set([id(caseId)]);
   for (const result of baseline) {
@@ -168,14 +169,25 @@ function gateCheck(session, testCase) {
   if (!attempt) return { ok: true };
   if (attempt.status !== 'VALIDATED' || attempt.candidateHash !== contractIdentity(testCase))
     return { ok: false, code: 'REPAIR_REGRESSION_GATE_REQUIRED', reason: 'Repair requires a successful isolated full-baseline regression run.' };
-  if (attempt.verification?.baselineRunNumber !== (session.lastResults?.runNumber || null))
-    return { ok: false, code: 'REPAIR_REGRESSION_STALE', reason: 'The baseline has changed since regression validation.' };
+  if (attempt.verification?.baselineRunNumber !== (session.lastResults?.runNumber || null)) {
+    // A later normal execution that passed the same complete tested scope strengthens
+    // the evidence instead of invalidating it. Any missing or failing case blocks.
+    const last = session.lastResults?.summary?.tests || [];
+    const byId = new Map(last.map((test) => [id(test.testCaseId), test]));
+    if (!Object.keys(attempt.verification?.identities || {}).every((key) => byId.get(key)?.pass === true))
+      return { ok: false, code: 'REPAIR_REGRESSION_STALE', reason: 'The latest run did not pass every case in the verified scope.' };
+  }
   for (const [key, approvedHash] of Object.entries(attempt.verification?.identities || {})) {
     const current = (session.testCases || []).find((tc) => id(tc.id) === key);
     if (!current || contractIdentity(current) !== approvedHash)
       return { ok: false, code: 'REPAIR_REGRESSION_STALE', reason: 'A dependent test contract changed after the regression run.' };
   }
   return { ok: true };
+}
+function repairPattern(original, candidate) {
+  const shape = (tc) => [...(tc?.canonicalIr?.actions || []), ...(tc?.canonicalIr?.assertions || [])]
+    .map((step) => ({ operation: String(step.operation || ''), elementRef: String(step.elementRef || '').slice(0, 180) }));
+  return { before: shape(original).slice(0, 50), after: shape(candidate).slice(0, 50) };
 }
 function recordEvaluation(session, caseId, scope, outcome) {
   const attempt = getAttempt(session, caseId);
@@ -202,6 +214,7 @@ function recordEvaluation(session, caseId, scope, outcome) {
       impactedIds: attempt.impactedIds,
       verifiedAt: attempt.verifiedAt,
       approval: 'HUMAN_CONFIRMED_AND_BROWSER_VERIFIED',
+      repairPattern: repairPattern(attempt.originalSnapshot, scope.candidate),
     };
     session.validatedRepairMemory = [...(session.validatedRepairMemory || []), memory].slice(-200);
   }
@@ -232,4 +245,4 @@ function rollback(session, caseId) {
   attempt.rolledBackAt = timestamp();
   return restored;
 }
-module.exports = { hash, contractIdentity, originFor, unchangedRequirements, failureSignature, dependencies, dependencyGraph, impactedCases, getAttempt, createAttempt, eligibleForValidation, suiteToValidate, verifyExecution, gateCheck, recordEvaluation, rollback };
+module.exports = { hash, contractIdentity, originFor, unchangedRequirements, failureSignature, dependencies, dependencyGraph, impactedCases, getAttempt, createAttempt, eligibleForValidation, suiteToValidate, verifyExecution, gateCheck, repairPattern, recordEvaluation, rollback };
