@@ -5,6 +5,7 @@ const { getSession } = require('../data/sessionStore');
 const persistence = require('../services/persistenceService');
 const { persistCaseIr } = require('../services/canonicalArtifactStore');
 const learning = require('../services/repairLearning');
+const repairMemory = require('../services/repairLearningMemory');
 const { executeIsolatedRegression } = require('../services/isolatedRegressionRunner');
 
 const router = express.Router();
@@ -34,7 +35,14 @@ async function eventQuery(client, sessionId, session, attempt, outcome) {
       JSON.stringify({
         verifiedAt: attempt.verifiedAt,
         impactedIds: attempt.impactedIds,
+        changedDependencies: attempt.changedDependencies || null,
+        rollbackMode: attempt.rollbackMode || null,
+        rollbackReason: attempt.rollbackReason || null,
+        rejectedCandidateHash: attempt.rejectedCandidateHash || null,
         repairPattern: attempt.repairPattern || null,
+        intent: attempt.intent || '',
+        testCategory: attempt.testCategory || '',
+        scenarioType: attempt.scenarioType || '',
         validation: attempt.verification ? {
           baselineRunNumber: attempt.verification.baselineRunNumber,
           results: attempt.verification.results,
@@ -65,24 +73,8 @@ router.get('/api/test-cases/repair-learning/memory/:sessionId', async (req, res)
   if (!owned(req, session)) return res.status(403).json({ ok: false, code: 'SESSION_ACCESS_DENIED' });
   try {
     const currentOrigin = learning.originFor(session);
-    let items = (session.validatedRepairMemory || []).filter((item) => item.targetOrigin === currentOrigin);
-    if (db.isEnabled()) {
-      if (!persistence.enabled()) throw new Error('PostgreSQL is not configured.');
-      const result = await db.query(
-        `select attempt_id,external_case_id,target_origin,failure_signature,original_hash,candidate_hash,
-          evidence_json,updated_at from repair_learning_events
-          where outcome='VALIDATED' and target_origin=$1
-          and (($2::uuid is not null and project_id=$2::uuid) or ($2::uuid is null and session_id=$3))
-          order by updated_at desc limit 100`,
-        [currentOrigin, session.projectId || null, sessionId]
-      );
-      items = result.rows.map((row) => ({
-        attemptId: row.attempt_id, caseId: row.external_case_id, targetOrigin: row.target_origin,
-        failureSignature: row.failure_signature, originalHash: row.original_hash,
-        candidateHash: row.candidate_hash, verification: row.evidence_json,
-        verifiedAt: row.updated_at,
-      }));
-    }
+    const items = await repairMemory.retrieveVerifiedMemory(session, { sessionId });
+
     return res.json({ ok: true, applicationOrigin: currentOrigin, validatedOnly: true, suggestionsRequireFreshDiscovery: true, items });
   } catch (error) { return problem(res, error); }
 });
@@ -92,14 +84,14 @@ router.get('/api/test-cases/repair-learning/:sessionId/:caseId', (req, res) => {
   if (!owned(req, session)) return res.status(403).json({ ok: false, code: 'SESSION_ACCESS_DENIED' });
   const key = caseId(req.params.caseId);
   const attempt = learning.getAttempt(session, key);
-  const { graph, impactedIds } = learning.impactedCases(session, key, attempt?.originalSnapshot);
+  const { graph, impactedIds, changedDependencies, reasonsByCase } = learning.impactedCases(session, key, attempt?.originalSnapshot);
   const safeAttempt = attempt ? {
     attemptId: attempt.attemptId, status: attempt.status, caseId: key,
     originalHash: attempt.originalHash, candidateHash: attempt.candidateHash,
     failureSignature: attempt.failureSignature, createdAt: attempt.createdAt,
     verifiedAt: attempt.verifiedAt, verification: attempt.verification,
   } : null;
-  return res.json({ ok: true, attempt: safeAttempt, graph, impactedIds, approvalGate: learning.gateCheck(session, (session.testCases || []).find((tc) => caseId(tc.id) === key) || { id: key }) });
+  return res.json({ ok: true, attempt: safeAttempt, graph, impactedIds, changedDependencies, reasonsByCase, approvalGate: learning.gateCheck(session, (session.testCases || []).find((tc) => caseId(tc.id) === key) || { id: key }) });
 });
 
 router.post('/api/test-cases/repair-learning/validate', async (req, res) => {
@@ -123,21 +115,41 @@ router.post('/api/test-cases/repair-learning/validate', async (req, res) => {
         })) {
       throw Object.assign(new Error('The suite or baseline changed during validation. Re-run on the current version.'), { code: 'REPAIR_CONCURRENT_CHANGE' });
     }
-    const previousAttempt = JSON.parse(JSON.stringify(learning.getAttempt(session, key)));
-    const previousMemory = [...(session.validatedRepairMemory || [])];
+    const previous = {
+      testCases: session.testCases, approvedIds: session.approvedIds,
+      approvedContractSeals: session.approvedContractSeals ? { ...session.approvedContractSeals } : null,
+      generatedScript: session.generatedScript,
+      automationReadiness: session.automationReadiness,
+      repairLearning: JSON.parse(JSON.stringify(session.repairLearning || {})),
+      validatedRepairMemory: [...(session.validatedRepairMemory || [])],
+    };
+    let restoredCase = null;
     const attempt = learning.recordEvaluation(session, key, scope, outcome);
+    // A regression failure is harmful until proven otherwise. Never leave a
+    // rejected candidate active: restore the known pre-edit contract automatically.
+    if (!outcome.ok) {
+      restoredCase = learning.rollback(session, key, {
+        automatic: true, reason: outcome.reason || run?.error || 'Browser regression did not pass',
+      });
+    }
     try {
-      await saveLearning(sessionId, session, attempt, attempt.status);
+      await saveLearning(sessionId, session, attempt, attempt.status, restoredCase);
     } catch (error) {
-      session.repairLearning[key] = previousAttempt;
-      session.validatedRepairMemory = previousMemory;
+      Object.assign(session, previous);
       throw error;
     }
     return res.status(outcome.ok ? 200 : 422).json({
-      ok: outcome.ok, code: outcome.ok ? 'REPAIR_REGRESSION_VERIFIED' : 'REPAIR_REGRESSION_REJECTED',
+      ok: outcome.ok,
+      code: outcome.ok ? 'REPAIR_REGRESSION_VERIFIED' : 'REPAIR_AUTO_ROLLED_BACK',
       status: attempt.status, reason: outcome.reason || null, results: outcome.results,
-      testedIds: scope.expectedIds, impactedIds: attempt.impactedIds, verifiedAt: attempt.verifiedAt,
-      note: 'Only a passing real Cypress regression run can enter validated learning memory.',
+      testedIds: scope.expectedIds, impactedIds: attempt.impactedIds,
+      changedDependencies: scope.impact?.changedDependencies || null,
+      verifiedAt: attempt.verifiedAt, autoRolledBack: !outcome.ok,
+      testCase: restoredCase,
+      requiresHumanReview: !outcome.ok,
+      note: outcome.ok
+        ? 'Only browser-verified repairs enter reusable learning memory.'
+        : 'Cypress regression failed. The previous version was automatically restored as an unapproved draft.',
     });
   } catch (error) { return problem(res, error); }
   finally { active.delete(sessionId); }
@@ -154,6 +166,8 @@ router.post('/api/test-cases/repair-learning/rollback', async (req, res) => {
     testCases: session.testCases, approvedIds: session.approvedIds,
     approvedContractSeals: session.approvedContractSeals ? { ...session.approvedContractSeals } : null,
     generatedScript: session.generatedScript,
+    automationReadiness: session.automationReadiness,
+    validatedRepairMemory: [...(session.validatedRepairMemory || [])],
     repairLearning: JSON.parse(JSON.stringify(session.repairLearning || {})),
   };
   try {
