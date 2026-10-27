@@ -246,6 +246,32 @@ automation-intelligence/
         └── requestContext.js
 ```
 
+## Repair learning & regression protection
+
+The canonical test-case repair workbench now enforces **validate before learn**:
+
+1. AI regeneration, an AI-assisted rewrite, or a manual script edit creates a versioned candidate and revokes the prior execution approval.
+2. The dependency graph links test cases by element references, rendered selectors, forms, pages, routes and behavior rules; the UI shows related cases.
+3. Human confirmation is required before the isolated **Run Regression Gate** action. Cypress executes the repaired candidate and **every test from the previous completed execution scope**, including unrelated regression checks, in a separate spec/result namespace.
+4. Promotion fails closed when any expected case is missing, duplicated, skipped, failed, or the Cypress engine fails. Earlier passing test cases must remain passing. Application failures must not be disguised by changing the approved business assertion.
+5. A real successful regression produces a version/hash-scoped validation record. Only that record unblocks the next explicit execution approval and becomes eligible for the learning memory.
+6. **Restore Previous Version** returns the earlier contract as an unapproved, unconfirmed draft. No prior approval seal is restored. A fresh review and validation are mandatory.
+
+Session-only mode keeps learning memory for the current process and across reset within the same session ID. PostgreSQL mode additionally stores project/target-origin-scoped verified repair patterns and event history in `repair_learning_events`; re-run `npm run db:migrate` when upgrading an existing database. Stored patterns are **advisory**, and must match current rendered discovery before they may influence subsequent AI-assisted repairs. TestNexus never silently rewrites expected business behavior or upgrades the underlying AI model.
+
+The regression gate intentionally needs a known healthy prior suite as a baseline. If there are several tests and no baseline, execute the existing confirmed tests first; a first single-case suite can establish its own baseline. Runs should target a **nonproduction test environment** because browser test flows can modify application data. The gate uses the same configured Cypress binary/browser as normal execution and blocks concurrent runs.
+
+### Validation
+
+```bash
+npm run test:repair-learning
+npm run test:repair-workbench-contract
+npm run test:repair-route-integration
+npm run test:capabilities
+```
+
+The first three commands are also included in the GitHub Actions workflow `.github/workflows/repair-learning.yml` on `live-browser-streaming`. Those smoke tests exercise policy and route contracts; they do not substitute for a real Cypress regression against a running target application with known passing and failing cases.
+
 ## Production security notes
 
 For production:
