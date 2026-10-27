@@ -1,0 +1,37 @@
+name: Repair learning safeguards
+
+on:
+  push:
+    branches:
+      - live-browser-streaming
+  pull_request:
+    branches:
+      - live-browser-streaming
+  workflow_dispatch:
+
+jobs:
+  regression-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    env:
+      DATABASE_ENABLED: 'false'
+      AUTH_REQUIRED: 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install backend dependencies (no Cypress postinstall)
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Validate JavaScript syntax
+        run: npm run test:server-syntax
+      - name: Repair learning safety checks
+        run: npm run test:repair-learning
+      - name: Existing repair-workbench contract checks
+        run: npm run test:repair-workbench-contract
+      - name: Existing repair-route integration checks
+        run: npm run test:repair-route-integration
