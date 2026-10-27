@@ -118,6 +118,11 @@ const unsafe = sessionFor(weakened);
 learning.createAttempt(unsafe, original, weakened);
 assert.throws(() => learning.suiteToValidate(unsafe, 'TC001'), (error) => error.code === 'BUSINESS_ASSERTION_CHANGED');
 assert.equal(learning.unchangedRequirements(original, candidate), true);
+// Baseline coverage must fail closed rather than silently excluding unlabelled tests.
+const unlabelled = sessionFor(makeCase('TC001', 'ref:email-new'), makeCase('TC002', 'ref:password'));
+unlabelled.lastResults.summary.tests[1].testCaseId = null;
+learning.createAttempt(unlabelled, original, unlabelled.testCases[0]);
+assert.throws(() => learning.suiteToValidate(unlabelled, 'TC001'), (error) => error.code === 'REGRESSION_BASELINE_UNIDENTIFIED');
 assert.equal(learning.unchangedRequirements(original, weakened), false);
 
 // When there is only one case, its first browser run can establish validation
