@@ -1,0 +1,15 @@
+'use strict';
+const assert = require('node:assert/strict');
+const lease = require('../server/services/browserExecutionLease');
+assert.equal(lease.current(), null);
+const first = lease.acquire('NORMAL', 'run-1');
+assert.equal(lease.current().kind, 'NORMAL');
+assert.throws(() => lease.acquire('REPAIR_REGRESSION','repair-1'), (error) => error.code === 'AUTOMATION_ENGINE_BUSY');
+assert.equal(lease.release({ kind: 'NORMAL', runId: 'run-1' }), false, 'An impersonated token cannot unlock the engine.');
+assert.equal(lease.current().runId, 'run-1');
+assert.equal(lease.release(first), true);
+const second = lease.acquire('REPAIR_REGRESSION', 'repair-1');
+assert.throws(() => lease.acquire('NORMAL','run-2'), (error) => error.code === 'AUTOMATION_ENGINE_BUSY');
+assert.equal(lease.release(second), true);
+assert.equal(lease.current(), null);
+console.log('browser-execution-lease-smoke: PASS (normal/repair mutual exclusion and owner-only release)');
