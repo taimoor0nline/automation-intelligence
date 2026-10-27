@@ -73,7 +73,7 @@
           </div>
         </div>
         <div class="repair-workbench-status" id="repairWorkbenchStatus"></div>
-        <div class="repair-contract-note"><b>Contract rule:</b> every repair invalidates the previous approval seal. The repaired case must pass deterministic readiness and exact automation-artifact validation, then be reviewed again before Run/Re-run can seal it for execution.</div>
+        <div class="repair-contract-note"><b>Contract rule:</b> every repair invalidates the previous approval seal. The repaired case must pass deterministic readiness, explicit human review, and the isolated cross-test regression gate before Run/Re-run can seal it for execution. Harmful repairs are restored automatically.</div>
       </div>
     </div>`;
   document.body.appendChild(modal);
