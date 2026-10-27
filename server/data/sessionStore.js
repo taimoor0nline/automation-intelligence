@@ -33,6 +33,8 @@ function createSession() {
     behaviorRules: [],
     behaviorRuleConflicts: [],
     behaviorRuleRegistryVersion: 1,
+    repairLearning: {},
+    validatedRepairMemory: [],
     testCases: [],
     automationReadiness: null,
     readinessValidated: false,
@@ -82,6 +84,7 @@ function resetSession(id) {
     session.behaviorRules = Array.isArray(previous.behaviorRules) ? previous.behaviorRules.map((rule) => ({ ...rule })) : [];
     session.behaviorRuleConflicts = Array.isArray(previous.behaviorRuleConflicts) ? previous.behaviorRuleConflicts.map((item) => ({ ...item })) : [];
     session.behaviorRuleRegistryVersion = previous.behaviorRuleRegistryVersion || 1;
+    session.validatedRepairMemory = Array.isArray(previous.validatedRepairMemory) ? previous.validatedRepairMemory.map((item) => ({ ...item })) : [];
   }
   try { require('../services/testActorRuntimeStore').applyToSession(id, session); } catch {}
   return session;
