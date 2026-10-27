@@ -209,6 +209,19 @@ function verifyExecution(expectedIds, run) {
     results: tests.map((item) => ({ caseId: id(item.testCaseId), pass: item.pass === true, state: String(item.state || '') })),
   };
 }
+function shouldAutoRollback(scope, run, outcome) {
+  if (outcome?.ok || !run?.ok || !Array.isArray(run.summary?.tests)) return false;
+  const expected = new Set(scope?.expectedIds || []);
+  const actual = run.summary.tests || [];
+  // Infrastructure faults, skipped/missing cases, and incomplete evidence are
+  // inconclusive: keep the repair unapproved and retry instead of falsely
+  // diagnosing it as harmful. Roll back only confirmed browser test failures.
+  if (!expected.size || actual.length !== expected.size) return false;
+  if (new Set(actual.map((test) => id(test.testCaseId))).size !== expected.size) return false;
+  if (!actual.every((test) => expected.has(id(test.testCaseId)))) return false;
+  if (!actual.every((test) => ['passed','failed'].includes(String(test.state || '').toLowerCase()))) return false;
+  return actual.some((test) => test.pass === false && String(test.state).toLowerCase() === 'failed');
+}
 function gateCheck(session, testCase) {
   const attempt = getAttempt(session, testCase.id);
   if (!attempt) return { ok: true };
@@ -311,4 +324,4 @@ function rollback(session, caseId, options = {}) {
   session.automationReadiness = { ...(session.automationReadiness || {}), ready: (session.testCases || []).filter((tc) => tc.automationReadiness?.status === 'READY').length };
   return restored;
 }
-module.exports = { hash, contractIdentity, originFor, unchangedRequirements, failureSignature, dependencies, dependencyGraph, impactedCases, getAttempt, createAttempt, eligibleForValidation, suiteToValidate, verifyExecution, gateCheck, repairPattern, recordEvaluation, rollback };
+module.exports = { hash, contractIdentity, originFor, unchangedRequirements, failureSignature, dependencies, dependencyGraph, impactedCases, getAttempt, createAttempt, eligibleForValidation, suiteToValidate, verifyExecution, shouldAutoRollback, gateCheck, repairPattern, recordEvaluation, rollback };
