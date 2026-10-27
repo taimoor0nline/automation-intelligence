@@ -421,7 +421,7 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
       approvalReset: mode !== 'confirm',
       regressionGate: repairLearning.gateCheck(session, candidate),
       message: mode === 'confirm'
-        ? `${candidate.id} review confirmed. You may now explicitly approve its exact executable artifact for execution.`
+        ? `${candidate.id} review confirmed. Run the isolated regression gate before explicitly approving its exact executable artifact for execution.`
         : String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY'
           ? `${candidate.id} was validated and saved as a draft. Confirm the reviewed contract before execution.`
           : `${candidate.id} remains blocked: ${candidate.automationReadiness?.reason || candidate.automationReadiness?.reasonCode || 'review required'}`,
