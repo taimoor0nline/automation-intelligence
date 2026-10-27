@@ -433,4 +433,4 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
   }
 }
 
-module.exports = { executeSingleGeneratedSpec, cancelActiveExecution, getActiveExecution };
+module.exports = { executeSingleGeneratedSpec, cancelActiveExecution, getActiveExecution, hasActiveExecutions: () => activeExecutions.size > 0 };
