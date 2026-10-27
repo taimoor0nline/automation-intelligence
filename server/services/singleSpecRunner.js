@@ -3,6 +3,7 @@ const path = require("path");
 const { randomUUID } = require("crypto");
 const { spawn, execFile } = require("child_process");
 const { cleanupAutomationBrowsers } = require("./browserProcessCleanup");
+const browserLease = require('./browserExecutionLease');
 
 const AUTOMATION_DIR = path.join(__dirname, "..", "..", "automation-system");
 const SPEC_DIR = path.join(AUTOMATION_DIR, "tests", "e2e", "generated");
@@ -376,8 +377,10 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
     cancelReason: null,
     startedAt: new Date().toISOString(),
   };
-  activeExecutions.set(runId, control);
+  let lease = null;
   try {
+    lease = browserLease.acquire('NORMAL', runId);
+    activeExecutions.set(runId, control);
     prepared = prepareSpec(generated);
     const headed = options.headed == null ? boolEnv(process.env.AUTOMATION_HEADED, true) : Boolean(options.headed);
     const browser = options.browser || process.env.AUTOMATION_BROWSER || "chrome";
@@ -430,6 +433,7 @@ async function executeSingleGeneratedSpec(generated, executionContext = {}, opti
     return { ok: false, cancelled, runId, specPath: prepared?.specPath || null, summary: null, artifacts: null, error: err.message || String(err) };
   } finally {
     if (activeExecutions.get(runId) === control) activeExecutions.delete(runId);
+    browserLease.release(lease);
   }
 }
 
