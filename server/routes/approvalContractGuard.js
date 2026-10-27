@@ -8,6 +8,7 @@ const { stableHash, executionPlanShape, displayExpectationShape } = require('../
 const executionGenerator = require('../services/deterministicAutomationGeneratorV7');
 const { validateGroundedScript } = require('../services/scriptValidator');
 const { isConfirmedCurrentReview } = require('../services/reviewContract');
+const { gateCheck } = require('../services/repairLearning');
 
 function configuredActorRefs(session) {
   return Object.entries(session.actorCredentials || {})
@@ -169,6 +170,15 @@ router.use((req, res, next) => {
     for (const testCase of assessed) {
       const selected = !approved.size || approved.has(String(testCase.id || '').toUpperCase());
       if (!selected || !testCase?.canonicalIr) continue;
+
+      const repairGate = gateCheck(session, testCase);
+      if (!repairGate.ok) {
+        return res.status(422).json({
+          reply: `Execution blocked for ${testCase.id}: ${repairGate.reason}`,
+          code: repairGate.code,
+          testCaseId: testCase.id,
+        });
+      }
 
       if (!isConfirmedCurrentReview(testCase)) {
         return res.status(422).json({
