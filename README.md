@@ -246,6 +246,15 @@ automation-intelligence/
         └── requestContext.js
 ```
 
+### Continuous improvement and automatic rollback (2026-10-27)
+
+- **Verified learning retrieval:** browser-verified, human-confirmed repairs are matched against future scenarios by normalized intent and scope, not the original TC number; the replacement element must still exist in current rendered discovery. Guidance stays advisory and never alters approved expectations without review.
+- **Cross-test impact graph:** indexes both pre-fix and post-fix dependencies, including changed selectors and transitive page/form/field connections. Impacted tests outside the previous execution baseline must first establish a passing baseline. The actual verification scope includes the entire prior execution suite.
+- **Automatic rollback:** a complete isolated Cypress run that demonstrates failed tests restores the previous test contract as an unapproved draft, removes approval seals, invalidates learned memory, and writes a versioned audit event in PostgreSQL mode. Browser startup failures, incomplete results and timeouts instead reject validation without claiming the fix caused a regression.
+- **Cross-run memory:** session-only mode keeps verified hints in memory across reset under the same session; PostgreSQL stores verified patterns by project and target origin. Rolling back a successful repair revokes its memory and changes its recorded event outcome to `ROLLED_BACK`.
+- **Execution isolation:** an exclusive server-side lease prevents regular Cypress executions from overlapping isolated regression execution; the latter writes separate result/spec paths.
+- **Automated test suites:** `npm run test:repair-learning` runs contract, retrieval, impact, auto-rollback HTTP, and browser lease tests without requiring a real target server. A real browser + database smoke check remains necessary before production deployment.
+
 ## Repair learning & regression protection
 
 The canonical test-case repair workbench now enforces **validate before learn**:
