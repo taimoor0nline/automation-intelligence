@@ -138,7 +138,7 @@ assert.throws(() => learning.suiteToValidate(noBaseline, 'TC001'), (error) => er
 const failedSibling = sessionFor(makeCase('TC001', 'ref:email-new'), makeCase('TC002', 'ref:password'));
 failedSibling.lastResults.summary.tests[1].pass = false;
 learning.createAttempt(failedSibling, original, failedSibling.testCases[0]);
-assert.throws(() => learning.suiteToValidate(failedSibling, 'TC001'), (error) => error.code === 'REGRESSION_BASELINE_FAILED');
+assert.throws(() => learning.suiteToValidate(failedSibling, 'TC001'), (error) => error.code === 'REGRESSION_IMPACT_BASELINE_FAILED');
 
 // Route wiring and migrations are deliberate contracts, not documentation-only.
 const root = path.join(__dirname, '..');
