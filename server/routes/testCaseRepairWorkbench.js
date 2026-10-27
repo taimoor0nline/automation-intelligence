@@ -13,6 +13,7 @@ const { contractReviewHash } = require('../services/reviewContract');
 const persistence = require('../services/persistenceService');
 const db = require('../db');
 const repairLearning = require('../services/repairLearning');
+const memory = require('../services/repairLearningMemory');
 
 function clean(value, max = 2000) {
   return String(value ?? '').trim().slice(0, max);
@@ -111,36 +112,7 @@ function updateCredentials(session, credentials) {
   };
 }
 
-async function verifiedRepairHints(session, testCase) {
-  const origin = repairLearning.originFor(session);
-  if (!origin) return [];
-  const learned = (session.validatedRepairMemory || [])
-    .filter((item) => item.targetOrigin === origin && String(item.caseId).toUpperCase() === String(testCase.id).toUpperCase());
-  if (db.isConfigured() && session.projectId) {
-    try {
-      const saved = await db.query(
-        `select evidence_json from repair_learning_events
-         where project_id=$1 and target_origin=$2 and external_case_id=$3 and outcome='VALIDATED'
-         order by updated_at desc limit 5`,
-        [session.projectId, origin, String(testCase.id).toUpperCase()]
-      );
-      for (const row of saved.rows || []) {
-        if (row.evidence_json?.repairPattern) learned.push({ repairPattern: row.evidence_json.repairPattern });
-      }
-    } catch (error) {
-      console.warn('[repair-learning] Reusable guidance unavailable:', error.message);
-    }
-  }
-  const available = new Set((session.canonicalElementRegistry?.elements || []).map((item) => item.elementRef));
-  return learned.reverse().flatMap((item) => {
-    const pattern = item.repairPattern;
-    if (!pattern?.after || !Array.isArray(pattern.after)) return [];
-    const operations = pattern.after.filter((part) => part?.operation && (!part.elementRef || available.has(part.elementRef)));
-    return operations.length ? [operations.slice(0, 25).map((part) => ({ operation: part.operation, elementRef: part.elementRef }))] : [];
-  }).slice(-3);
-}
-
-async function regenerateCanonical(session, original, mode, instruction) {
+async function regenerateCanonical(session, original, mode, instruction, sessionId = 'default') {
   const registry = session.canonicalElementRegistry;
   if (!registry?.elements?.length) throw new Error('Canonical rendered discovery is unavailable. Run fresh page discovery before AI regeneration.');
 
@@ -148,12 +120,12 @@ async function regenerateCanonical(session, original, mode, instruction) {
   const baseRepairObjective = mode === 'rewrite-ai'
     ? `${originalObjective}\nHuman repair instruction: ${clean(instruction, 1200)}\nPreserve the business intent, but use only currently discovered evidence and supported deterministic browser operations/assertions.`
     : originalObjective;
-  const hints = await verifiedRepairHints(session, original);
+  let hints = [];
+  try { hints = await memory.hintsForCase(session, original, { sessionId, objective: originalObjective }); }
+  catch (error) { console.warn('[repair-learning] Memory retrieval unavailable:', error.message); }
   // Historical outcomes are advisory only. Current discovery + canonical validation
   // remain authoritative; prior fixes cannot modify the expected business contract.
-  const objective = hints.length
-    ? `${baseRepairObjective}\nPreviously browser-verified repair patterns (advisory only, reuse only when still grounded): ${JSON.stringify(hints).slice(0, 2200)}\nNever weaken or delete business assertions.`
-    : baseRepairObjective;
+  const objective = baseRepairObjective + memory.describeHints(hints);
 
   const plannedUnit = {
     plannedId: plannedIdFor(original),
@@ -194,7 +166,8 @@ async function regenerateCanonical(session, original, mode, instruction) {
     id: original.id,
     source: mode === 'rewrite-ai' ? 'ai-rewritten' : 'ai-regenerated',
     createdBy: 'human-repair-request',
-    coverageRationale: objective,
+    coverageRationale: originalObjective,
+    repairLearningHints: hints.length,
     // Any rewrite is a new contract. Never carry a previous human approval seal.
     canonicalValidation: {
       ...(raw.canonicalValidation || {}),
@@ -370,7 +343,7 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
         original,
         mode === 'manual-script'
           ? manualScriptCandidate(session, original, script)
-          : await regenerateCanonical(session, original, mode, instruction)
+          : await regenerateCanonical(session, original, mode, instruction, sessionId)
       );
     if (res.destroyed || res.writableEnded) return;
     // Prevent delayed AI repairs from overwriting a newer manual edit.
@@ -420,6 +393,7 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
       requiresHumanReview: mode !== 'confirm',
       approvalReset: mode !== 'confirm',
       regressionGate: repairLearning.gateCheck(session, candidate),
+      reusedVerifiedRepairHints: mode !== 'confirm' && mode !== 'manual-script' ? (candidate?.repairLearningHints || 0) : 0,
       message: mode === 'confirm'
         ? `${candidate.id} review confirmed. Run the isolated regression gate before explicitly approving its exact executable artifact for execution.`
         : String(candidate.automationReadiness?.status || '').toUpperCase() === 'READY'
