@@ -86,6 +86,9 @@ function buildSafeSessionPayload(session = {}) {
     approvedIds: session.approvedIds,
     runHistory: session.runHistory,
     failureAnalyses: session.failureAnalyses,
+    // Version snapshots contain only test contract data; never persist runtime credentials.
+    repairLearning: session.repairLearning || {},
+    validatedRepairMemory: (session.validatedRepairMemory || []).slice(-200),
     lastResults: session.lastResults ? {
       summary: session.lastResults.summary || null,
       runNumber: session.lastResults.runNumber || null,
