@@ -229,8 +229,10 @@ function rollback(session, caseId) {
   if (!current || attempt.candidateHash !== contractIdentity(current)) throw Object.assign(new Error('The case has been edited again. Cannot safely roll back this version.'), { code: 'REPAIR_ROLLBACK_CONFLICT' });
   const previous = clone(attempt.originalSnapshot);
   // Rollback is a new draft, never an automatic restoration of an approval seal.
-  delete previous.canonicalValidation?.approvedCanonicalHash;
-  delete previous.canonicalValidation?.approvedCompiledHash;
+  // Never revive an old approval/frozen artifact when restoring a prior version.
+  for (const seal of Object.keys(previous.canonicalValidation || {})) {
+    if (seal.startsWith('approved') || seal === 'approvalMode' || seal === 'approvalContractVersion') delete previous.canonicalValidation[seal];
+  }
   const restored = {
     ...previous,
     review: { status: 'PENDING_REVIEW', revision: Math.max(Number(current.review?.revision) || 0, Number(previous.review?.revision) || 0) + 1, contractHash: contractIdentity(previous), confirmedAt: null },
