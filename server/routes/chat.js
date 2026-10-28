@@ -173,3 +173,4 @@ router.get("/api/artifacts/:sessionId/screenshot/:testCaseId", (req, res) => { c
 router.post("/api/reset", (req, res) => { const { sessionId = "default" } = req.body || {}; resetSession(sessionId); res.json({ ok: true }); });
 
 module.exports = router;
+//...

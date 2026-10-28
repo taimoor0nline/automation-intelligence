@@ -147,6 +147,11 @@ STRICT RULES:
 16. Do not use unsupported assertion hybrids such as .and('have.text').to.not.be.empty. Use .invoke('text').should('not.be.empty').
 17. Do not use .type('') for an intentionally blank field; leave it untouched or use .clear() only when required.
 18. validationFeedback, when supplied, contains deterministic validator errors from a previous attempt. Correct every listed error and do not repeat the rejected pattern.
+19. For normal user interactions, use .click() on the exact discovered button selector, including login, submit, and other action buttons.
+20. NEVER call .submit() on a button element. A button must be activated with .click() when simulating a user interaction.
+21. Use .submit() on a form element only when the approved test explicitly requires testing programmatic form submission. Do not replace a normal button click with programmatic form submission.
+22. Use only selectors and element types supported by pageDiscoveries. Never hardcode or invent selectors. If the required button selector is missing, report a validation error instead of guessing.
+
 
 Return JSON only:
 {"fileName": string, "framework": "browser-automation", "language": "javascript", "script": string}`;
@@ -224,10 +229,86 @@ function validateTestCaseGrounding(result, pageDiscoveries, story) {
   return result;
 }
 
-function validateAutomation(result) {
-  if (!result || typeof result.script !== "string" || !result.script.includes("describe(") || !result.script.includes("it(")) throw new Error("AI did not return a valid automation spec.");
-  if (result.script.length > 200000) throw new Error("Generated automation spec is unexpectedly large.");
-  return { fileName: result.fileName || "ai-generated.cy.js", framework: "browser-automation", language: "javascript", script: result.script };
+function validateCypressSubmitUsage(script, pageDiscoveries = []) {
+  const errors = [];
+
+  // Match a direct cy.get(selector).submit() call.
+  const pattern =
+    /cy\.get\(\s*(['"`])([^'"`]+)\1\s*\)\s*\.submit\s*\(/gi;
+
+  let match;
+
+  while ((match = pattern.exec(script)) !== null) {
+    const selector = match[2].trim();
+
+    // Check whether the selector identifies a discovered button.
+    const isButton = pageDiscoveries.some((page) =>
+      (page.elements || []).some((element) => {
+        const tag = String(element.tag || element.tagName || "").toLowerCase();
+        const role = String(element.role || "").toLowerCase();
+        const type = String(element.type || "").toLowerCase();
+
+        const knownSelectors = [
+          element.selector,
+          element.id ? `#${element.id}` : null,
+          element.testId ? `[data-testid="${element.testId}"]` : null,
+          element.name ? `[name="${element.name}"]` : null,
+        ].filter(Boolean).map(String);
+
+        return (
+          knownSelectors.includes(selector) &&
+          (tag === "button" ||
+            role === "button" ||
+            (tag === "input" && type === "submit"))
+        );
+      })
+    );
+
+    if (isButton) {
+      errors.push(
+        `Selector "${selector}" identifies a button. Use .click(), not .submit().`
+      );
+    }
+  }
+
+  if (/\bcy\s*\.\s*submit\s*\(/i.test(script)) {
+    errors.push("cy.submit() is not a standard Cypress command.");
+  }
+
+  return errors;
+}
+
+function validateAutomation(result, pageDiscoveries = []) {
+  if (
+    !result ||
+    typeof result.script !== "string" ||
+    !result.script.includes("describe(") ||
+    !result.script.includes("it(")
+  ) {
+    throw new Error("AI did not return a valid automation spec.");
+  }
+
+  if (result.script.length > 200000) {
+    throw new Error("Generated automation spec is unexpectedly large.");
+  }
+
+  const errors = validateCypressSubmitUsage(
+    result.script,
+    pageDiscoveries
+  );
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Automation validation failed: ${errors.join(" ")}`
+    );
+  }
+
+  return {
+    fileName: result.fileName || "ai-generated.cy.js",
+    framework: "browser-automation",
+    language: "javascript",
+    script: result.script,
+  };
 }
 
 function validateFailure(result) {
@@ -377,7 +458,7 @@ async function generateAutomationCode({ approvedTestCases, pageDiscoveries, file
     },
     validationFeedback: Array.isArray(validationFeedback) ? validationFeedback.slice(0, 20) : [],
   }, { modelTier });
-  return validateAutomation(result);
+  return validateAutomation(result, pageDiscoveries);
 }
 
 async function analyzeFailure({ story, testCase, expected, actual, modelTier = "fast" }) {
