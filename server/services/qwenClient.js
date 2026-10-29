@@ -151,7 +151,7 @@ STRICT RULES:
 20. NEVER call .submit() on a button element. A button must be activated with .click() when simulating a user interaction.
 21. Use .submit() on a form element only when the approved test explicitly requires testing programmatic form submission. Do not replace a normal button click with programmatic form submission.
 22. Use only selectors and element types supported by pageDiscoveries. Never hardcode or invent selectors. If the required button selector is missing, report a validation error instead of guessing.
-
+23. Use .click() on the exact discovered button selector for normal user interactions and form submissions; use .submit() on the form element only when explicitly testing programmatic form submission, never on a button.
 
 Return JSON only:
 {"fileName": string, "framework": "browser-automation", "language": "javascript", "script": string}`;
