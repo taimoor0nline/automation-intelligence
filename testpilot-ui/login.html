@@ -1,0 +1,163 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in | AI TestPilot</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #f3f6fc;
+      color: #101828;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+    }
+    .login-card {
+      width: min(420px, 100%);
+      padding: 36px;
+      background: #fff;
+      border: 1px solid #e5e9f1;
+      border-radius: 18px;
+      box-shadow: 0 18px 55px rgba(16, 24, 40, .09);
+    }
+    .logo {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      background: linear-gradient(135deg, #2f5bff, #7794ff);
+      color: white;
+      font-size: 19px;
+      font-weight: 800;
+      margin-bottom: 22px;
+    }
+    h1 { margin: 0; font-size: 25px; }
+    .subtitle {
+      margin: 9px 0 26px;
+      color: #667085;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    label {
+      display: block;
+      margin: 16px 0 7px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #344054;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #d0d5dd;
+      border-radius: 9px;
+      font: inherit;
+      outline: none;
+    }
+    input:focus {
+      border-color: #2f5bff;
+      box-shadow: 0 0 0 3px #eaf0ff;
+    }
+    button {
+      width: 100%;
+      margin-top: 23px;
+      padding: 13px;
+      border: 0;
+      border-radius: 9px;
+      background: #2f5bff;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    .error {
+      display: none;
+      margin-top: 15px;
+      padding: 11px;
+      border-radius: 8px;
+      background: #fee2e2;
+      color: #b91c1c;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .error.show { display: block; }
+    .footer {
+      margin-top: 24px;
+      text-align: center;
+      color: #98a2b3;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <main class="login-card">
+    <div class="logo">AI</div>
+    <h1>Welcome back</h1>
+    <p class="subtitle">Sign in to access your AI TestPilot workspace.</p>
+
+    <form id="loginForm">
+      <label for="email">Email address</label>
+      <input id="email" type="email" autocomplete="username"
+             placeholder="you@example.com" required>
+
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password"
+             placeholder="Enter your password" required>
+
+      <button id="loginButton" type="submit">Sign in</button>
+      <div id="errorMessage" class="error" role="alert"></div>
+    </form>
+
+    <div class="footer">AI TestPilot · Secure workspace access</div>
+  </main>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const button = document.getElementById('loginButton');
+    const errorBox = document.getElementById('errorMessage');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorBox.classList.remove('show');
+      errorBox.textContent = '';
+      button.disabled = true;
+      button.textContent = 'Signing in…';
+
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('email').value.trim(),
+            password: document.getElementById('password').value
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.reply || 'Unable to sign in.');
+        }
+
+        if (!data.token) {
+          throw new Error('The server did not return an authentication token.');
+        }
+
+        sessionStorage.setItem('aiTestPilotToken', data.token);
+        window.location.replace('/');
+      } catch (error) {
+        errorBox.textContent = error.message;
+        errorBox.classList.add('show');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Sign in';
+      }
+    });
+  </script>
+</body>
+</html>

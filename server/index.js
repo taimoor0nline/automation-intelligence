@@ -160,6 +160,9 @@ function serveUi(req, res, next) {
   });
 }
 function serveRestUi(req, res, next) { const uiFile = path.join(__dirname, "..", "testpilot-ui", "rest.html"); fs.readFile(uiFile, "utf8", (err, html) => { if (err) return next(err); res.type("html").send(html.replace("</body>", '<script src="/rest-request-template.js"></script></body>')); }); }
+app.get("/login", (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "testpilot-ui", "login.html"));
+});
 app.get(["/", "/index.html"], serveUi);
 app.get("/rest.html", serveRestUi);
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
