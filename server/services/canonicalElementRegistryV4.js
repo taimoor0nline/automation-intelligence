@@ -56,8 +56,12 @@ function isRangeInput(item = {}) { return lower(item.tag || item.tagName) === 'i
 function isCheckable(item = {}) { return lower(item.tag || item.tagName) === 'input' && ['checkbox','radio'].includes(lower(item.type)); }
 function isCheckbox(item = {}) { return lower(item.tag || item.tagName) === 'input' && lower(item.type) === 'checkbox'; }
 function isSubmitTarget(item = {}) {
-  const tag = lower(item.tag || item.tagName), type = lower(item.type);
-  return tag === 'form' || ((tag === 'button' || tag === 'input') && type === 'submit');
+  const tag = lower(item.tag || item.tagName);
+  const type = lower(item.type);
+
+  return tag === 'form' ||
+    (tag === 'button' && (!type || type === 'submit')) ||
+    (tag === 'input' && type === 'submit');
 }
 
 function capabilitiesFor(item = {}) {
