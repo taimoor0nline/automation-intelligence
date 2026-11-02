@@ -145,6 +145,7 @@ async function persistTestCases(sessionId, testCases = [], client = null) {
         [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, security.subcategory, security.severity, tc.source || null, JSON.stringify(normalizedCase)]
       );
     }
+    if(testCases.length){await connection.query("insert into project_audit_events(project_id,session_id,event_type,metadata) select project_id,$1,'TEST_CASES_SAVED',$2::jsonb from test_sessions where id=$1 and project_id is not null",[sessionId,JSON.stringify({caseCount:testCases.length})]);}
   };
   if (client) await work(client);
   else await db.withTransaction(work);
@@ -280,6 +281,7 @@ async function persistReviewedCase(sessionId, session, testCase) {
     });
     await persistTestCases(sessionId, [testCase], client);
     await canonical.persistCaseIr(sessionId, testCase, client);
+    if(session.projectId)await client.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TEST_CASE_REVIEWED',$4::jsonb)",[session.projectId,sessionId,session.createdBy||null,JSON.stringify({caseId:String(testCase.id),status:'SAVED'})]);
     // Persist the reviewed contract, not runtime credentials or raw session state.
     const reviewed={id:testCase.id,title:testCase.title,priority:testCase.priority,type:testCase.type,source:testCase.source,steps:testCase.steps,expectedResult:testCase.expectedResult,automationReadiness:testCase.automationReadiness,reviewedAt:new Date().toISOString()};
     const rev=await client.query("select coalesce(max(revision),0)+1 as next from test_report_snapshots where session_id=$1 and external_case_id=$2 and report_kind='REVIEWED_CASE'",[sessionId,String(testCase.id)]);
