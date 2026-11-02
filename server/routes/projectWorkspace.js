@@ -427,6 +427,16 @@ router.get('/api/projects/:projectId/report-snapshots/:reportId',requireAuth,asy
  if(req.query.format==='html'){if(!r.rows[0].report_html)throw fail(404,'HTML report unavailable.');res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',"sandbox; default-src 'none'; style-src 'unsafe-inline'");return res.send(r.rows[0].report_html);}
  const {report_html,...report}=r.rows[0];res.json({ok:true,report,hasHtml:!!report_html});
 }catch(e){respond(res,e);}});
+router.post('/api/projects/:projectId/repair-memory',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ const repair=await require('../services/repairMemoryService').propose({projectId:req.params.projectId,entry:req.body,userId:req.user.sub});
+ res.status(201).json({ok:true,repair});
+}catch(e){respond(res,e);}});
+router.post('/api/projects/:projectId/repair-memory/:memoryId/verify',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ const result=await require('../services/repairMemoryService').verifyApplied({projectId:req.params.projectId,memoryId:req.params.memoryId,runId:req.body?.runId,userId:req.user.sub});
+ res.json({ok:true,...result});
+}catch(e){respond(res,e);}});
 // Verified repairs are project-scoped suggestions; applying them still requires the existing review/approval workflow.
 router.get('/api/projects/:projectId/repair-memory',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);
