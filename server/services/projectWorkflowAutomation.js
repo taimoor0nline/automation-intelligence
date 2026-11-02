@@ -1,6 +1,5 @@
 'use strict';
 const db=require('../db');
-const {randomUUID}=require('crypto');
 const priority=v=>['LOW','MEDIUM','HIGH','CRITICAL'].includes(String(v||'').toUpperCase())?String(v).toUpperCase():'MEDIUM';
 async function applyProjectWorkflow({sessionId,projectId,runNumber,executedBy}){
  if(!db.isConfigured()||!projectId||!runNumber)return {created:0,closed:0};
@@ -22,7 +21,7 @@ async function applyProjectWorkflow({sessionId,projectId,runNumber,executedBy}){
     const who=canAssign?.rowCount?assignee:null;
     const t=await client.query("insert into work_items(project_id,session_id,run_id,test_result_id,external_case_id,work_type,title,description,priority,assigned_to,created_by,metadata) values($1,$2,$3,$4,$5,'DEFECT_FIX',$6,$7,$8,$9,$10,$11::jsonb) returning id",[projectId,sessionId,run.rows[0].id,r.id,r.external_case_id,'Investigate failed test: '+r.title,'Automatically created by the project workflow after a failed verified execution. Review the test evidence before attributing failure to application code.',priority(r.priority),who,executedBy||null,JSON.stringify({source:'project_workflow',testCategory:r.test_category||null,executionRunId:run.rows[0].id})]);
     await client.query("insert into work_item_history(work_item_id,event_type,new_status,performed_by,comment) values($1,'WORKFLOW_FAILED_TEST','PENDING',$2,$3)",[t.rows[0].id,executedBy||null,'Created from TestNexus execution #'+runNumber]);
-    if(who)await client.query("insert into notification_outbox(project_id,user_id,event_type,subject,payload_json) values($1,$2,'WORK_ITEM_ASSIGNED',$3,$4::jsonb)",[projectId,who,'Failed test needs review: '+r.title,JSON.stringify({workItemId:t.rows[0].id,runId:run.rows[0].id})]);
+    if(who)await client.query("insert into notification_outbox(project_id,user_id,channel,event_type,subject,payload_json,status) values($1,$2,'IN_APP','WORK_ITEM_ASSIGNED',$3,$4::jsonb,'PENDING')",[projectId,who,'Failed test needs review: '+r.title,JSON.stringify({workItemId:t.rows[0].id,runId:run.rows[0].id})]);
     return 'created';
    }
    if(r.passed&&policy.auto_close_verified_retests&&active.rowCount&&active.rows[0].status==='READY_FOR_RETEST'){
