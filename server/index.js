@@ -14,6 +14,7 @@ const approvalContractGuardRoutes = require("./routes/approvalContractGuard");
 const liveBrowserRoutes = require("./routes/liveBrowser");
 const authRoutes = require("./routes/auth");
 const projectRoutes = require("./routes/projects");
+const projectWorkspaceRoutes = require("./routes/projectWorkspace");
 const sessionContextRoutes = require("./routes/sessionContext");
 const reportingRoutes = require("./routes/reporting");
 const failureAnalysisStreamRoutes = require("./routes/failureAnalysisStream");
@@ -67,6 +68,7 @@ const HOST = process.env.SERVER_HOST || "0.0.0.0";
 const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || "false").toLowerCase() === "true";
 
 app.use(cors());
+app.use(["/api/projects/:projectId/documents", "/api/work-items/:id/attachments"], express.json({ limit: "8mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(optionalAuth);
 app.use((req, res, next) => {
@@ -104,6 +106,7 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
 
 app.use(authRoutes);
 app.use(projectRoutes);
+app.use(projectWorkspaceRoutes);
 app.use(sessionContextRoutes);
 app.use(reportingRoutes);
 app.use(restApiRoutes);
