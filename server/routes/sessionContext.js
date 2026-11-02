@@ -119,6 +119,10 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     const project = await db.query('select id from projects where id=$1', [projectId]);
     if (!project.rowCount) return res.status(404).json({ reply: 'Project not found.' });
 
+    if(String(req.user.role).toUpperCase()!=='MANAGER'){
+      const membership=await db.query("select project_role from project_members where project_id=$1 and user_id=$2",[projectId,req.user.sub]);
+      if(!membership.rowCount||!['QA','PROJECT_MANAGER'].includes(membership.rows[0].project_role))return res.status(403).json({reply:'Project QA or manager access required.'});
+    }
     if (repositoryId) {
       const repository = await db.query('select id from source_repositories where id=$1 and project_id=$2 and source_enabled=true', [repositoryId, projectId]);
       if (!repository.rowCount) return res.status(400).json({ reply: 'Repository does not belong to this project or is disabled.' });
@@ -132,6 +136,10 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     session.createdBy = req.user.sub;
     await persistence.persistSession(req.params.sessionId, session, { projectId, repositoryId: repositoryId || null, userId: req.user.sub });
     await db.query('update test_sessions set project_story_id=$1 where id=$2 and project_id=$3',[storyId||null,req.params.sessionId,projectId]);
+    if(storyId){
+      await db.query('insert into story_test_sessions(story_id,session_id) values($1,$2) on conflict do nothing',[storyId,req.params.sessionId]);
+      await db.query("insert into project_audit_events(project_id,story_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,$4,'STORY_SESSION_LINKED',$5::jsonb)",[projectId,storyId,req.params.sessionId,req.user.sub,JSON.stringify({repositoryId:repositoryId||null})]);
+    }
     res.json({ ok: true, projectId, repositoryId: repositoryId || null, storyId: storyId||null });
   } catch (err) {
     res.status(500).json({ reply: err.message });
