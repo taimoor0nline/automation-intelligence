@@ -3,6 +3,8 @@
 const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const state={user:null,projects:[],projectId:'',context:null,tasks:[],deletedTasks:[],evidence:[],taskId:null,view:'overview'};
 const token=()=>sessionStorage.getItem('aiTestPilotToken')||'';
+function syncProjectRunnerMode(){const handoff=sessionStorage.getItem('testnexus:runnerHandoff');if(!handoff)return;try{const value=JSON.parse(handoff);if(value?.projectId)sessionStorage.setItem('testnexus:runnerOrigin','project');}catch{}}
+
 function notice(message,type='danger'){const el=$('notice');el.className='alert alert-'+type;el.textContent=message;el.scrollIntoView({block:'nearest'});}
 function clearNotice(){$('notice').className='alert alert-warning d-none';$('notice').textContent='';}
 async function api(url,options={}){
@@ -117,6 +119,7 @@ async function saveStory(){
  return d.story;
 }
 async function launchStory(){
+ syncProjectRunnerMode();
  requireProject();const form=$('storyForm');if(!form.reportValidity())return;
  const current=$('storyId').value;const saved=await saveStory();
  const env=state.context.environments.find(e=>e.id===form.elements.namedItem('environmentId').value)||state.context.environments.find(e=>e.is_default)||state.context.environments[0];
