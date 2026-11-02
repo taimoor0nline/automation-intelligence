@@ -2,7 +2,8 @@
 const express=require('express');
 const db=require('../db');
 const {requireAuth,requireRole}=require('../services/authService');
-const {getSession}=require('../data/sessionStore');
+const {getSession,hydrateSession}=require('../data/sessionStore');
+const persistence=require('../services/persistenceService');
 const fs=require('fs');
 const path=require('path');
 const {ROOT:ARTIFACT_ROOT}=require('../services/retainedExecutionEvidence');
@@ -181,7 +182,7 @@ router.post('/api/work-items/:id/subtasks',requireAuth,async(req,res)=>{
  if(assignee){const m=await db.query('select 1 from project_members where project_id=$1 and user_id=$2',[ctx.item.project_id,assignee]);if(!m.rowCount)throw fail(400,'Assignee must belong to this project.');}
  const r=await db.withTransaction(async client=>{
  const t=await client.query('insert into work_items(project_id,parent_work_item_id,session_id,external_case_id,work_type,title,description,priority,assigned_to,created_by,assigned_by,due_at,eta_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12) returning *',
- [ctx.item.project_id,ctx.item.id,ctx.item.session_id,ctx.item.external_case_id,'GENERAL',title,s(req.body?.description,4000)||null,s(req.body?.priority,15)||'MEDIUM',assignee,req.user.sub,req.body?.dueAt||null,req.body?.etaAt||null]);
+ [ctx.item.project_id,ctx.item.id,null,null,'GENERAL',title,s(req.body?.description,4000)||null,s(req.body?.priority,15)||'MEDIUM',assignee,req.user.sub,req.body?.dueAt||null,req.body?.etaAt||null]);
  await client.query('insert into work_item_history(work_item_id,event_type,new_status,performed_by,comment) values($1,$2,$3,$4,$5)',[ctx.item.id,'SUBTASK_CREATED',ctx.item.status,req.user.sub,title]);
  return t.rows[0];
  });
@@ -225,7 +226,7 @@ router.get('/api/work-items/:id/attachments/:attachmentId/download',requireAuth,
 });
 router.get('/api/projects/:projectId/task-tree',requireAuth,async(req,res)=>{
  try{await access(req,req.params.projectId);
- const r=await db.query("select id,parent_work_item_id as parent_id,title,status,work_type,external_case_id,session_id,assigned_to,created_at from work_items where project_id=$1 and deleted_at is null order by created_at,id",[req.params.projectId]);
+ const role=await access(req,req.params.projectId);const values=[req.params.projectId];let filter='';if(role.role==='DEVELOPER'){values.push(req.user.sub);filter=' and assigned_to=$2';}const r=await db.query('select id,parent_work_item_id as parent_id,title,status,work_type,external_case_id,session_id,assigned_to,created_at from work_items where project_id=$1 and deleted_at is null'+filter+' order by created_at,id',values);
  const byId=new Map(r.rows.map(x=>[x.id,{...x,children:[]}]));const roots=[];
  for(const node of byId.values()){const parent=node.parent_id&&byId.get(node.parent_id);if(parent&&parent.id!==node.id)parent.children.push(node);else roots.push(node);}
  res.json({ok:true,roots,total:r.rows.length});
@@ -234,8 +235,9 @@ router.get('/api/projects/:projectId/task-tree',requireAuth,async(req,res)=>{
 router.get('/api/projects/:projectId/task-test-history',requireAuth,async(req,res)=>{
  try{await access(req,req.params.projectId);const taskId=req.query.taskId;
  if(!id(taskId))throw fail(400,'Valid taskId required.');
- const task=await db.query('select id from work_items where id=$1 and project_id=$2 and deleted_at is null',[taskId,req.params.projectId]);
+ const task=await db.query('select id,assigned_to from work_items where id=$1 and project_id=$2 and deleted_at is null',[taskId,req.params.projectId]);
  if(!task.rowCount)throw fail(404,'Task not found.');
+ const permission=await access(req,req.params.projectId);if(permission.role==='DEVELOPER'&&String(task.rows[0].assigned_to)!==String(req.user.sub))throw fail(403,'Task is not assigned to you.');
  const rows=await db.query(`with linked_cases as (select session_id,external_case_id from task_test_case_links where work_item_id=$1 and project_id=$2 union select session_id,external_case_id from work_items where id=$1 and project_id=$2 and session_id is not null and external_case_id is not null) select tr.id run_id,tr.run_number,tr.completed_at,tr.executed_by,u.display_name tester,te.external_case_id,te.title,te.passed,te.evidence_json from linked_cases lc join test_runs tr on tr.session_id=lc.session_id and tr.project_id=$2 join test_results te on te.run_id=tr.id and te.external_case_id=lc.external_case_id left join users u on u.id=tr.executed_by order by tr.completed_at desc limit 100`,[taskId,req.params.projectId]);
  res.json({ok:true,results:rows.rows});
  }catch(e){respond(res,e);}
@@ -244,13 +246,28 @@ router.get('/api/work-items/:id/test-links',requireAuth,async(req,res)=>{
  try{const ctx=await task(req);const r=await db.query('select id,session_id,external_case_id,created_at from task_test_case_links where work_item_id=$1 and project_id=$2 order by created_at desc',[ctx.item.id,ctx.item.project_id]);res.json({ok:true,links:r.rows});}catch(e){respond(res,e);}
 });
 router.post('/api/work-items/:id/test-links',requireAuth,async(req,res)=>{
- try{const ctx=await task(req);reviewer(ctx.role);const sessionId=s(req.body?.sessionId,120),caseId=s(req.body?.caseId,150);if(!sessionId||!caseId)throw fail(400,'Session and case IDs are required.');const session=getSession(sessionId);if(String(session.projectId)!==String(ctx.item.project_id)||!(session.testCases||[]).some(x=>String(x.id).toUpperCase()===caseId.toUpperCase()))throw fail(400,'Case must exist in the selected project session.');const r=await db.query('insert into task_test_case_links(project_id,work_item_id,session_id,external_case_id,created_by) values($1,$2,$3,$4,$5) on conflict(work_item_id,session_id,external_case_id) do update set work_item_id=excluded.work_item_id returning *',[ctx.item.project_id,ctx.item.id,sessionId,caseId,req.user.sub]);res.status(201).json({ok:true,link:r.rows[0]});}catch(e){respond(res,e);}
+ try{const ctx=await task(req);reviewer(ctx.role);const sessionId=s(req.body?.sessionId,120),caseId=s(req.body?.caseId,150);if(!sessionId||!caseId)throw fail(400,'Session and case IDs are required.');const valid=await db.query('select 1 from test_cases tc join test_sessions ts on ts.id=tc.session_id where ts.project_id=$1 and tc.session_id=$2 and upper(tc.external_case_id)=upper($3) limit 1',[ctx.item.project_id,sessionId,caseId]);if(!valid.rowCount)throw fail(400,'Case must exist in the selected project session.');const r=await db.query('insert into task_test_case_links(project_id,work_item_id,session_id,external_case_id,created_by) values($1,$2,$3,$4,$5) on conflict(work_item_id,session_id,external_case_id) do update set work_item_id=excluded.work_item_id returning *',[ctx.item.project_id,ctx.item.id,sessionId,caseId,req.user.sub]);res.status(201).json({ok:true,link:r.rows[0]});}catch(e){respond(res,e);}
 });
 router.delete('/api/work-items/:id/test-links/:linkId',requireAuth,async(req,res)=>{
  try{const ctx=await task(req);reviewer(ctx.role);const r=await db.query('delete from task_test_case_links where id=$1 and work_item_id=$2 and project_id=$3 returning id',[req.params.linkId,ctx.item.id,ctx.item.project_id]);if(!r.rowCount)throw fail(404,'Link not found.');res.json({ok:true});}catch(e){respond(res,e);}
 });
+
+async function projectSession(sessionId,projectId){
+ const session=getSession(sessionId);
+ if(String(session.projectId)===String(projectId) && Array.isArray(session.testCases) && session.testCases.length)return session;
+ const restored=await persistence.loadSession(sessionId);
+ if(!restored||String(restored.projectId)!==String(projectId))return null;
+ return hydrateSession(sessionId,restored);
+}
+router.get('/api/projects/:projectId/test-cases',requireAuth,async(req,res)=>{
+ try{
+  await access(req,req.params.projectId);
+  const result=await db.query('select tc.session_id,tc.external_case_id,tc.title,ts.state,ts.updated_at from test_cases tc join test_sessions ts on ts.id=tc.session_id where ts.project_id=$1 order by ts.updated_at desc,tc.external_case_id limit 300',[req.params.projectId]);
+  res.json({ok:true,cases:result.rows});
+ }catch(e){respond(res,e);}
+});
 router.post('/api/projects/:projectId/project-test-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
- try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select distinct session_id from test_sessions where project_id=$1 order by session_id limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=getSession(row.session_id);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved!==false).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
+ try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select distinct session_id from test_sessions where project_id=$1 order by session_id limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=await projectSession(row.session_id,req.params.projectId);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved!==false).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
  try{
@@ -267,9 +284,9 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  const candidates=[...linked,...r.rows.filter(x=>!linked.some(y=>y.id===x.id))];
  for(const item of candidates) {
  if(!item.session_id || !item.external_case_id){blocked.push({taskId:item.id,reason:'No linked session/test case'});continue;}
- const session=getSession(item.session_id);
- const tc=(session.testCases||[]).find(x=>String(x.id).toUpperCase()===String(item.external_case_id).toUpperCase());
- if(String(session.projectId)!==String(req.params.projectId) || !tc || tc.automationReadiness?.status!=='READY' || !session.readinessValidated || !['AWAITING_APPROVAL','DONE'].includes(session.state)){
+ const session=await projectSession(item.session_id,req.params.projectId);
+ const tc=(session?.testCases||[]).find(x=>String(x.id).toUpperCase()===String(item.external_case_id).toUpperCase());
+ if(!session || String(session.projectId)!==String(req.params.projectId) || !tc || tc.automationReadiness?.status!=='READY' || !session.readinessValidated || !['AWAITING_APPROVAL','DONE'].includes(session.state)){
  blocked.push({taskId:item.id,reason:'Generate/review this case in the current test session before retesting'});continue;
  }
  const group=groups.get(item.session_id)||{sessionId:item.session_id,caseIds:[],taskIds:[],targetUrl:session.targetUrl};
