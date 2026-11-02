@@ -20,3 +20,36 @@ jobs:
         run: node scripts/project-workspace-smoke.js
       - name: Route security and task regression tests
         run: node --test scripts/testnexus-workspace-routes.test.js
+
+  postgres-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testnexus
+          POSTGRES_PASSWORD: testnexus
+          POSTGRES_DB: testnexus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U testnexus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_ENABLED: 'true'
+      DATABASE_REQUIRED: 'true'
+      DATABASE_URL: postgresql://testnexus:testnexus@127.0.0.1:5432/testnexus_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install server dependencies without Cypress postinstall
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Apply all database migrations
+        run: node server/db/migrate.js
+      - name: Verify TestNexus workspace schema
+        run: node scripts/testnexus-db-schema.test.js
