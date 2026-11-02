@@ -201,7 +201,6 @@ async function persistCompletedRun(sessionId, session, userId) {
       approvedIds: session.approvedIds || [],
       userId: userId || session.createdBy || null,
     });
-    await persistence.persistRunReportSnapshots({sessionId,session,runId:persistedRunId,userId:userId||session.createdBy||null});
     try { await retainExecutionEvidence({projectId:session.projectId,runId:persistedRunId,sessionArtifacts:session.artifacts}); }
     catch (evidenceError) { console.error('[evidence-retention] retention failed',evidenceError); }
     try { await applyProjectWorkflow({sessionId,projectId:session.projectId,runNumber:session.lastResults?.runNumber,executedBy:userId||session.createdBy||null}); }
