@@ -17,7 +17,7 @@
    <button class="nav-link" data-view="tasks">Tasks</button>
    <button class="nav-link" data-view="reports">Reports</button>
    <button class="nav-link" data-view="inventory">Test inventory & audit</button><button class="nav-link" data-view="team">Team & Roles</button>
-   <a class="nav-link" href="/" title="Generate, review and run tests">Run Tests ↗</a>
+   <a class="nav-link" href="/runner" title="Generate, review and run tests">Run Tests ↗</a>
   </nav>
   <select id="projectPicker" class="form-select" aria-label="Current project" style="width:210px"></select>
   <button id="uiPreferences" type="button" class="btn btn-outline-secondary tn-btn" aria-label="Appearance preferences" aria-expanded="false" aria-controls="preferencesPanel">Appearance</button><span id="currentUser" class="tn-muted text-nowrap"></span>
@@ -28,7 +28,7 @@
  <div id="notice" class="alert alert-warning d-none" role="alert" aria-live="polite"></div><div id="workspaceLoading" class="tn-note mb-3 d-none" role="status" aria-live="polite">Loading project workspace…</div>
  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
   <div><div class="tn-eyebrow" id="breadcrumb">PROJECT WORKSPACE</div><h1 class="tn-title" id="pageTitle">Project overview</h1><div class="tn-muted" id="pageSubtitle">Scope, documents, stories, assignments and execution evidence</div></div>
-  <div class="d-flex gap-2"><button class="btn btn-outline-secondary tn-btn" data-go="projects">+ New project</button><button class="btn btn-primary tn-btn" data-go="stories">Write a story</button><a href="/" class="btn btn-outline-secondary tn-btn">Run Tests ↗</a></div>
+  <div class="d-flex gap-2"><button class="btn btn-outline-secondary tn-btn" data-go="projects">+ New project</button><button class="btn btn-primary tn-btn" data-go="stories">Write a story</button><a href="/runner" class="btn btn-outline-secondary tn-btn">Run Tests ↗</a></div>
  </div>
  <section id="view-overview" class="tn-view active"><div id="overviewHealth" class="tn-health-strip mb-3" aria-live="polite"></div>
   <div class="row g-3 mb-3">
@@ -65,7 +65,7 @@
     <div class="tn-card-head"><h2>Continue testing</h2></div><div class="tn-card-body">
      <p class="tn-muted">Use your project stories as input to the existing three-phase TestNexus flow.</p>
      <div class="tn-project-summary mb-3"><strong>1.</strong> Generate evidence-grounded tests<br><strong>2.</strong> Review and approve test cases<br><strong>3.</strong> Run approved tests and capture evidence</div>
-     <button class="btn btn-primary tn-btn" data-go="stories">Select a story →</button><a href="/" class="btn btn-outline-secondary tn-btn ms-1">Existing runner ↗</a>
+     <button class="btn btn-primary tn-btn" data-go="stories">Select a story →</button><a href="/runner" class="btn btn-outline-secondary tn-btn ms-1">Existing runner ↗</a>
     </div></div></div>
    <div class="col-12"><div class="tn-card"><div class="tn-card-head"><h2>Project testing workflow</h2><span class="tn-muted">Project-specific automated tasks; off until enabled by the project manager</span></div>
    <div class="tn-card-body"><form id="workflowForm" class="row g-3 align-items-end">
