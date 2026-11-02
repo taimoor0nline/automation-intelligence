@@ -1,7 +1,7 @@
 (function(){
 'use strict';
 const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state={user:null,projects:[],projectId:'',context:null,tasks:[],evidence:[],taskId:null,view:'overview'};
+const state={user:null,projects:[],projectId:'',context:null,tasks:[],deletedTasks:[],evidence:[],taskId:null,view:'overview'};
 const token=()=>sessionStorage.getItem('aiTestPilotToken')||'';
 function notice(message,type='danger'){const el=$('notice');el.className='alert alert-'+type;el.textContent=message;el.scrollIntoView({block:'nearest'});}
 function clearNotice(){$('notice').className='alert alert-warning d-none';$('notice').textContent='';}
@@ -103,6 +103,7 @@ async function launchStory(){
 }
 function renderTasks(){
  let tasks=state.tasks.filter(x=>!x.deleted_at),status=$('taskStatusFilter').value;
+ if(status==='DELETED'){$('tasksBody').innerHTML=(state.deletedTasks||[]).map(x=>'<tr><td></td><td><strong>'+esc(x.title)+'</strong></td><td>—</td><td>'+display(x.deleted_by_name)+'</td><td>'+dateTime(x.deleted_at)+'</td><td>'+statusTag('CANCELLED')+'</td><td><button class="tn-link" data-restore="'+esc(x.id)+'">Restore ↗</button></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No deleted tasks.</td></tr>';return;}
  if(status)tasks=tasks.filter(t=>t.status===status);
  $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><strong>'+esc(x.title)+'</strong><div class="tn-muted">'+esc(x.work_type)+'</div></td><td>'+display(x.external_case_id)+'</td><td>'+display(x.assigned_to_name)+'</td><td>'+dateTime(x.eta_at||x.due_at)+'</td><td>'+statusTag(x.status)+'</td><td><button class="tn-link" data-task="'+esc(x.id)+'">Details →</button></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No tasks match this filter.</td></tr>';
  $('allTasks').checked=false;
@@ -140,7 +141,7 @@ async function fetchDirectory(){
 async function openTask(id){
  const d=await api('/api/work-items/'+encodeURIComponent(id)+'/details');state.taskId=id;const t=d.task;
  $('drawerTitle').textContent=t.title;
- $('drawerInfo').innerHTML='<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+esc(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div><div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+' · '+(t.closed_by?'By user '+esc(t.closed_by):'')+'</span></div><p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
+ $('drawerInfo').innerHTML='<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+esc(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div><div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+' · '+(t.closed_by_name?'By '+esc(t.closed_by_name):'')+'</span></div><p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
  $('taskEta').value=t.eta_at?new Date(t.eta_at).toISOString().slice(0,16):'';
  $('taskDeferDate').value=t.deferred_until?new Date(t.deferred_until).toISOString().slice(0,16):'';
  $('taskReason').value='';
@@ -192,6 +193,18 @@ function dropZone(zoneId,inputId,kind){
  zone.addEventListener('drop',e=>uploadMany([...e.dataTransfer.files],kind));
  input.onchange=e=>{uploadMany([...e.target.files],kind);input.value='';};
 }
+let evidenceObjectUrl='';
+async function previewEvidence(url){
+ const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});
+ if(!r.ok)throw Error('Evidence is unavailable ('+r.status+').');
+ const blob=await r.blob();const view=$('evidencePreview');view.replaceChildren();
+ if(evidenceObjectUrl)URL.revokeObjectURL(evidenceObjectUrl);
+ evidenceObjectUrl=URL.createObjectURL(blob);
+ const node=document.createElement(blob.type.startsWith('video/')?'video':'img');
+ node.src=evidenceObjectUrl;node.style.maxWidth='100%';node.style.maxHeight='75vh';
+ if(node.tagName==='VIDEO'){node.controls=true;node.preload='metadata';}
+ view.appendChild(node);bootstrap.Modal.getOrCreateInstance($('evidenceModal')).show();
+}
 async function download(url){
  const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('Evidence or attachment is no longer available ('+r.status+').');
  const blob=await r.blob(),href=URL.createObjectURL(blob),link=document.createElement('a');
@@ -236,7 +249,8 @@ function bind(){
  await api('/api/projects/'+encodeURIComponent(requireProject())+'/work-items',{method:'POST',body:JSON.stringify(v)});
  e.target.reset();await loadWorkspace();notice('Task created.','success');
  }catch(err){notice(err.message);}};
- $('taskStatusFilter').onchange=renderTasks;
+ $('taskStatusFilter').onchange=async()=>{if($('taskStatusFilter').value==='DELETED'){try{state.deletedTasks=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/deleted-tasks')).tasks||[];}catch(err){notice(err.message);state.deletedTasks=[];}}renderTasks();};
+ $('evidenceModal').addEventListener('hidden.bs.modal',()=>{const v=$('evidencePreview');v.replaceChildren();if(evidenceObjectUrl)URL.revokeObjectURL(evidenceObjectUrl);evidenceObjectUrl='';});
  $('allTasks').onchange=e=>document.querySelectorAll('.task-select').forEach(x=>x.checked=e.target.checked);
  $('batchRetest').onclick=async()=>{const ids=[...document.querySelectorAll('.task-select:checked')].map(x=>x.value);if(!ids.length){notice('Select one or more tasks to retest.','warning');return;}try{await retest(ids);}catch(e){notice(e.message);}};
  $('taskShade').onclick=closeTask;$('closeTask').onclick=closeTask;
@@ -262,7 +276,8 @@ function bind(){
  const t=e.target.closest('[data-task]');if(t){try{await openTask(t.dataset.task);}catch(err){notice(err.message);}return;}
  const doc=e.target.closest('[data-doc]');if(doc){try{await download('/api/projects/'+encodeURIComponent(requireProject())+'/documents/'+encodeURIComponent(doc.dataset.doc)+'/download');}catch(err){notice(err.message);}return;}
  const file=e.target.closest('[data-task-file]');if(file){try{await download('/api/work-items/'+encodeURIComponent(state.taskId)+'/attachments/'+encodeURIComponent(file.dataset.taskFile)+'/download');}catch(err){notice(err.message);}return;}
- const evidence=e.target.closest('[data-evidence]');if(evidence){try{await download(evidence.dataset.evidence);}catch(err){notice(err.message);}return;}
+ const evidence=e.target.closest('[data-evidence]');if(evidence){try{await previewEvidence(evidence.dataset.evidence);}catch(err){notice(err.message);}return;}
+ const restore=e.target.closest('[data-restore]');if(restore){try{await api('/api/work-items/'+encodeURIComponent(restore.dataset.restore)+'/lifecycle',{method:'PATCH',body:JSON.stringify({action:'RESTORE'})});state.deletedTasks=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/deleted-tasks')).tasks||[];renderTasks();notice('Task restored.','success');}catch(err){notice(err.message);}return;}
  const report=e.target.closest('[data-report]');if(report){try{await download('/api/reports/'+encodeURIComponent(report.dataset.report));}catch(err){notice(err.message);}}
  });
 }
