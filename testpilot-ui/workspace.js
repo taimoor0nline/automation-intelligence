@@ -106,12 +106,34 @@ async function launchStory(){
  sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify(handoff));
  window.location.href='/';
 }
+function updateTaskSelection(){
+ const count=document.querySelectorAll('.task-select:checked').length;
+ $('taskSelectionCount').textContent=count+' selected';
+ $('batchRetest').disabled=count===0;
+ const all=document.querySelectorAll('.task-select');
+ $('allTasks').checked=all.length>0&&count===all.length;
+ $('allTasks').indeterminate=count>0&&count<all.length;
+}
 function renderTasks(){
  let tasks=state.tasks.filter(x=>!x.deleted_at),status=$('taskStatusFilter').value;
- if(status==='DELETED'){$('tasksBody').innerHTML=(state.deletedTasks||[]).map(x=>'<tr><td></td><td><strong>'+esc(x.title)+'</strong></td><td>—</td><td>'+display(x.deleted_by_name)+'</td><td>'+dateTime(x.deleted_at)+'</td><td>'+statusTag('CANCELLED')+'</td><td><button class="tn-link" data-restore="'+esc(x.id)+'">Restore ↗</button></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No deleted tasks.</td></tr>';return;}
+ const q=$('taskSearch').value.trim().toLowerCase();
+ if(status==='DELETED'){
+ const deleted=(state.deletedTasks||[]).filter(x=>!q||String(x.title||'').toLowerCase().includes(q));
+ $('tasksBody').innerHTML=deleted.map(x=>'<tr><td></td><td><strong>'+esc(x.title)+'</strong></td><td>—</td><td>'+display(x.deleted_by_name)+'</td><td>'+dateTime(x.deleted_at)+'</td><td>'+statusTag('CANCELLED')+'</td><td><button class="tn-link" data-restore="'+esc(x.id)+'">Restore</button></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No deleted tasks match your search.</td></tr>';
+ $('taskVisibleCount').textContent=deleted.length;updateTaskSelection();return;
+ }
  if(status)tasks=tasks.filter(t=>t.status===status);
- $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><strong>'+esc(x.title)+'</strong><div class="tn-muted">'+esc(x.work_type)+'</div></td><td>'+display(x.external_case_id)+'</td><td>'+display(x.assigned_to_name)+'</td><td>'+dateTime(x.eta_at||x.due_at)+'</td><td>'+statusTag(x.status)+'</td><td><button class="tn-link" data-task="'+esc(x.id)+'">Details →</button></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No tasks match this filter.</td></tr>';
- $('allTasks').checked=false;
+ if(q)tasks=tasks.filter(t=>[t.title,t.work_type,t.external_case_id,t.assigned_to_name].some(v=>String(v||'').toLowerCase().includes(q)));
+ if($('taskHierarchy').checked){
+  const all=new Map(state.tasks.map(t=>[t.id,t]));
+  const depth=t=>{let n=0,p=t.parent_work_item_id,seen=new Set([t.id]);while(p&&all.has(p)&&!seen.has(p)&&n<8){seen.add(p);n++;p=all.get(p).parent_work_item_id;}return n;};
+  const order=[];const byParent=new Map();for(const t of tasks){const key=t.parent_work_item_id||'';if(!byParent.has(key))byParent.set(key,[]);byParent.get(key).push(t);}
+  const visited=new Set();const walk=t=>{if(visited.has(t.id))return;visited.add(t.id);order.push({...t,_depth:depth(t)});for(const child of byParent.get(t.id)||[])walk(child);};
+  for(const t of tasks)if(!t.parent_work_item_id||!tasks.some(x=>x.id===t.parent_work_item_id))walk(t);
+  for(const t of tasks)walk(t);tasks=order;
+ }
+ $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(x.work_type)+'</div></div></div></td><td>'+display(x.external_case_id)+'</td><td>'+display(x.assigned_to_name)+'</td><td>'+dateTime(x.eta_at||x.due_at)+'</td><td>'+statusTag(x.status)+'</td><td><button class="tn-link" data-task="'+esc(x.id)+'">Details</button></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No tasks match your filters. Clear the search or select another status.</td></tr>';
+ $('taskVisibleCount').textContent=tasks.length;updateTaskSelection();
 }
 function renderReports(){
  const runs=state.context.runs,passed=runs.reduce((n,r)=>n+Number(r.passed||0),0),failed=runs.reduce((n,r)=>n+Number(r.failed||0),0);
@@ -268,7 +290,10 @@ function bind(){
  }catch(err){notice(err.message);}};
  $('taskStatusFilter').onchange=async()=>{if($('taskStatusFilter').value==='DELETED'){try{state.deletedTasks=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/deleted-tasks')).tasks||[];}catch(err){notice(err.message);state.deletedTasks=[];}}renderTasks();};
  $('evidenceModal').addEventListener('hidden.bs.modal',()=>{const v=$('evidencePreview');v.replaceChildren();if(evidenceObjectUrl)URL.revokeObjectURL(evidenceObjectUrl);evidenceObjectUrl='';});
- $('allTasks').onchange=e=>document.querySelectorAll('.task-select').forEach(x=>x.checked=e.target.checked);
+ $('allTasks').onchange=e=>{document.querySelectorAll('.task-select').forEach(x=>x.checked=e.target.checked);updateTaskSelection();};
+ $('tasksBody').addEventListener('change',e=>{if(e.target.matches('.task-select'))updateTaskSelection();});
+ $('taskSearch').addEventListener('input',renderTasks);
+ $('taskHierarchy').addEventListener('change',renderTasks);
  $('projectRunAll').onclick=async()=>{try{await runProjectTests();}catch(e){notice(e.message);}};
  $('batchRetest').onclick=async()=>{const ids=[...document.querySelectorAll('.task-select:checked')].map(x=>x.value);if(!ids.length){notice('Select one or more tasks to retest.','warning');return;}try{await retest(ids);}catch(e){notice(e.message);}};
  $('taskShade').onclick=closeTask;$('closeTask').onclick=closeTask;
