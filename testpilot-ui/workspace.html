@@ -17,7 +17,7 @@
    <button class="nav-link" data-view="tasks">Tasks</button>
    <button class="nav-link" data-view="reports">Reports</button>
    <button class="nav-link" data-view="inventory">Test inventory & audit</button><button class="nav-link" data-view="team">Team & Roles</button>
-   <a class="nav-link" href="/" title="Existing three-phase test generation, review and Cypress execution">Run Tests ↗</a>
+   <a class="nav-link" href="/" title="Generate, review and run tests">Run Tests ↗</a>
   </nav>
   <select id="projectPicker" class="form-select" aria-label="Current project" style="width:210px"></select>
   <button id="uiPreferences" type="button" class="btn btn-outline-secondary tn-btn" aria-label="Appearance preferences" aria-expanded="false" aria-controls="preferencesPanel">Appearance</button><span id="currentUser" class="tn-muted text-nowrap"></span>
@@ -64,7 +64,7 @@
    <div class="col-xl-5"><div class="tn-card h-100">
     <div class="tn-card-head"><h2>Continue testing</h2></div><div class="tn-card-body">
      <p class="tn-muted">Use your project stories as input to the existing three-phase TestNexus flow.</p>
-     <div class="tn-project-summary mb-3"><strong>1.</strong> Generate evidence-grounded tests<br><strong>2.</strong> Review and approve test cases<br><strong>3.</strong> Run with Cypress and capture evidence</div>
+     <div class="tn-project-summary mb-3"><strong>1.</strong> Generate evidence-grounded tests<br><strong>2.</strong> Review and approve test cases<br><strong>3.</strong> Run approved tests and capture evidence</div>
      <button class="btn btn-primary tn-btn" data-go="stories">Select a story →</button><a href="/" class="btn btn-outline-secondary tn-btn ms-1">Existing runner ↗</a>
     </div></div></div>
    <div class="col-12"><div class="tn-card"><div class="tn-card-head"><h2>Project testing workflow</h2><span class="tn-muted">Project-specific automated tasks; off until enabled by the project manager</span></div>
@@ -130,7 +130,7 @@
  <section id="view-inventory" class="tn-view">
   <div class="tn-card mb-3"><div class="tn-card-head"><h2>Project test inventory</h2><button class="btn btn-outline-primary tn-btn" id="inventoryRefresh" type="button">Refresh</button></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Story</th><th>Case</th><th>Priority</th><th>Session</th></tr></thead><tbody id="inventoryCases"></tbody></table></div></div>
   <div class="tn-card mb-3"><div class="tn-card-head"><h2>Story generation and execution counts</h2></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Story</th><th>Generations</th><th>Cases</th><th>Executions</th></tr></thead><tbody id="inventoryStories"></tbody></table></div></div>
-  <div class="tn-card mb-3"><div class="tn-card-head"><h2>Verified AI repair memory</h2></div><div class="tn-card-body"><p class="tn-muted">Verified selector repairs are reusable suggestions only. Existing review and approval are required before execution.</p><div id="repairMemoryList" aria-live="polite"></div></div></div>
+  <div class="tn-card mb-3"><div class="tn-card-head"><h2>AI learning recommendations</h2></div><div class="tn-card-body"><p class="tn-muted">Recommended fixes and automation improvements are reviewed before use.</p><div id="repairMemoryList" aria-live="polite"></div></div></div>
   <div class="tn-card"><div class="tn-card-head"><h2>Project audit</h2></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Event</th><th>Actor</th><th>When</th></tr></thead><tbody id="inventoryAudit"></tbody></table></div></div>
  </section>
  <section id="view-team" class="tn-view">
