@@ -182,7 +182,7 @@ async function openTask(id){
  if(related.length)$('drawerInfo').innerHTML+='<h3 class="mt-3">Run evidence</h3>'+related.map(x=>'<div class="tn-sub">'+(x.passed?'Passed':'Failed')+' · '+dateTime(x.completed_at)+'<div>'+evidenceButtons(x.evidence_json)+'</div></div>').join('');
  $('taskShade').classList.add('open');$('taskDrawer').classList.add('open');
 }
-function closeTask(){$('taskDrawer').classList.remove('open');$('taskShade').classList.remove('open');state.taskId=null;}
+function closeTask(){$('taskDrawer').classList.remove('open');$('taskDrawer').setAttribute('aria-hidden','true');$('taskShade').classList.remove('open');state.taskId=null;if(lastTaskTrigger?.isConnected)lastTaskTrigger.focus();}
 async function lifecycle(action){
  const id=state.taskId;if(!id)return;
  if(action==='DELETE'&&!confirm('Soft-delete this task? It will remain in the audit history.'))return;
@@ -270,7 +270,9 @@ async function retest(taskIds,includeChildren=false){
  }
  await loadWorkspace();
 }
+let lastTaskTrigger=null;
 function bind(){
+ document.addEventListener('keydown',e=>{if(!$('taskDrawer').classList.contains('open'))return;if(e.key==='Escape'){e.preventDefault();closeTask();}else if(e.key==='Tab'){const items=[...$('taskDrawer').querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]')].filter(x=>x.getClientRects().length);if(!items.length)return;const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
  document.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>show(el.dataset.view));
  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{show(el.dataset.go);if(el.dataset.go==='stories')clearStory();});
  $('projectPicker').onchange=async e=>{closeTask();state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();}catch(err){notice(err.message);}};
@@ -317,7 +319,7 @@ function bind(){
  document.body.addEventListener('click',async e=>{
  const p=e.target.closest('[data-open-project]');if(p){state.projectId=p.dataset.openProject;$('projectPicker').value=state.projectId;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();show('overview');}catch(err){notice(err.message);}return;}
  const st=e.target.closest('[data-story]');if(st){selectStory(st.dataset.story);return;}
- const t=e.target.closest('[data-task]');if(t){try{await openTask(t.dataset.task);}catch(err){notice(err.message);}return;}
+ const t=e.target.closest('[data-task]');if(t){lastTaskTrigger=t;try{await openTask(t.dataset.task);}catch(err){notice(err.message);}return;}
  const doc=e.target.closest('[data-doc]');if(doc){try{await download('/api/projects/'+encodeURIComponent(requireProject())+'/documents/'+encodeURIComponent(doc.dataset.doc)+'/download');}catch(err){notice(err.message);}return;}
  const file=e.target.closest('[data-task-file]');if(file){try{await download('/api/work-items/'+encodeURIComponent(state.taskId)+'/attachments/'+encodeURIComponent(file.dataset.taskFile)+'/download');}catch(err){notice(err.message);}return;}
  const evidence=e.target.closest('[data-evidence]');if(evidence){try{await previewEvidence(evidence.dataset.evidence);}catch(err){notice(err.message);}return;}
