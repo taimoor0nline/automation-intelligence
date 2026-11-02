@@ -240,6 +240,18 @@ router.get('/api/projects/:projectId/task-test-history',requireAuth,async(req,re
  res.json({ok:true,results:rows.rows});
  }catch(e){respond(res,e);}
 });
+router.get('/api/work-items/:id/test-links',requireAuth,async(req,res)=>{
+ try{const ctx=await task(req);const r=await db.query('select id,session_id,external_case_id,created_at from task_test_case_links where work_item_id=$1 and project_id=$2 order by created_at desc',[ctx.item.id,ctx.item.project_id]);res.json({ok:true,links:r.rows});}catch(e){respond(res,e);}
+});
+router.post('/api/work-items/:id/test-links',requireAuth,async(req,res)=>{
+ try{const ctx=await task(req);reviewer(ctx.role);const sessionId=s(req.body?.sessionId,120),caseId=s(req.body?.caseId,150);if(!sessionId||!caseId)throw fail(400,'Session and case IDs are required.');const session=getSession(sessionId);if(String(session.projectId)!==String(ctx.item.project_id)||!(session.testCases||[]).some(x=>String(x.id).toUpperCase()===caseId.toUpperCase()))throw fail(400,'Case must exist in the selected project session.');const r=await db.query('insert into task_test_case_links(project_id,work_item_id,session_id,external_case_id,created_by) values($1,$2,$3,$4,$5) on conflict(work_item_id,session_id,external_case_id) do update set work_item_id=excluded.work_item_id returning *',[ctx.item.project_id,ctx.item.id,sessionId,caseId,req.user.sub]);res.status(201).json({ok:true,link:r.rows[0]});}catch(e){respond(res,e);}
+});
+router.delete('/api/work-items/:id/test-links/:linkId',requireAuth,async(req,res)=>{
+ try{const ctx=await task(req);reviewer(ctx.role);const r=await db.query('delete from task_test_case_links where id=$1 and work_item_id=$2 and project_id=$3 returning id',[req.params.linkId,ctx.item.id,ctx.item.project_id]);if(!r.rowCount)throw fail(404,'Link not found.');res.json({ok:true});}catch(e){respond(res,e);}
+});
+router.post('/api/projects/:projectId/project-test-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
+ try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select distinct session_id from test_sessions where project_id=$1 order by session_id limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=getSession(row.session_id);if(String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved!==false).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
+});
 router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
  try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
