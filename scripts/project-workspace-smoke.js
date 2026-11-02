@@ -33,7 +33,7 @@ assert(routes.includes("router.get('/api/projects/:projectId/run-evidence"),'Ret
 assert(platform.includes('testnexus:runnerHandoff')&&platform.includes("url==='/api/generation/start'"),'Progressive generation handoff missing');
 assert(session.includes('session.projectStoryId = previous.projectStoryId'),'Generation reset must retain project story identity');
 assert(js.includes("'/api/test-runs/start'")&&js.includes("previewEvidence("),'Batch testing must reuse real runner with media preview');
-assert(workflow.includes('pg_advisory_xact_lock')&&workflow.includes("status='READY_FOR_RETEST'"),'Workflow must dedupe tasks and only close verified retests');
+assert(workflow.includes('pg_advisory_xact_lock')&&workflow.includes("active.rows[0].status==='READY_FOR_RETEST'")&&workflow.includes('task_test_case_links'),'Workflow must dedupe tasks and only close verified linked retests');
 assert(media.includes('test_run_evidence')&&media.includes('COPYFILE_EXCL'),'Run media needs durable storage');
 assert(css.includes('appearance:auto!important')&&css.includes('background-image:none!important'),'Dropdown chevron fix missing');
 for(const m of ['014_project_workspace.sql','015_story_workflow_link.sql','016_retained_execution_evidence.sql','017_task_test_links.sql']) assert(fs.existsSync(path.join(root,'server/db',m)),'Missing migration '+m);
