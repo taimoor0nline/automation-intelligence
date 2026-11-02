@@ -19,19 +19,25 @@ function isVerified(entry){
 async function captureVerified({client,projectId,session,runId,userId}){
  if(!db.isConfigured()||!uuid(projectId)||!uuid(runId))return 0;
  const entries=[...(Array.isArray(session.validatedRepairMemory)?session.validatedRepairMemory:[]),...(Array.isArray(session.repairLearning?.repairs)?session.repairLearning.repairs:[])];
+ if(!entries.length)return 0;
+ const outcome=await client.query('select count(*)::int as total,count(*) filter(where passed=true)::int as passed from test_results where run_id=$1',[runId]);
+ if(!outcome.rows[0].total||outcome.rows[0].passed!==outcome.rows[0].total)return 0;
  let count=0;const seen=new Set();
  for(const entry of entries){
   if(!isVerified(entry))continue;
   const item=normalize(entry);if(!item||seen.has(item.fingerprint))continue;seen.add(item.fingerprint);
-  // Verification must be attached to this completed run, never inferred from a historic flag.
   const sourceRun=clean(entry.validationRunId||entry.runId||entry.validation?.runId,100);
   if(sourceRun!==String(runId)&&sourceRun!==clean(session.executionProgress?.runId,100))continue;
-  const row=await client.query(`insert into ai_repair_memory(project_id,fingerprint,failure_signature,original_selector,replacement_selector,page_path,status,verification_source,verification_run_id,verified_at,created_by)
-   values($1,$2,$3,$4,$5,$6,'VERIFIED','EXECUTION', $7,now(),$8)
-   on conflict(project_id,fingerprint) do update set replacement_selector=excluded.replacement_selector,status='VERIFIED',verification_source='EXECUTION',verification_run_id=excluded.verification_run_id,verified_at=now(),updated_at=now()
-   where ai_repair_memory.status <> 'REVOKED' returning id`,
-   [projectId,item.fingerprint,item.failureSignature,item.originalSelector,item.replacementSelector,item.pagePath,runId,uuid(userId)?userId:null]);
-  if(row.rowCount)count++;
+  const row=await client.query(`update ai_repair_memory m
+    set status='VERIFIED',verification_source='APPLIED_PASSING_RUN',verification_run_id=$3,verified_at=now(),updated_at=now()
+    where m.project_id=$1 and m.fingerprint=$2 and m.status='CANDIDATE'
+      and exists(select 1 from ai_repair_reuse_events e where e.memory_id=m.id and e.project_id=$1 and e.run_id=$3 and e.event_type='APPLIED')
+    returning m.id`,[projectId,item.fingerprint,runId]);
+  if(row.rowCount){
+   count++;
+   const event=await client.query("insert into ai_repair_reuse_events(memory_id,project_id,run_id,event_type,actor_id) values($1,$2,$3,'SUCCEEDED',$4) on conflict do nothing returning id",[row.rows[0].id,projectId,runId,uuid(userId)?userId:null]);
+   if(event.rowCount)await client.query('update ai_repair_memory set success_count=success_count+1,last_used_at=now() where id=$1',[row.rows[0].id]);
+  }
  }
  return count;
 }
