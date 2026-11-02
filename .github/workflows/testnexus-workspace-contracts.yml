@@ -1,0 +1,22 @@
+name: TestNexus MMP workspace contracts
+on:
+  pull_request:
+    branches: [live-browser-streaming]
+  push:
+    branches: [feature/testnexus-project-workspace-ui-v6]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  workspace-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and Workspace contract checks
+        run: node scripts/project-workspace-smoke.js
+      - name: Route security and task regression tests
+        run: node --test scripts/testnexus-workspace-routes.test.js
