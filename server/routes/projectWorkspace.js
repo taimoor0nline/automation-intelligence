@@ -168,7 +168,7 @@ router.get('/api/work-items/:id/details',requireAuth,async(req,res)=>{
  db.query('select event_type,old_status,new_status,comment,created_at,u.display_name by_name from work_item_history h left join users u on u.id=h.performed_by where work_item_id=$1 order by created_at desc limit 100',[req.params.id]),
  db.query('select c.id,c.comment,c.created_at,u.display_name user_name from work_item_comments c left join users u on u.id=c.user_id where work_item_id=$1 order by c.created_at',[req.params.id])
  ]);
- const parent=ctx.item.parent_id?(await db.query('select id,title,status from work_items where id=$1 and project_id=$2 and deleted_at is null',[ctx.item.parent_id,ctx.item.project_id])).rows[0]||null:null;
+ const parent=ctx.item.parent_work_item_id?(await db.query('select id,title,status from work_items where id=$1 and project_id=$2 and deleted_at is null',[ctx.item.parent_work_item_id,ctx.item.project_id])).rows[0]||null:null;
  res.json({ok:true,parent,task:{...ctx.item,closed_by_name:closer?.rows?.[0]?.display_name||null},subtasks:children.rows,attachments:attachments.rows,history:history.rows,comments:comments.rows,projectRole:ctx.role});
  }catch(e){respond(res,e);}
 });
@@ -225,7 +225,7 @@ router.get('/api/work-items/:id/attachments/:attachmentId/download',requireAuth,
 });
 router.get('/api/projects/:projectId/task-tree',requireAuth,async(req,res)=>{
  try{await access(req,req.params.projectId);
- const r=await db.query("select id,parent_id,title,status,work_type,external_case_id,session_id,assigned_to,created_at from work_items where project_id=$1 and deleted_at is null order by created_at,id",[req.params.projectId]);
+ const r=await db.query("select id,parent_work_item_id as parent_id,title,status,work_type,external_case_id,session_id,assigned_to,created_at from work_items where project_id=$1 and deleted_at is null order by created_at,id",[req.params.projectId]);
  const byId=new Map(r.rows.map(x=>[x.id,{...x,children:[]}]));const roots=[];
  for(const node of byId.values()){const parent=node.parent_id&&byId.get(node.parent_id);if(parent&&parent.id!==node.id)parent.children.push(node);else roots.push(node);}
  res.json({ok:true,roots,total:r.rows.length});
@@ -245,8 +245,10 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
  const ids=[...new Set((Array.isArray(req.body?.taskIds)?req.body.taskIds:[]).filter(id))];
  if(!ids.length || ids.length>30 || ids.some(x=>!id(x)))throw fail(400,'Select between 1 and 30 tasks.');
- const r=await db.query('select id,session_id,external_case_id,status,project_id from work_items where id=any($1::uuid[]) and project_id=$2 and deleted_at is null',[ids,req.params.projectId]);
- if(r.rows.length!==ids.length)throw fail(400,'Task selection contains missing or unauthorized tasks.');
+ const includeChildren=req.body?.includeChildren===true;
+ const r=await db.query(includeChildren?`with recursive selected as (select id,session_id,external_case_id,status,project_id,parent_work_item_id,ARRAY[id] as lineage from work_items where id=any($1::uuid[]) and project_id=$2 and deleted_at is null union all select w.id,w.session_id,w.external_case_id,w.status,w.project_id,w.parent_work_item_id,s.lineage||w.id from work_items w join selected s on w.parent_work_item_id=s.id where w.project_id=$2 and w.deleted_at is null and not w.id=any(s.lineage) and cardinality(s.lineage)<20) select distinct id,session_id,external_case_id,status,project_id from selected limit 501`:'select id,session_id,external_case_id,status,project_id from work_items where id=any($1::uuid[]) and project_id=$2 and deleted_at is null',[ids,req.params.projectId]);
+ if(r.rows.length>500)throw fail(400,'Task hierarchy exceeds 500 items; narrow your selection.');
+ if(!ids.every(selected=>r.rows.some(item=>item.id===selected)))throw fail(400,'Task selection contains missing or unauthorized tasks.');
  const groups=new Map(),blocked=[];
  for(const item of r.rows) {
  if(!item.session_id || !item.external_case_id){blocked.push({taskId:item.id,reason:'No linked session/test case'});continue;}
