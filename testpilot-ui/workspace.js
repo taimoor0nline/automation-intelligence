@@ -116,7 +116,7 @@ function renderReports(){
 function evidenceButtons(meta){
  if(!meta||typeof meta!=='object')return '<span class="tn-muted">No evidence stored</span>';
  const e=meta.evidence||meta;
- return ['screenshotUrl','videoUrl'].filter(k=>typeof e[k]==='string'&&e[k].startsWith('/api/artifacts/')).map(k=>'<button class="tn-link me-3" data-evidence="'+esc(e[k])+'">'+(k==='videoUrl'?'▶ Video':'▧ Screenshot')+'</button>').join('')||'<span class="tn-muted">No retained media URL</span>';
+ return ['screenshotUrl','videoUrl'].filter(k=>typeof e[k]==='string'&&(e[k].startsWith('/api/artifacts/')||(/^\/api\/projects\/[^/]+\/run-evidence\//.test(e[k])))).map(k=>'<button class="tn-link me-3" data-evidence="'+esc(e[k])+'">'+(k==='videoUrl'?'▶ Video':'▧ Screenshot')+'</button>').join('')||'<span class="tn-muted">No retained media URL</span>';
 }
 async function loadWorkflow(){
  const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/workflow');
