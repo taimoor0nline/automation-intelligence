@@ -443,11 +443,11 @@ function enableSearchableSelects(){
 }
 async function initialize(){
  bind();enableSearchableSelects();try{
- if(!token()){notice('Sign in through Run Tests first, then return Home. Project data is served from your TestNexus database.','warning');return;}
+ if(!token()){location.replace('/login.html');return;}
  const me=await api('/api/auth/me');state.user=me.user;$('currentUser').textContent=me.user?.name||me.user?.email||'';
  await loadProjects();await fetchDirectory();clearStory();
- const hash=window.location.hash.replace('#','');if(['overview','projects','stories','tasks','reports','inventory','team'].includes(hash))show(hash);else show('projects');
- }catch(e){notice(e.message+' · Use the existing TestNexus sign-in screen to authenticate.');}
+ const hash=window.location.hash.replace('#','');if(['projects','stories','tasks','reports','inventory','team'].includes(hash))show(hash);else show('projects');
+ }catch(e){if(/auth|token|unauthoriz|sign.in/i.test(e.message))location.replace('/login.html');else notice(e.message);}
 }
 initialize();
 })();
