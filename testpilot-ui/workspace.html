@@ -66,6 +66,13 @@
      <div class="tn-project-summary mb-3"><strong>1.</strong> Generate evidence-grounded tests<br><strong>2.</strong> Review and approve test cases<br><strong>3.</strong> Run with Cypress and capture evidence</div>
      <button class="btn btn-primary tn-btn" data-go="stories">Select a story →</button><a href="/" class="btn btn-outline-secondary tn-btn ms-1">Existing runner ↗</a>
     </div></div></div>
+   <div class="col-12"><div class="tn-card"><div class="tn-card-head"><h2>Project testing workflow</h2><span class="tn-muted">Project-specific automated tasks; off until enabled by the project manager</span></div>
+   <div class="tn-card-body"><form id="workflowForm" class="row g-3 align-items-end">
+    <div class="col-lg-4"><label class="d-flex align-items-center gap-2"><input type="checkbox" name="autoCreateFailedTasks"> Auto-create tasks for failed tests</label><div class="tn-muted mt-1">Deduplicate active failures per project + session + case</div></div>
+    <div class="col-lg-4"><label class="d-flex align-items-center gap-2"><input type="checkbox" name="autoCloseVerifiedRetests"> Close tasks after passing QA retest</label><div class="tn-muted mt-1">Only tasks in Ready for Retest status</div></div>
+    <div class="col-lg-3"><label class="form-label">Default developer (optional)</label><select name="defaultDeveloper" class="form-select" id="workflowDeveloper"></select></div>
+    <div class="col-lg-1"><button class="btn btn-outline-secondary tn-btn" type="submit">Save</button></div>
+   </form></div></div></div>
   </div>
  </section>
  <section id="view-projects" class="tn-view">
@@ -100,6 +107,16 @@
    <div class="tn-scroll"><table class="table tn-table"><thead><tr><th><input id="allTasks" type="checkbox" aria-label="Select all tasks"></th><th>Task</th><th>Test case</th><th>Assignee</th><th>ETA</th><th>Status</th><th></th></tr></thead><tbody id="tasksBody"></tbody></table></div>
   </div>
   <div id="retestOutput" class="mt-3"></div>
+  <div class="tn-card mt-3"><div class="tn-card-head"><h2>Create project task</h2><span class="tn-muted">For investigation, review, defect fix or general work</span></div><div class="tn-card-body"><form id="newTaskForm" class="row g-2 align-items-end">
+   <div class="col-lg-4"><label class="form-label">Task title</label><input name="title" class="form-control" required></div>
+   <div class="col-lg-2"><label class="form-label">Type</label><select name="workType" class="form-select"><option>GENERAL</option><option>INVESTIGATION</option><option>DEFECT_FIX</option><option>TEST_REVIEW</option><option>RETEST</option></select></div>
+   <div class="col-lg-2"><label class="form-label">Priority</label><select name="priority" class="form-select"><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option><option>LOW</option></select></div>
+   <div class="col-lg-2"><label class="form-label">Assign to</label><select id="newTaskAssignee" name="assignedTo" class="form-select"></select></div>
+   <div class="col-lg-2"><button type="submit" class="btn btn-primary tn-btn">Create task</button></div>
+   <div class="col-lg-5"><label class="form-label">Description</label><textarea name="description" class="form-control"></textarea></div>
+   <div class="col-lg-3"><label class="form-label">Linked case ID (optional)</label><input class="form-control" name="externalCaseId" placeholder="TC001"></div>
+   <div class="col-lg-4"><label class="form-label">Due date</label><input type="datetime-local" class="form-control" name="dueAt"></div>
+  </form></div></div>
  </section>
  <section id="view-reports" class="tn-view">
   <div class="row g-3 mb-3"><div class="col-md-6"><div class="tn-card tn-stat"><b id="reportPass">—</b><span class="label">Passed tests in recorded runs</span></div></div><div class="col-md-6"><div class="tn-card tn-stat"><b id="reportFail">—</b><span class="label">Failed tests in recorded runs</span></div></div></div>
