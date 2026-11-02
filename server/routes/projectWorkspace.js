@@ -427,4 +427,23 @@ router.get('/api/projects/:projectId/report-snapshots/:reportId',requireAuth,asy
  if(req.query.format==='html'){if(!r.rows[0].report_html)throw fail(404,'HTML report unavailable.');res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',"sandbox; default-src 'none'; style-src 'unsafe-inline'");return res.send(r.rows[0].report_html);}
  const {report_html,...report}=r.rows[0];res.json({ok:true,report,hasHtml:!!report_html});
 }catch(e){respond(res,e);}});
+// Verified repairs are project-scoped suggestions; applying them still requires the existing review/approval workflow.
+router.get('/api/projects/:projectId/repair-memory',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const memory=require('../services/repairMemoryService');
+ const repairs=await memory.suggestions(req.params.projectId,{pagePath:req.query.pagePath,limit:req.query.limit});
+ res.json({ok:true,repairs,reusePolicy:'review_required'});
+}catch(e){respond(res,e);}});
+router.post('/api/projects/:projectId/repair-memory/:memoryId/events',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ const eventType=s(req.body?.eventType,20).toUpperCase();
+ if(!['SUGGESTED','APPLIED','SUCCEEDED','FAILED','REVOKED'].includes(eventType))throw fail(400,'Invalid reuse event.');
+ const sessionId=s(req.body?.sessionId,150)||null;
+ const runId=s(req.body?.runId,50)||null;
+ if(sessionId){const owned=await db.query('select 1 from test_sessions where id=$1 and project_id=$2',[sessionId,req.params.projectId]);if(!owned.rowCount)throw fail(400,'Session does not belong to project.');}
+ if(runId){const owned=await db.query('select 1 from test_runs where id=$1 and project_id=$2',[runId,req.params.projectId]);if(!owned.rowCount)throw fail(400,'Run does not belong to project.');}
+ if(['APPLIED','SUCCEEDED','FAILED'].includes(eventType)&&!runId)throw fail(400,'Run ID required for applied repair events.');
+ const result=await require('../services/repairMemoryService').recordReuse({projectId:req.params.projectId,memoryId:req.params.memoryId,sessionId,runId,eventType,userId:req.user.sub});
+ res.json({ok:true,...result});
+}catch(e){respond(res,e);}});
 module.exports=router;
