@@ -16,7 +16,7 @@ async function main(){
   const files=fs.readdirSync(__dirname).filter(name=>/^\d+.*\.sql$/i.test(name)).sort();
   const baseline=String(process.env.TESTNEXUS_MIGRATION_BASELINE||'').trim();
   if(baseline){
-   if(!/^\\d+.*\\.sql$/i.test(baseline)||!files.includes(baseline))throw new Error('Unknown baseline migration: '+baseline);
+   if(!/^\d+.*\.sql$/i.test(baseline)||!files.includes(baseline))throw new Error('Unknown baseline migration: '+baseline);
    if(process.env.TESTNEXUS_CONFIRM_BASELINE!=='I_HAVE_VERIFIED_SCHEMA')throw new Error('Set TESTNEXUS_CONFIRM_BASELINE=I_HAVE_VERIFIED_SCHEMA after verifying existing database schema.');
    const recorded=await client.query('select count(*)::int as total from schema_migrations');
    if(recorded.rows[0].total)throw new Error('Baseline is only allowed before any migrations have been recorded.');
