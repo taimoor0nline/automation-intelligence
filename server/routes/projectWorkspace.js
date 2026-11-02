@@ -212,7 +212,7 @@ router.patch('/api/work-items/:id/lifecycle',requireAuth,async(req,res)=>{
 });
 router.post('/api/work-items/:id/attachments',requireAuth,async(req,res)=>{
  try{
- const ctx=await task(req);if(ctx.item.deleted_at)throw fail(409,'Restore this task before attaching files.');
+ const ctx=await task(req);if(ctx.role==='VIEWER')throw fail(403,'Viewers cannot modify task attachments.');if(ctx.item.deleted_at)throw fail(409,'Restore this task before attaching files.');
  const f=parseFile(req.body),r=await db.query('insert into work_item_attachments(work_item_id,filename,mime_type,file_size,file_data,uploaded_by) values($1,$2,$3,$4,$5,$6) returning id,filename,mime_type,file_size,created_at',[req.params.id,f.filename,f.mime,f.buf.length,f.buf,req.user.sub]);
  res.status(201).json({ok:true,attachment:r.rows[0]});
  }catch(e){respond(res,e);}
