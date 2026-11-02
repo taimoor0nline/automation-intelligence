@@ -276,12 +276,20 @@ async function fileUpload(file,kind){
  await api(path,{method:'POST',body:JSON.stringify(body)});
 }
 async function uploadMany(files,kind){
- try{if(kind==='task'&&!state.taskId)throw Error('Open a task first.');for(const file of files)await fileUpload(file,kind);await loadWorkspace();if(kind==='task'&&state.taskId)await openTask(state.taskId);notice(files.length+' file(s) uploaded to the project database.','success');}catch(e){notice(e.message);}
+ if(!files.length)return true;
+ try{
+  if(kind==='task'&&!state.taskId)throw Error('Open a task first.');
+  for(const file of files)await fileUpload(file,kind);
+  await loadWorkspace();
+  if(kind==='task'&&state.taskId)await openTask(state.taskId);
+  notice(files.length+' file(s) uploaded.','success');
+  return true;
+ }catch(e){notice(e.message);return false;}
 }
 function dropZone(zoneId,inputId,kind){
  const zone=$(zoneId),input=$(inputId);
  zone.onclick=()=>{if(zone.getAttribute('aria-disabled')!=='true')input.click();};zone.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&zone.getAttribute('aria-disabled')!=='true'){e.preventDefault();input.click();}};
- for(const event of ['dragenter','dragover'])zone.addEventListener(event,e=>{e.preventDefault();zone.classList.add('drag');});
+ for(const event of ['dragenter','dragover'])zone.addEventListener(event,e=>{e.preventDefault();if(zone.getAttribute('aria-disabled')!=='true')zone.classList.add('drag');});
  for(const event of ['dragleave','drop'])zone.addEventListener(event,e=>{e.preventDefault();zone.classList.remove('drag');});
  zone.addEventListener('drop',e=>{if(zone.getAttribute('aria-disabled')!=='true')uploadMany([...e.dataTransfer.files],kind);});
  input.onchange=e=>{uploadMany([...e.target.files],kind);input.value='';};
@@ -376,7 +384,7 @@ function bind(){
  for(const event of ['dragleave','drop'])projectDrop.addEventListener(event,e=>{e.preventDefault();projectDrop.classList.remove('drag');});
  projectDrop.addEventListener('drop',e=>{const dt=new DataTransfer();for(const file of e.dataTransfer.files)dt.items.add(file);projectFileInput.files=dt.files;projectFileInput.dispatchEvent(new Event('change'));});
  projectFileInput.onchange=()=>{$('newProjectFileNames').textContent=[...projectFileInput.files].map(f=>f.name).join(', ');};
- $('newProjectForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target),d=await api('/api/projects',{method:'POST',body:JSON.stringify({name:vals.name,description:vals.description})});await api('/api/projects/'+encodeURIComponent(d.project.id)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:vals.referenceNo,startDate:vals.startDate,endDate:vals.endDate})});state.projectId=d.project.id;const files=[...projectFileInput.files];e.target.reset();$('newProjectFileNames').textContent='';await loadProjects();show('details');if(files.length)await uploadMany(files,'project');notice('Project created'+(files.length?' with '+files.length+' attachment(s)':'')+'.','success');}catch(err){notice(err.message);}};
+ $('newProjectForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target),d=await api('/api/projects',{method:'POST',body:JSON.stringify({name:vals.name,description:vals.description})});await api('/api/projects/'+encodeURIComponent(d.project.id)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:vals.referenceNo,startDate:vals.startDate,endDate:vals.endDate})});state.projectId=d.project.id;const files=[...projectFileInput.files];e.target.reset();$('newProjectFileNames').textContent='';await loadProjects();show('details');const uploaded=files.length?await uploadMany(files,'project'):true;if(uploaded)notice('Project created'+(files.length?' with '+files.length+' attachment(s)':'')+'.','success');else notice('Project created, but one or more attachments failed. Check the Attachments tab.','warning');}catch(err){notice(err.message);}};
  $('environmentForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments',{method:'POST',body:JSON.stringify({...vals,isDefault:!!e.target.elements.namedItem('isDefault').checked})});e.target.reset();await loadWorkspace();notice('Environment saved.','success');}catch(err){notice(err.message);}};
  $('storyForm').onsubmit=async e=>{e.preventDefault();try{await saveStory();}catch(err){notice(err.message);}};
  $('storyClear').onclick=clearStory;
@@ -460,8 +468,8 @@ function enableSearchableSelects(){
   select.addEventListener('change',restore);
   select.addEventListener('focus',()=>{if(!search.value)snapshot();});
  };
- document.querySelectorAll('select').forEach(setup);
- new MutationObserver(()=>document.querySelectorAll('select:not([data-search-enhanced])').forEach(setup)).observe(document.body,{childList:true,subtree:true});
+ document.querySelectorAll('select:is(#memberUser,#newTaskAssignee,#teamDirectory,#teamMemberUser,#workflowDeveloper)').forEach(setup);
+ new MutationObserver(()=>document.querySelectorAll('select:is(#memberUser,#newTaskAssignee,#teamDirectory,#teamMemberUser,#workflowDeveloper):not([data-search-enhanced])').forEach(setup)).observe(document.body,{childList:true,subtree:true});
 }
 async function initialize(){
  bind();enableSearchableSelects();try{
