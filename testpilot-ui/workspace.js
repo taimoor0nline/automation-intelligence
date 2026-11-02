@@ -50,9 +50,9 @@ async function loadProjects(){
  localStorage.setItem('testnexus:currentProject',state.projectId);
 }
 async function loadWorkspace(){
- const pid=state.projectId; state.context=null;state.tasks=[];state.evidence=[];
- if(!pid){['statStories','statRuns','statTasks','statDocs'].forEach(id=>$(id).textContent='0');return;}
- const results=await Promise.allSettled([api('/api/projects/'+encodeURIComponent(pid)+'/workspace'),api('/api/projects/'+encodeURIComponent(pid)+'/work-items'),api('/api/projects/'+encodeURIComponent(pid)+'/evidence')]);
+ const pid=state.projectId; $('workspaceLoading').classList.remove('d-none');document.querySelector('.tn-container').setAttribute('aria-busy','true');state.context=null;state.tasks=[];state.evidence=[];
+ if(!pid){['statStories','statRuns','statTasks','statDocs'].forEach(id=>$(id).textContent='0');$('workspaceLoading').classList.add('d-none');document.querySelector('.tn-container').removeAttribute('aria-busy');return;}
+ try{const results=await Promise.allSettled([api('/api/projects/'+encodeURIComponent(pid)+'/workspace'),api('/api/projects/'+encodeURIComponent(pid)+'/work-items'),api('/api/projects/'+encodeURIComponent(pid)+'/evidence')]);
  if(results[0].status!=='fulfilled')throw results[0].reason;
  state.context=results[0].value;
  state.tasks=results[1].status==='fulfilled'?results[1].value.workItems||[]:[];
@@ -60,6 +60,7 @@ async function loadWorkspace(){
  renderAll();
  try{await loadWorkflow();}catch(err){console.warn('Project workflow settings unavailable:',err.message);}
  if(results[1].status!=='fulfilled'||results[2].status!=='fulfilled')notice('Some project data could not be loaded. Check your access and database configuration.','warning');
+ }finally{$('workspaceLoading').classList.add('d-none');document.querySelector('.tn-container').removeAttribute('aria-busy');}
 }
 function renderAll(){renderOverview();renderStoryList();renderTasks();renderReports();renderTeam();}
 function renderOverview(){
@@ -178,7 +179,10 @@ async function openTask(id){
  const d=await api('/api/work-items/'+encodeURIComponent(id)+'/details');state.taskId=id;const t=d.task;
  $('drawerTitle').textContent=t.title;
  $('drawerInfo').innerHTML=(d.parent?'<div class="tn-kv"><span>Parent task</span><button class="tn-link" data-task="'+esc(d.parent.id)+'">'+esc(d.parent.title)+'</button></div>':'')+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+esc(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div><div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+' · '+(t.closed_by_name?'By '+esc(t.closed_by_name):'')+'</span></div><p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
- $('linkSession').value=t.session_id||'';$('linkCase').value=t.external_case_id||'';await loadTaskLinks(id);
+ $('linkSession').value=t.session_id||'';$('linkCase').value=t.external_case_id||'';
+ $('sessionChoices').innerHTML=[...new Set([t.session_id,...(state.context?.runs||[]).map(r=>r.session_id)].filter(Boolean))].slice(0,100).map(v=>'<option value="'+esc(v)+'"></option>').join('');
+ $('caseChoices').innerHTML=[...new Set([t.external_case_id,...state.evidence.map(e=>e.external_case_id),...state.tasks.map(x=>x.external_case_id)].filter(Boolean))].slice(0,250).map(v=>'<option value="'+esc(v)+'"></option>').join('');
+ const canLink=['PROJECT_MANAGER','QA'].includes(d.projectRole);$('testLinkForm').querySelectorAll('input,button').forEach(el=>el.disabled=!canLink);await loadTaskLinks(id);
  $('taskEta').value=t.eta_at?new Date(t.eta_at).toISOString().slice(0,16):'';
  $('taskDeferDate').value=t.deferred_until?new Date(t.deferred_until).toISOString().slice(0,16):'';
  $('taskReason').value='';
