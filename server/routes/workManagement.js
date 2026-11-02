@@ -88,9 +88,9 @@ router.delete('/api/projects/:projectId/members/:userId', requireAuth, async (re
 router.get('/api/projects/:projectId/work-summary', requireAuth, async (req,res) => {
   try {
     await assertProjectAccess(req, req.params.projectId);
-    const status = await db.query('select status,count(*)::int count from work_items where project_id=$1 group by status',[req.params.projectId]);
-    const type = await db.query('select work_type,count(*)::int count from work_items where project_id=$1 group by work_type',[req.params.projectId]);
-    const overdue = await db.query("select count(*)::int count from work_items where project_id=$1 and due_at<now() and status not in ('COMPLETED','CANCELLED')",[req.params.projectId]);
+    const status = await db.query('select status,count(*)::int count from work_items where project_id=$1 and deleted_at is null group by status',[req.params.projectId]);
+    const type = await db.query('select work_type,count(*)::int count from work_items where project_id=$1 and deleted_at is null group by work_type',[req.params.projectId]);
+    const overdue = await db.query("select count(*)::int count from work_items where project_id=$1 and deleted_at is null and due_at<now() and status not in ('COMPLETED','CANCELLED')",[req.params.projectId]);
     res.json({ ok:true, byStatus:Object.fromEntries(status.rows.map(x=>[x.status,x.count])), byType:Object.fromEntries(type.rows.map(x=>[x.work_type,x.count])), overdue:overdue.rows[0].count });
   } catch(err) { res.status(err.statusCode||500).json({ reply:err.message }); }
 });
@@ -98,7 +98,7 @@ router.get('/api/projects/:projectId/work-summary', requireAuth, async (req,res)
 router.get('/api/projects/:projectId/work-items', requireAuth, async (req,res) => {
   try {
     const member = await assertProjectAccess(req, req.params.projectId);
-    const conditions=['w.project_id=$1']; const values=[req.params.projectId];
+    const conditions=['w.project_id=$1','w.deleted_at is null']; const values=[req.params.projectId];
     const projectRole=String(member.project_role||'').toUpperCase();
     if (!member.platformManager && projectRole==='DEVELOPER') { values.push(req.user.sub); conditions.push(`w.assigned_to=$${values.length}`); }
     if (req.query.status) { values.push(clean(req.query.status,50).toUpperCase()); conditions.push(`w.status=$${values.length}`); }
@@ -113,7 +113,7 @@ router.get('/api/projects/:projectId/work-items', requireAuth, async (req,res) =
 
 router.get('/api/my-work-items', requireAuth, async (req,res) => {
   try {
-    const result=await db.query(`select w.*,p.name project_name from work_items w join projects p on p.id=w.project_id where w.assigned_to=$1 order by w.updated_at desc limit 500`,[req.user.sub]);
+    const result=await db.query(`select w.*,p.name project_name from work_items w join projects p on p.id=w.project_id where w.assigned_to=$1 and w.deleted_at is null order by w.updated_at desc limit 500`,[req.user.sub]);
     res.json({ ok:true, workItems:result.rows });
   } catch(err) { res.status(500).json({ reply:err.message }); }
 });
@@ -158,7 +158,7 @@ router.patch('/api/work-items/:id/status', requireAuth, async (req,res) => {
     const isAssignee=String(item.assigned_to||'')===String(req.user.sub||''); const canManage=member.platformManager||['PROJECT_MANAGER','QA'].includes(projectRole);
     if(!canManage&&!isAssignee)return res.status(403).json({reply:'Only the assignee, Project Manager, or QA can change this work item.'});
     if(projectRole==='DEVELOPER'&&next==='COMPLETED')return res.status(409).json({reply:'Developers move fixes to READY_FOR_RETEST. COMPLETED is set after QA/system verification.'});
-    const updated=await db.withTransaction(async client=>{const r=await client.query(`update work_items set status=$1,started_at=case when $1='IN_PROGRESS' and started_at is null then now() else started_at end,completed_at=case when $1='COMPLETED' then now() when status='COMPLETED' and $1<>'COMPLETED' then null else completed_at end,updated_at=now() where id=$2 returning *`,[next,item.id]);await addHistory(client,item.id,'STATUS_CHANGED',item.status,next,req.user.sub,req.body?.comment||'');if(next==='READY_FOR_RETEST'){const qa=await client.query("select user_id from project_members where project_id=$1 and project_role in ('QA','PROJECT_MANAGER')",[item.project_id]);for(const x of qa.rows)await enqueueNotification(client,{projectId:item.project_id,userId:x.user_id,eventType:'READY_FOR_RETEST',subject:`Ready for retest: ${item.title}`,payload:{workItemId:item.id,externalCaseId:item.external_case_id}});}return r.rows[0]});
+    const updated=await db.withTransaction(async client=>{const r=await client.query(`update work_items set status=$1,started_at=case when $1='IN_PROGRESS' and started_at is null then now() else started_at end,completed_at=case when $1='COMPLETED' then now() when status='COMPLETED' and $1<>'COMPLETED' then null else completed_at end,closed_at=case when $1='COMPLETED' then now() when status='COMPLETED' and $1<>'COMPLETED' then null else closed_at end,closed_by=case when $1='COMPLETED' then $3::uuid when status='COMPLETED' and $1<>'COMPLETED' then null else closed_by end,updated_at=now() where id=$2 returning *`,[next,item.id,req.user.sub]);await addHistory(client,item.id,'STATUS_CHANGED',item.status,next,req.user.sub,req.body?.comment||'');if(next==='READY_FOR_RETEST'){const qa=await client.query("select user_id from project_members where project_id=$1 and project_role in ('QA','PROJECT_MANAGER')",[item.project_id]);for(const x of qa.rows)await enqueueNotification(client,{projectId:item.project_id,userId:x.user_id,eventType:'READY_FOR_RETEST',subject:`Ready for retest: ${item.title}`,payload:{workItemId:item.id,externalCaseId:item.external_case_id}});}return r.rows[0]});
     res.json({ok:true,workItem:updated});
   } catch(err){res.status(err.statusCode||500).json({reply:err.message});}
 });
