@@ -262,7 +262,10 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  if(r.rows.length>500)throw fail(400,'Task hierarchy exceeds 500 items; narrow your selection.');
  if(!ids.every(selected=>r.rows.some(item=>item.id===selected)))throw fail(400,'Task selection contains missing or unauthorized tasks.');
  const groups=new Map(),blocked=[];
- for(const item of r.rows) {
+ const links=await db.query('select work_item_id,session_id,external_case_id from task_test_case_links where project_id=$1 and work_item_id=any($2::uuid[])',[req.params.projectId,r.rows.map(x=>x.id)]);
+ const linked=links.rows.map(x=>({id:x.work_item_id,session_id:x.session_id,external_case_id:x.external_case_id}));
+ const candidates=[...linked,...r.rows.filter(x=>!linked.some(y=>y.id===x.id))];
+ for(const item of candidates) {
  if(!item.session_id || !item.external_case_id){blocked.push({taskId:item.id,reason:'No linked session/test case'});continue;}
  const session=getSession(item.session_id);
  const tc=(session.testCases||[]).find(x=>String(x.id).toUpperCase()===String(item.external_case_id).toUpperCase());
