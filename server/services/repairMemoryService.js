@@ -74,7 +74,9 @@ async function recordReuse({projectId,memoryId,sessionId,runId,eventType,userId}
  return db.withTransaction(async client=>{
   const row=await client.query("select id,status from ai_repair_memory where id=$1 and project_id=$2 for update",[memoryId,projectId]);
   if(!row.rowCount)throw Error('Repair memory not found in project');
-  if(row.rows[0].status!=='VERIFIED'&&eventType!=='REVOKED')throw Error('Only verified repairs can be reused');
+  if(row.rows[0].status==='REVOKED'&&eventType!=='REVOKED')throw Error('Revoked repairs cannot be reused');
+  if(row.rows[0].status!=='VERIFIED'&&!['APPLIED','REVOKED'].includes(eventType))throw Error('Only verified repairs may be suggested or counted as reused');
+  if(eventType==='SUCCEEDED')throw Error('Use the verified passing-run endpoint to record success');
   if(eventType==='REVOKED')await client.query("update ai_repair_memory set status='REVOKED',updated_at=now() where id=$1",[memoryId]);
   if(eventType==='SUCCEEDED'||eventType==='FAILED'){
    if(!uuid(runId))throw Error('A completed run ID is required to record a repair outcome');
