@@ -92,3 +92,12 @@ body[data-density=compact] .form-control,body[data-density=compact] .form-select
 .tn-error-action{margin-left:10px}
 .tn-inline-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 @media(max-width:760px){.tn-preferences{right:12px;top:115px}.tn-timeline-item{align-items:flex-start}.tn-health-chip{flex-basis:45%}}
+
+
+/* WCAG AA contrast: table headings and compact secondary copy */
+.tn-table thead th{color:#465673;background:#f7f9fd}
+.tn-empty,.tn-kv span:first-child{color:#465673}
+.tn-muted,.tn-timeline-meta{color:#526179}
+.tn-table tbody tr:hover{background:#f4f7ff}
+body[data-theme=dark] .tn-table thead th{color:#e0e9fa;background:#263448}
+body[data-theme=dark] .tn-empty,body[data-theme=dark] .tn-kv span:first-child,body[data-theme=dark] .tn-muted,body[data-theme=dark] .tn-timeline-meta{color:#c5d0e2}
