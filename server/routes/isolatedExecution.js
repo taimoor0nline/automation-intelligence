@@ -192,7 +192,6 @@ async function persistCompletedRun(sessionId, session, userId) {
       repositoryId: session.repositoryId,
       userId: userId || session.createdBy || null,
     });
-    await persistence.persistTestCases(sessionId, session.testCases || []);
     const persistedRunId = await persistence.persistRun({
       sessionId,
       session,
