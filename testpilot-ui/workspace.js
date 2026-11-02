@@ -14,10 +14,6 @@ async function api(url,options={}){
  if(!r.ok)throw Error(d.reply||'Request failed ('+r.status+')');
  return d;
 }
-const UI_KEY='testnexus:ui-preferences';
-function prefsRead(){try{return JSON.parse(localStorage.getItem(UI_KEY)||'{}')}catch{return {}}}
-function applyPreferences(){const p=prefsRead();const mode=['light','dark','system'].includes(p.theme)?p.theme:'light';const actual=mode==='system'&&window.matchMedia?.('(prefers-color-scheme: dark)').matches?'dark':mode==='system'?'light':mode;document.body.dataset.theme=actual;document.body.dataset.density=p.density==='compact'?'compact':'comfortable';$('themePreference').value=mode;$('densityPreference').value=document.body.dataset.density;}
-function savePreferences(){localStorage.setItem(UI_KEY,JSON.stringify({theme:$('themePreference').value,density:$('densityPreference').value}));applyPreferences();}
 async function loadTaskLinks(id){const box=$('drawerTestLinks');box.textContent='Loading linked cases…';try{const d=await api('/api/work-items/'+encodeURIComponent(id)+'/test-links');if(state.taskId!==id)return;const canEdit=['PROJECT_MANAGER','QA'].includes(state.taskRole);box.innerHTML=d.links.length?d.links.map(x=>'<div class="tn-sub tn-row"><span><strong>'+esc(x.external_case_id)+'</strong><span class="tn-muted d-block">Session '+esc(x.session_id)+'</span></span><button class="tn-link" data-unlink-test="'+esc(x.id)+'" aria-label="Unlink case '+esc(x.external_case_id)+'">Unlink</button></div>').join(''):'<p class="tn-muted">No reusable test cases linked. Use the form below to add one.</p>'; }catch(err){box.textContent='Unable to load linked cases: '+err.message;}}
 function formPayload(form){return Object.fromEntries(new FormData(form).entries());}
 function date(v){return v?new Date(v).toLocaleDateString():'—';}
@@ -89,7 +85,7 @@ function renderOverview(){
  $('profileMeta').innerHTML='<strong>Dates:</strong> '+date(p.start_date)+' – '+date(p.end_date)+'<br><strong>Target:</strong> '+display(p.target_url)+'<br><strong>Technology:</strong> '+display(p.technology_stack);
  const latest=c.runs[0]||null;const pending=state.tasks.filter(t=>!t.deleted_at&&t.status==='READY_FOR_RETEST').length;const successes=c.runs.reduce((n,r)=>n+Number(r.passed||0),0),failures=c.runs.reduce((n,r)=>n+Number(r.failed||0),0);const rate=successes+failures?Math.round(100*successes/(successes+failures))+'%':'—';$('overviewHealth').innerHTML='<div class="tn-health-chip"><strong>'+rate+'</strong>Recorded pass rate</div><div class="tn-health-chip"><strong>'+pending+'</strong>Ready for retest</div><div class="tn-health-chip"><strong>'+(latest?'#'+esc(latest.run_number):'—')+'</strong>Latest run</div><div class="tn-health-chip"><strong>'+c.environments.length+'</strong>Environments</div>';
  $('environmentList').innerHTML=c.environments.map(e=>'<div class="tn-kv"><span>'+esc(e.name)+(e.is_default?' ★':'')+'</span><span>'+esc(e.base_url)+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
- $('projectFilesList').innerHTML=c.documents.map(d=>'<div class="tn-kv"><span>'+esc(d.category)+'</span><span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button> <small class="tn-muted">v'+esc(d.version)+' · '+Math.ceil(d.file_size/1024)+' KB</small></span></div>').join('')||'<div class="tn-muted">No documents attached yet.</div>';
+ $('profileDocumentList').innerHTML=c.documents.map(d=>'<div class="tn-kv"><span>'+esc(d.category)+'</span><span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button> <small class="tn-muted">'+Math.ceil(d.file_size/1024)+' KB</small></span></div>').join('')||'<div class="tn-muted">No documents attached yet.</div>';
 }
 function renderStoryList(){
  const c=state.context;
@@ -255,7 +251,7 @@ async function fileUpload(file,kind){
  const mime={'pdf':'application/pdf','doc':'application/msword','docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','xls':'application/vnd.ms-excel','xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','webp':'image/webp','txt':'text/plain','csv':'text/csv','zip':'application/zip'}[ext];
  const data=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<data.length;i+=32768)binary+=String.fromCharCode.apply(null,data.subarray(i,i+32768));
  const body={filename:file.name,mimeType:mime,base64:btoa(binary)};
- if(kind==='project'){body.category=$('documentCategory').value;body.version=$('documentVersion').value;}
+ if(kind==='project'){body.category='OTHER';}
  const path=kind==='project'?'/api/projects/'+encodeURIComponent(requireProject())+'/documents':'/api/work-items/'+encodeURIComponent(state.taskId)+'/attachments';
  await api(path,{method:'POST',body:JSON.stringify(body)});
 }
@@ -337,12 +333,6 @@ function bind(){
  $('teamAttachForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTeams();notice('Team attached.','success');}catch(err){notice(err.message);}};
  $('projectTeams').onclick=async e=>{const btn=e.target.closest('[data-detach-team]');if(!btn)return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams/'+encodeURIComponent(btn.dataset.detachTeam),{method:'DELETE'});await loadTeams();}catch(err){notice(err.message);}};
 
- applyPreferences();
- $('uiPreferences').onclick=()=>{const panel=$('preferencesPanel');panel.hidden=!panel.hidden;$('uiPreferences').setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)$('themePreference').focus();};
- document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('preferencesPanel').hidden){$('preferencesPanel').hidden=true;$('uiPreferences').setAttribute('aria-expanded','false');$('uiPreferences').focus();}});
- document.addEventListener('click',e=>{if(!$('preferencesPanel').hidden&&!e.target.closest('#preferencesPanel,#uiPreferences')){$('preferencesPanel').hidden=true;$('uiPreferences').setAttribute('aria-expanded','false');}});
- $('themePreference').onchange=savePreferences;$('densityPreference').onchange=savePreferences;
- window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change',()=>{if(prefsRead().theme==='system')applyPreferences()});
  $('testLinkForm').onsubmit=async e=>{e.preventDefault();try{const id=state.taskId;if(!id)throw Error('Open a task first.');await api('/api/work-items/'+encodeURIComponent(id)+'/test-links',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTaskLinks(id);notice('Test case linked to task.','success');}catch(err){notice(err.message);}};
  $('drawerTestLinks').addEventListener('click',async e=>{const b=e.target.closest('[data-unlink-test]');if(!b)return;try{const id=state.taskId;await api('/api/work-items/'+encodeURIComponent(id)+'/test-links/'+encodeURIComponent(b.dataset.unlinkTest),{method:'DELETE'});await loadTaskLinks(id);notice('Test case unlinked.','success');}catch(err){notice(err.message);}});
 
@@ -393,6 +383,7 @@ function bind(){
  $('editProfile').onclick=()=>{
  const p=state.context?.project;if(!p)return;const f=$('profileForm');
  for(const [k,v] of Object.entries({name:p.name,referenceNo:p.reference_no,startDate:p.start_date?.slice(0,10),endDate:p.end_date?.slice(0,10),description:p.description,objectives:p.objectives,scopeIn:p.scope_in,scopeOut:p.scope_out,businessRules:p.business_rules,acceptanceCriteria:p.acceptance_criteria,targetUrl:p.target_url,technologyStack:p.technology_stack})){const el=f.elements.namedItem(k);if(el)el.value=v||'';}
+ $('profileDocumentList').innerHTML=(state.context?.documents||[]).map(d=>'<div class="tn-kv"><span>'+esc(d.category)+'</span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button></div>').join('')||'<span class="tn-muted">No documents attached.</span>';
  bootstrap.Modal.getOrCreateInstance($('profileModal')).show();
  };
  $('profileForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/profile',{method:'PATCH',body:JSON.stringify(formPayload(e.target))});bootstrap.Modal.getOrCreateInstance($('profileModal')).hide();await loadWorkspace();notice('Project profile saved.','success');}catch(err){notice(err.message);}};
