@@ -22,6 +22,7 @@ function createSession() {
     apiOperationIds: [],
     apiOperations: [],
     projectId: null,
+    projectStoryId: null,
     repositoryId: null,
     createdBy: null,
     pageDiscoveries: [],
@@ -84,6 +85,7 @@ function resetSession(id) {
     // Generating a new suite must not detach it from its authorized project
     // or accidentally make verified history available under another project.
     session.projectId = previous.projectId || null;
+    session.projectStoryId = previous.projectStoryId || null;
     session.repositoryId = previous.repositoryId || null;
     session.createdBy = previous.createdBy || null;
     session.behaviorRules = Array.isArray(previous.behaviorRules) ? previous.behaviorRules.map((rule) => ({ ...rule })) : [];
