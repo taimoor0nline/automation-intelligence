@@ -27,10 +27,12 @@ function show(view){
  state.view=view;
  document.querySelectorAll('.tn-view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));
  document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===view;el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
- const labels={overview:'Project overview',projects:'Projects',stories:'Stories & test generation',tasks:'Tasks & retesting',reports:'Test reports & evidence',team:'Team & roles'};
+ const labels={overview:'Project overview',projects:'Projects',stories:'Stories & test generation',tasks:'Tasks & retesting',reports:'Test reports & evidence',inventory:'Test inventory & audit',team:'Team & roles'};
  $('pageTitle').textContent=labels[view]||'TestNexus';
  $('pageSubtitle').textContent=view==='stories'?'Write or reuse a project story; generation/review/execution stays in the existing Test Studio':view==='tasks'?'Attach evidence, collaborate, close/defer tasks and retest one or many using the existing runner':'Scope, documents, assignments and quality history in one place';
  clearNotice();
+ if(view==='inventory'&&state.projectId)loadInventory().catch(e=>notice(e.message));
+ if(view==='team'&&state.projectId)loadTeams().catch(e=>notice(e.message));
  window.history.replaceState(null,'','#'+view);
 }
 function requireProject(){if(!state.projectId)throw Error('Select or create a project first.');return state.projectId;}
@@ -176,6 +178,8 @@ async function loadWorkflow(){
  const locked=d.projectRole!=='PROJECT_MANAGER';
  f.querySelectorAll('input,select,button').forEach(x=>x.disabled=locked);
 }
+async function loadInventory(){const project=requireProject();const [inventory,audit]=await Promise.all([api('/api/projects/'+encodeURIComponent(project)+'/test-inventory'),api('/api/projects/'+encodeURIComponent(project)+'/audit')]);$('inventoryCases').innerHTML=inventory.cases.map(x=>'<tr><td>'+esc(x.story_reference||'Unlinked')+'</td><td>'+esc(x.title)+'<div class="tn-muted">'+esc(x.external_case_id)+'</div></td><td>'+esc(x.priority||'—')+'</td><td>'+esc(x.session_id)+'</td></tr>').join('')||'<tr><td colspan="4">No cases yet.</td></tr>';$('inventoryStories').innerHTML=inventory.stories.map(x=>'<tr><td>'+esc(x.reference_no||'')+' · '+esc(x.title)+'</td><td>'+x.generation_count+'</td><td>'+x.case_count+'</td><td>'+x.execution_count+'</td></tr>').join('')||'<tr><td colspan="4">No stories yet.</td></tr>';$('inventoryAudit').innerHTML=audit.events.map(x=>'<tr><td>'+esc(x.event_type)+'</td><td>'+esc(x.actor_name||'System')+'</td><td>'+dateTime(x.created_at)+'</td></tr>').join('')||'<tr><td colspan="3">No recorded audit events yet.</td></tr>';}
+async function loadTeams(){const project=requireProject();const [all,attached,assignees]=await Promise.all([api('/api/teams'),api('/api/projects/'+encodeURIComponent(project)+'/teams'),api('/api/projects/'+encodeURIComponent(project)+'/team-assignees')]);$('teamDirectory').innerHTML='<option value="">Select team</option>'+all.teams.map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>').join('');$('projectTeams').innerHTML=attached.teams.map(t=>'<div class="d-flex align-items-center justify-content-between py-2 border-bottom"><strong>'+esc(t.name)+'</strong><button class="btn btn-sm btn-outline-danger" data-detach-team="'+esc(t.id)+'">Detach</button></div>').join('')||'<p class="tn-muted">No teams attached.</p>';$('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+assignees.users.map(u=>'<option value="'+esc(u.id)+'">'+esc(u.display_name)+'</option>').join('');}
 function renderTeam(){
  $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td>'+esc(m.display_name)+'</td><td>'+esc(m.email)+'</td><td>'+statusTag(m.project_role)+'</td></tr>').join('')||'<tr><td colspan="3" class="tn-empty">No members.</td></tr>';
  const list=state.users||state.context.members;
@@ -319,6 +323,11 @@ async function retest(taskIds,includeChildren=false){
 }
 let lastTaskTrigger=null;
 function bind(){
+ $('inventoryRefresh').onclick=()=>loadInventory().catch(e=>notice(e.message));
+ $('teamCreateForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});e.target.reset();await loadTeams();notice('Team created.','success');}catch(err){notice(err.message);}};
+ $('teamAttachForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTeams();notice('Team attached.','success');}catch(err){notice(err.message);}};
+ $('projectTeams').onclick=async e=>{const btn=e.target.closest('[data-detach-team]');if(!btn)return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams/'+encodeURIComponent(btn.dataset.detachTeam),{method:'DELETE'});await loadTeams();}catch(err){notice(err.message);}};
+
  applyPreferences();
  $('uiPreferences').onclick=()=>{const panel=$('preferencesPanel');panel.hidden=!panel.hidden;$('uiPreferences').setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)$('themePreference').focus();};
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('preferencesPanel').hidden){$('preferencesPanel').hidden=true;$('uiPreferences').setAttribute('aria-expanded','false');$('uiPreferences').focus();}});
@@ -409,7 +418,7 @@ async function initialize(){
  if(!token()){notice('Sign in through Run Tests first, then return Home. Project data is served from your TestNexus database.','warning');return;}
  const me=await api('/api/auth/me');state.user=me.user;$('currentUser').textContent=me.user?.name||me.user?.email||'';
  await loadProjects();await fetchDirectory();clearStory();
- const hash=window.location.hash.replace('#','');if(['overview','projects','stories','tasks','reports','team'].includes(hash))show(hash);else show('projects');
+ const hash=window.location.hash.replace('#','');if(['overview','projects','stories','tasks','reports','inventory','team'].includes(hash))show(hash);else show('projects');
  }catch(e){notice(e.message+' · Use the existing TestNexus sign-in screen to authenticate.');}
 }
 initialize();
