@@ -10,9 +10,10 @@ CREATE TABLE IF NOT EXISTS test_report_snapshots (
  report_json JSONB NOT NULL,
  report_html TEXT,
  recorded_by UUID REFERENCES users(id) ON DELETE SET NULL,
- created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- UNIQUE(session_id,run_id,report_kind,revision) NULLS NOT DISTINCT
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+
 );
 CREATE INDEX IF NOT EXISTS idx_report_snapshots_project ON test_report_snapshots(project_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_report_snapshots_session ON test_report_snapshots(session_id,report_kind,created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_report_review_case_revision ON test_report_snapshots(session_id,external_case_id,revision) WHERE report_kind='REVIEWED_CASE';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_report_run_kind ON test_report_snapshots(run_id,report_kind,revision) WHERE run_id IS NOT NULL;
