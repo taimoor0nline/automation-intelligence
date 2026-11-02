@@ -183,6 +183,7 @@ function sendEvidence(kind) {
 }
 
 const { applyProjectWorkflow } = require('../services/projectWorkflowAutomation');
+const { retainExecutionEvidence } = require('../services/retainedExecutionEvidence');
 async function persistCompletedRun(sessionId, session, userId) {
   if (!persistence.enabled()) return;
   try {
@@ -192,7 +193,7 @@ async function persistCompletedRun(sessionId, session, userId) {
       userId: userId || session.createdBy || null,
     });
     await persistence.persistTestCases(sessionId, session.testCases || []);
-    await persistence.persistRun({
+    const persistedRunId = await persistence.persistRun({
       sessionId,
       session,
       runNumber: session.lastResults?.runNumber,
@@ -200,6 +201,8 @@ async function persistCompletedRun(sessionId, session, userId) {
       approvedIds: session.approvedIds || [],
       userId: userId || session.createdBy || null,
     });
+    try { await retainExecutionEvidence({projectId:session.projectId,runId:persistedRunId,sessionArtifacts:session.artifacts}); }
+    catch (evidenceError) { console.error('[evidence-retention] retention failed',evidenceError); }
     try { await applyProjectWorkflow({sessionId,projectId:session.projectId,runNumber:session.lastResults?.runNumber,executedBy:userId||session.createdBy||null}); }
     catch (workflowError) { console.error('[project-workflow] automation failed',workflowError); }
   } catch (err) {
