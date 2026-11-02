@@ -129,6 +129,12 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     }
 
     if (storyId) { const story=await db.query('select id from project_stories where id=$1 and project_id=$2',[storyId,projectId]); if(!story.rowCount)return res.status(400).json({reply:'Story does not belong to selected project.'}); }
+    const existingSession=await db.query('select project_id,created_by from test_sessions where id=$1',[req.params.sessionId]);
+    if(existingSession.rowCount){
+      const row=existingSession.rows[0];
+      if(row.project_id&&String(row.project_id)!==projectId)return res.status(409).json({reply:'This session is already associated with another project.'});
+      if(row.created_by&&String(row.created_by)!==String(req.user.sub)&&String(req.user.role).toUpperCase()!=='MANAGER')return res.status(403).json({reply:'Only the session owner or platform manager may attach its project context.'});
+    }
     const session = getSession(req.params.sessionId);
     session.projectStoryId = storyId || null;
     session.projectId = projectId;
@@ -137,8 +143,8 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     await persistence.persistSession(req.params.sessionId, session, { projectId, repositoryId: repositoryId || null, userId: req.user.sub });
     await db.query('update test_sessions set project_story_id=$1 where id=$2 and project_id=$3',[storyId||null,req.params.sessionId,projectId]);
     if(storyId){
-      await db.query('insert into story_test_sessions(story_id,session_id) values($1,$2) on conflict do nothing',[storyId,req.params.sessionId]);
-      await db.query("insert into project_audit_events(project_id,story_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,$4,'STORY_SESSION_LINKED',$5::jsonb)",[projectId,storyId,req.params.sessionId,req.user.sub,JSON.stringify({repositoryId:repositoryId||null})]);
+      const linked=await db.query('insert into story_test_sessions(story_id,session_id) values($1,$2) on conflict do nothing returning story_id',[storyId,req.params.sessionId]);
+      if(linked.rowCount)await db.query("insert into project_audit_events(project_id,story_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,$4,'STORY_SESSION_LINKED',$5::jsonb)",[projectId,storyId,req.params.sessionId,req.user.sub,JSON.stringify({repositoryId:repositoryId||null})]);
     }
     res.json({ ok: true, projectId, repositoryId: repositoryId || null, storyId: storyId||null });
   } catch (err) {
