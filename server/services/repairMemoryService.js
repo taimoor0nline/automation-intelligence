@@ -61,6 +61,18 @@ async function verifyApplied({projectId,memoryId,runId,userId}){
   return {verified:true};
  });
 }
+function recommendation(row){
+ const before=String(row.original_selector||'');
+ const after=String(row.replacement_selector||'');
+ return {
+  title:'Use a verified element locator',
+  summary:'An earlier execution confirmed an alternative element locator for this page. Review the proposed change before applying it.',
+  pagePath:row.page_path,
+  previousLocator:before,
+  recommendedLocator:after,
+  automationPatch:{language:'javascript',engine:'cypress',snippet:'cy.get('+JSON.stringify(after)+')',reviewRequired:true},
+ };
+}
 async function suggestions(projectId,{pagePath,limit=20}={}){
  if(!db.isConfigured()||!uuid(projectId))return [];
  const values=[projectId];let condition='';
@@ -90,4 +102,4 @@ async function recordReuse({projectId,memoryId,sessionId,runId,eventType,userId}
   return {recorded:!!r.rowCount};
  });
 }
-module.exports={normalize,isVerified,captureVerified,propose,verifyApplied,suggestions,recordReuse};
+module.exports={normalize,isVerified,captureVerified,propose,verifyApplied,suggestions,recommendation,recordReuse};
