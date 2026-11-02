@@ -17,18 +17,21 @@ The UI is implemented over the existing Project Workspace and three-phase Test S
 | Automated accessibility | scripts/project-workspace-smoke.js | Run semantic checks and manual axe-core browser audit (WCAG 2.2 AA target) |
 | Preferences | workspace.html/js/css, platform-ui.js | Light/dark/system, compact/comfortable, persistence across Workspace and Test Studio |
 
-## Verification performed
-- Repository-side JavaScript syntax and required-control assertions.
-- Reviewed consistency of new IDs, API paths and UI selectors.
-- Verified the PR references the intended feature branch and production target.
+## Verification performed in GitHub Actions
+The automated MMP workflow now checks:
+- Node workspace syntax and control contracts, plus permission/recovery route regression tests.
+- PostgreSQL 16 migrations 001–017 in a disposable CI database, with schema/FK/uniqueness validation.
+- Authenticated HTTP API integration against PostgreSQL: project isolation, task children, persistent case links, task history and retest planning.
+- Cypress/Electron browser coverage with mocked backend data: parent/child navigation, linked case add/remove, display preferences, mobile width and axe-core checks across workspace views.
+- The separate existing repair-learning safeguard workflow.
 
-## Still required for production acceptance
-1. Run `npm run test:project-workspace` in an actual checkout.
-2. Apply database migrations 014–017 in a disposable PostgreSQL environment and verify rollback/recovery.
-3. Exercise task-case linking as project manager, QA, developer and viewer and verify permissions.
-4. Run existing Cypress workflow end-to-end for project, parent, child, and selected tasks; validate screenshots and videos.
-5. Run browser accessibility audits using axe-core plus manual keyboard and screen-reader checks.
-6. Test desktop/mobile viewport matrix and actual devices in Chrome, Edge, Firefox, and Safari where supported.
-7. Resolve regressions, deploy to staging, obtain acceptance, and only then merge to `live-browser-streaming`.
+**The checks must be green on the exact merge head.** A checked source file or an earlier passing commit is not equivalent to current CI.
 
-Static checks do not establish browser accessibility or MMP production readiness.
+## Acceptance that remains environment-dependent
+1. Stage a deployment against an actual configured TestNexus application and validate a real AI-generated, reviewed Cypress suite end to end.
+2. Verify live screenshot/video capture, file delivery, historical case repair and retention after a restart.
+3. Verify supported browsers/devices outside CI Electron, including screen readers and keyboard usability.
+4. Back up the target PostgreSQL instance and artifacts directory; validate recovery, limits and monitoring.
+5. Run user acceptance on realistic project/task datasets before commercial release.
+
+**MMP source integration can be merged to the authorized development branch when all its CI checks pass, but this is not a claim of customer-production acceptance.**
