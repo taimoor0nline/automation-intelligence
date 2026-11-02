@@ -109,6 +109,7 @@ router.patch('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,r
  if(!existing.rowCount)throw fail(404,'Story not found.');
  const old=existing.rows[0],b=req.body||{},updated=await db.query('update project_stories set title=$1,story=$2,acceptance_criteria=$3,page_paths=$4,priority=$5,updated_by=$6,updated_at=now() where id=$7 and project_id=$8 returning *',
  [s(b.title??old.title,250),s(b.story??old.story,12000),s(b.acceptanceCriteria??old.acceptance_criteria,8000),s(b.pagePaths??old.page_paths,1500),s(b.priority??old.priority,20),req.user.sub,req.params.storyId,req.params.projectId]);
+ await db.query("insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,'STORY_UPDATED',$4::jsonb)",[req.params.projectId,req.params.storyId,req.user.sub,JSON.stringify({previousUpdatedAt:old.updated_at,newUpdatedAt:updated.rows[0].updated_at,fields:['title','story','acceptance_criteria','page_paths','priority'].filter(k=>String(old[k]??'')!==String(updated.rows[0][k]??''))})]);
  res.json({ok:true,story:updated.rows[0]});
  }catch(e){respond(res,e);}
 });
@@ -339,10 +340,25 @@ router.post('/api/teams',requireAuth,requireRole('MANAGER'),async(req,res)=>{try
  const r=await db.query('insert into teams(name,description,created_by) values($1,$2,$3) on conflict ((lower(name))) do update set description=excluded.description returning *',[name,s(req.body?.description,1000),req.user.sub]);
  res.status(201).json({ok:true,team:r.rows[0]});
 }catch(e){respond(res,e);}});
-router.post('/api/teams/:teamId/members',requireAuth,requireRole('MANAGER'),async(req,res)=>{try{
+router.post('/api/teams/:teamId/members',requireAuth,async(req,res)=>{try{
  if(!id(req.params.teamId)||!id(req.body?.userId))throw fail(400,'Valid team and user IDs required.');
+ const targetProject=req.body?.projectId;
+ if(targetProject){const ctx=await access(req,targetProject);manager(ctx.role);const attached=await db.query('select 1 from project_teams where project_id=$1 and team_id=$2',[targetProject,req.params.teamId]);if(!attached.rowCount)throw fail(403,'Team must be attached to the selected project.');const member=await db.query('select 1 from project_members where project_id=$1 and user_id=$2',[targetProject,req.body.userId]);if(!member.rowCount)throw fail(400,'User must belong to the project.');}
+ else if(req.user.role!=='MANAGER')throw fail(403,'Global manager access required without a project.');
  const r=await db.query('insert into team_members(team_id,user_id) select $1,u.id from users u where u.id=$2 and u.is_active=true on conflict do nothing returning user_id',[req.params.teamId,req.body.userId]);
  res.status(r.rowCount?201:200).json({ok:true});
+}catch(e){respond(res,e);}});
+router.delete('/api/projects/:projectId/teams/:teamId/members/:userId',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const attached=await db.query('select 1 from project_teams where project_id=$1 and team_id=$2',[req.params.projectId,req.params.teamId]);
+ if(!attached.rowCount)throw fail(404,'Team not associated with project.');
+ await db.query('delete from team_members where team_id=$1 and user_id=$2',[req.params.teamId,req.params.userId]);
+ res.json({ok:true});
+}catch(e){respond(res,e);}});
+router.get('/api/projects/:projectId/team-members',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const r=await db.query(`select pt.team_id,u.id as user_id,u.display_name,u.email from project_teams pt join team_members tm on tm.team_id=pt.team_id join users u on u.id=tm.user_id join project_members pm on pm.project_id=pt.project_id and pm.user_id=u.id where pt.project_id=$1 order by u.display_name`,[req.params.projectId]);
+ res.json({ok:true,members:r.rows});
 }catch(e){respond(res,e);}});
 router.get('/api/projects/:projectId/teams',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);
