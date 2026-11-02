@@ -407,16 +407,34 @@ function bind(){
  });
 }
 function enableSearchableSelects(){
- const cache=new WeakMap();
  const setup=select=>{
   if(select.multiple||select.dataset.searchEnhanced==='true'||select.closest('#preferencesPanel'))return;
   select.dataset.searchEnhanced='true';
-  const search=document.createElement('input');search.type='search';search.className='form-control form-control-sm mb-1';search.placeholder='Search options…';search.setAttribute('aria-label','Search '+(select.getAttribute('aria-label')||select.name||'options'));select.parentNode.insertBefore(search,select);
-  let options=[];
-  const snapshot=()=>{options=[...select.options].map(o=>({value:o.value,text:o.textContent,disabled:o.disabled}));};snapshot();
-  new MutationObserver(()=>{if(!search.value.trim())snapshot();}).observe(select,{childList:true,subtree:true});
-  search.addEventListener('input',()=>{const value=select.value,q=search.value.toLowerCase().trim();const matching=options.filter(o=>!q||o.text.toLowerCase().includes(q));select.replaceChildren(...matching.map(o=>new Option(o.text,o.value,false,o.value===value)));if(!matching.some(o=>o.value===value))select.selectedIndex=-1;});
-  search.addEventListener('blur',()=>{if(!search.value)return;});
+  const search=document.createElement('input');
+  search.type='search';search.className='form-control form-control-sm mb-1';
+  search.placeholder='Search options…';
+  search.setAttribute('aria-label','Search '+(select.getAttribute('aria-label')||select.name||'options'));
+  select.before(search);
+  let original=[];let rendering=false;
+  const snapshot=()=>{if(!rendering&&!search.value)original=[...select.options].map(o=>({value:o.value,text:o.textContent,disabled:o.disabled}));};
+  snapshot();
+  const observer=new MutationObserver(()=>snapshot());
+  observer.observe(select,{childList:true,subtree:true,characterData:true});
+  const restore=()=>{if(!search.value)return;search.value='';render('');};
+  const render=q=>{
+   const value=select.value;
+   rendering=true;observer.disconnect();
+   const items=original.filter(o=>!q||o.text.toLocaleLowerCase().includes(q.toLocaleLowerCase()));
+   select.replaceChildren(...items.map(o=>new Option(o.text,o.value,false,o.value===value)));
+   for(let i=0;i<items.length;i++)select.options[i].disabled=items[i].disabled;
+   if(!items.some(o=>o.value===value))select.selectedIndex=-1;
+   observer.observe(select,{childList:true,subtree:true,characterData:true});
+   rendering=false;
+  };
+  search.addEventListener('input',()=>render(search.value.trim()));
+  search.addEventListener('keydown',e=>{if(e.key==='Escape'){restore();select.focus();}else if(e.key==='ArrowDown'){e.preventDefault();select.focus();}});
+  select.addEventListener('change',restore);
+  select.addEventListener('focus',()=>{if(!search.value)snapshot();});
  };
  document.querySelectorAll('select').forEach(setup);
  new MutationObserver(()=>document.querySelectorAll('select:not([data-search-enhanced])').forEach(setup)).observe(document.body,{childList:true,subtree:true});
