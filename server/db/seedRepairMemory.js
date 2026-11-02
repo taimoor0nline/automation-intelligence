@@ -9,6 +9,8 @@ async function main(){
  if(!db.isConfigured())throw Error('DATABASE_ENABLED=true and DATABASE_URL are required');
  const projectId=String(process.env.TESTNEXUS_SEED_PROJECT_ID||'');
  const userId=String(process.env.TESTNEXUS_SEED_USER_ID||'');
+ const isUuid=value=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+ if(!isUuid(projectId)||!isUuid(userId))throw Error('Provide valid existing project and user UUIDs');
  const project=await db.query('select id from projects where id=$1',[projectId]);
  if(!project.rowCount)throw Error('Existing project ID required');
  const user=await db.query('select id from users where id=$1 and is_active=true',[userId]);
