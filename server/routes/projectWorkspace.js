@@ -442,7 +442,7 @@ router.get('/api/projects/:projectId/repair-memory',requireAuth,async(req,res)=>
  await access(req,req.params.projectId);
  const memory=require('../services/repairMemoryService');
  const repairs=await memory.suggestions(req.params.projectId,{pagePath:req.query.pagePath,limit:req.query.limit});
- res.json({ok:true,repairs,reusePolicy:'review_required'});
+ res.json({ok:true,repairs:repairs.map(r=>({...r,recommendation:memory.recommendation(r)})),reusePolicy:'review_required'});
 }catch(e){respond(res,e);}});
 router.post('/api/projects/:projectId/repair-memory/:memoryId/events',requireAuth,async(req,res)=>{try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
