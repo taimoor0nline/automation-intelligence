@@ -25,7 +25,7 @@ async function captureVerified({client,projectId,session,runId,userId}){
   const item=normalize(entry);if(!item||seen.has(item.fingerprint))continue;seen.add(item.fingerprint);
   // Verification must be attached to this completed run, never inferred from a historic flag.
   const sourceRun=clean(entry.validationRunId||entry.runId||entry.validation?.runId,100);
-  if(sourceRun!==String(runId))continue;
+  if(sourceRun!==String(runId)&&sourceRun!==clean(session.executionProgress?.runId,100))continue;
   const row=await client.query(`insert into ai_repair_memory(project_id,fingerprint,failure_signature,original_selector,replacement_selector,page_path,status,verification_source,verification_run_id,verified_at,created_by)
    values($1,$2,$3,$4,$5,$6,'VERIFIED','EXECUTION', $7,now(),$8)
    on conflict(project_id,fingerprint) do update set replacement_selector=excluded.replacement_selector,status='VERIFIED',verification_source='EXECUTION',verification_run_id=excluded.verification_run_id,verified_at=now(),updated_at=now()
