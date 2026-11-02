@@ -53,6 +53,8 @@ jobs:
         run: node server/db/migrate.js
       - name: Verify TestNexus workspace schema
         run: node scripts/testnexus-db-schema.test.js
+      - name: Exercise authenticated PostgreSQL workspace routes
+        run: node scripts/testnexus-db-integration.test.js
 
   browser-acceptance:
     runs-on: ubuntu-latest
