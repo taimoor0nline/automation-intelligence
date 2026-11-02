@@ -40,7 +40,7 @@ async function loadProjects(){
  await loadWorkspace();
 }
 async function loadWorkspace(){
- const pid=state.projectId; state.context=null;state.tasks=[];state.evidence=[];state.taskId=null;
+ const pid=state.projectId; state.context=null;state.tasks=[];state.evidence=[];
  if(!pid){['statStories','statRuns','statTasks','statDocs'].forEach(id=>$(id).textContent='0');return;}
  const results=await Promise.allSettled([api('/api/projects/'+encodeURIComponent(pid)+'/workspace'),api('/api/projects/'+encodeURIComponent(pid)+'/work-items'),api('/api/projects/'+encodeURIComponent(pid)+'/evidence')]);
  if(results[0].status!=='fulfilled')throw results[0].reason;
@@ -48,6 +48,7 @@ async function loadWorkspace(){
  state.tasks=results[1].status==='fulfilled'?results[1].value.workItems||[]:[];
  state.evidence=results[2].status==='fulfilled'?results[2].value.results||[]:[];
  renderAll();
+ try{await loadWorkflow();}catch(err){console.warn('Project workflow settings unavailable:',err.message);}
  if(results[1].status!=='fulfilled'||results[2].status!=='fulfilled')notice('Some project data could not be loaded. Check your access and database configuration.','warning');
 }
 function renderAll(){renderOverview();renderStoryList();renderTasks();renderReports();renderTeam();}
@@ -117,10 +118,21 @@ function evidenceButtons(meta){
  const e=meta.evidence||meta;
  return ['screenshotUrl','videoUrl'].filter(k=>typeof e[k]==='string'&&e[k].startsWith('/api/artifacts/')).map(k=>'<button class="tn-link me-3" data-evidence="'+esc(e[k])+'">'+(k==='videoUrl'?'▶ Video':'▧ Screenshot')+'</button>').join('')||'<span class="tn-muted">No retained media URL</span>';
 }
+async function loadWorkflow(){
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/workflow');
+ const f=$('workflowForm'),w=d.workflow||{};
+ f.elements.namedItem('autoCreateFailedTasks').checked=!!w.auto_create_failed_tasks;
+ f.elements.namedItem('autoCloseVerifiedRetests').checked=!!w.auto_close_verified_retests;
+ $('workflowDeveloper').value=w.default_developer||'';
+ const locked=d.projectRole!=='PROJECT_MANAGER';
+ f.querySelectorAll('input,select,button').forEach(x=>x.disabled=locked);
+}
 function renderTeam(){
  $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td>'+esc(m.display_name)+'</td><td>'+esc(m.email)+'</td><td>'+statusTag(m.project_role)+'</td></tr>').join('')||'<tr><td colspan="3" class="tn-empty">No members.</td></tr>';
  const list=state.users||state.context.members;
  $('memberUser').innerHTML='<option value="">Select user</option>'+list.map(x=>'<option value="'+esc(x.id||x.user_id)+'">'+esc(x.displayName||x.display_name||x.email)+'</option>').join('');
+ $('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+state.context.members.map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
+ $('workflowDeveloper').innerHTML='<option value="">Manual assignment</option>'+state.context.members.filter(m=>m.project_role==='DEVELOPER').map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
 }
 async function fetchDirectory(){
  try{const r=await api('/api/users');state.users=r.users||[];renderTeam();}catch{state.users=null;renderTeam();}
@@ -209,12 +221,21 @@ async function retest(taskIds){
 function bind(){
  document.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>show(el.dataset.view));
  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{show(el.dataset.go);if(el.dataset.go==='stories')clearStory();});
- $('projectPicker').onchange=async e=>{state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();}catch(err){notice(err.message);}};
+ $('projectPicker').onchange=async e=>{closeTask();state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();}catch(err){notice(err.message);}};
  $('newProjectForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target),d=await api('/api/projects',{method:'POST',body:JSON.stringify({name:vals.name,description:vals.description})});await api('/api/projects/'+encodeURIComponent(d.project.id)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:vals.referenceNo,startDate:vals.startDate,endDate:vals.endDate})});state.projectId=d.project.id;e.target.reset();await loadProjects();show('overview');notice('Project created successfully.','success');}catch(err){notice(err.message);}};
  $('environmentForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments',{method:'POST',body:JSON.stringify({...vals,isDefault:!!e.target.elements.namedItem('isDefault').checked})});e.target.reset();await loadWorkspace();notice('Environment saved.','success');}catch(err){notice(err.message);}};
  $('storyForm').onsubmit=async e=>{e.preventDefault();try{await saveStory();}catch(err){notice(err.message);}};
  $('storyClear').onclick=clearStory;
  $('storyLaunch').onclick=async()=>{try{await launchStory();}catch(err){notice(err.message);}};
+ $('workflowForm').onsubmit=async e=>{e.preventDefault();try{
+ const f=e.target;await api('/api/projects/'+encodeURIComponent(requireProject())+'/workflow',{method:'PUT',body:JSON.stringify({autoCreateFailedTasks:f.elements.namedItem('autoCreateFailedTasks').checked,autoCloseVerifiedRetests:f.elements.namedItem('autoCloseVerifiedRetests').checked,defaultDeveloper:$('workflowDeveloper').value||null})});
+ await loadWorkflow();notice('Project workflow configuration saved.','success');
+ }catch(err){notice(err.message);}};
+ $('newTaskForm').onsubmit=async e=>{e.preventDefault();try{
+ const v=formPayload(e.target);v.dueAt=v.dueAt?new Date(v.dueAt).toISOString():null;v.assignedTo=v.assignedTo||null;
+ await api('/api/projects/'+encodeURIComponent(requireProject())+'/work-items',{method:'POST',body:JSON.stringify(v)});
+ e.target.reset();await loadWorkspace();notice('Task created.','success');
+ }catch(err){notice(err.message);}};
  $('taskStatusFilter').onchange=renderTasks;
  $('allTasks').onchange=e=>document.querySelectorAll('.task-select').forEach(x=>x.checked=e.target.checked);
  $('batchRetest').onclick=async()=>{const ids=[...document.querySelectorAll('.task-select:checked')].map(x=>x.value);if(!ids.length){notice('Select one or more tasks to retest.','warning');return;}try{await retest(ids);}catch(e){notice(e.message);}};
