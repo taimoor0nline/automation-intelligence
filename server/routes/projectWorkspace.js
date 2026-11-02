@@ -168,7 +168,8 @@ router.get('/api/work-items/:id/details',requireAuth,async(req,res)=>{
  db.query('select event_type,old_status,new_status,comment,created_at,u.display_name by_name from work_item_history h left join users u on u.id=h.performed_by where work_item_id=$1 order by created_at desc limit 100',[req.params.id]),
  db.query('select c.id,c.comment,c.created_at,u.display_name user_name from work_item_comments c left join users u on u.id=c.user_id where work_item_id=$1 order by c.created_at',[req.params.id])
  ]);
- res.json({ok:true,task:{...ctx.item,closed_by_name:closer?.rows?.[0]?.display_name||null},subtasks:children.rows,attachments:attachments.rows,history:history.rows,comments:comments.rows,projectRole:ctx.role});
+ const parent=ctx.item.parent_id?(await db.query('select id,title,status from work_items where id=$1 and project_id=$2 and deleted_at is null',[ctx.item.parent_id,ctx.item.project_id])).rows[0]||null:null;
+ res.json({ok:true,parent,task:{...ctx.item,closed_by_name:closer?.rows?.[0]?.display_name||null},subtasks:children.rows,attachments:attachments.rows,history:history.rows,comments:comments.rows,projectRole:ctx.role});
  }catch(e){respond(res,e);}
 });
 router.post('/api/work-items/:id/subtasks',requireAuth,async(req,res)=>{
