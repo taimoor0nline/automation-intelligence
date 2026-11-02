@@ -78,7 +78,7 @@ async function main() {
     for(const entry of metadata.teams){
       const team=await client.query(
         'insert into teams(name,description,created_by) values($1,$2,$3) on conflict ((lower(name))) do update set name=excluded.name returning id',
-        [entry.name,'Demo team associated with '+PROJECT_REF,creator]);
+        [PROJECT_REF+' / '+entry.name,'Demo team associated with '+PROJECT_REF,creator]);
       const teamId=team.rows[0].id;
       teamIds.set(entry.name,teamId);
       await client.query('insert into project_teams(project_id,team_id) values($1,$2) on conflict do nothing',[projectId,teamId]);
