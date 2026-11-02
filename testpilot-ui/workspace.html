@@ -5,6 +5,7 @@
 <title>TestNexus | Project Workspace</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="/workspace.css" rel="stylesheet">
+<link href="/forms-alignment.css" rel="stylesheet">
 </head>
 <body>
 <header class="tn-top">
@@ -13,10 +14,8 @@
   <nav class="nav nav-pills flex-grow-1" aria-label="Main navigation">
    <button class="nav-link active" data-view="overview">Home</button>
    <button class="nav-link" data-view="projects">Projects</button>
-   <button class="nav-link" data-view="stories">Stories</button>
-   <button class="nav-link" data-view="tasks">Tasks</button>
+   <button class="nav-link" data-view="details">Project details</button>
    <button class="nav-link" data-view="reports">Reports</button>
-   <button class="nav-link" data-view="inventory">Test inventory & audit</button><button class="nav-link" data-view="team">Team & Roles</button>
    <a class="nav-link" href="/runner" title="Generate, review and run tests">Run Tests ↗</a>
   </nav>
   <select id="projectPicker" class="form-select" aria-label="Current project" style="width:210px"></select>
@@ -29,7 +28,19 @@
   <div><div class="tn-eyebrow" id="breadcrumb">PROJECT WORKSPACE</div><h1 class="tn-title" id="pageTitle">Project overview</h1><div class="tn-muted" id="pageSubtitle">Scope, documents, stories, assignments and execution evidence</div></div>
   <div class="d-flex gap-2"><button class="btn btn-outline-secondary tn-btn" data-go="projects">+ New project</button><button class="btn btn-primary tn-btn" data-go="stories">Write a story</button><a href="/runner" class="btn btn-outline-secondary tn-btn">Run Tests ↗</a></div>
  </div>
+ <div id="projectDetailTabs" class="tn-detail-tabs d-none mb-3" role="tablist" aria-label="Project detail sections">
+  <button type="button" role="tab" data-view="details">Context & scope</button>
+  <button type="button" role="tab" data-view="stories">Stories</button>
+  <button type="button" role="tab" data-view="inventory">Test cases & audit</button>
+  <button type="button" role="tab" data-view="tasks">Tasks & case links</button>
+  <button type="button" role="tab" data-view="team">Team</button>
+  <button type="button" role="tab" data-view="attachments">Attachments</button>
+ </div>
  <section id="view-overview" class="tn-view active">
+  <div class="tn-home-welcome mb-3"><div><div class="tn-eyebrow">WELCOME TO TESTNEXUS</div><h2>Projects at a glance</h2><p class="tn-muted mb-0">Choose a project to manage its stories, test cases, tasks and team.</p></div><button class="btn btn-primary tn-btn" data-go="projects" type="button">View all projects</button></div>
+  <div class="tn-card"><div class="tn-card-head"><h2>Recent projects <span id="homeProjectsCount" class="tn-badge-counter">0</span></h2><span class="tn-muted">Your accessible workspaces</span></div><div id="homeProjects" class="tn-home-list"></div></div>
+ </section>
+ <section id="view-details" class="tn-view">
   <div id="overviewHealth" class="tn-health-strip mb-3" aria-live="polite"></div>
   <div class="row g-3 mb-3">
    <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statStories">—</b><span class="label">Business stories</span></div></div>
@@ -50,7 +61,7 @@
     <div class="col-lg-4"><label class="d-flex align-items-center gap-2"><input type="checkbox" name="autoCloseVerifiedRetests" aria-label="Automatically close verified retests"> Close tasks after passing QA retest</label><div class="tn-muted mt-1">Only tasks in Ready for Retest status</div></div>
     <div class="col-lg-3"><label class="form-label">Default developer (optional)</label><select name="defaultDeveloper" class="form-select" id="workflowDeveloper" aria-label="Default developer"></select></div>
     <div class="col-lg-1"><button class="btn btn-outline-secondary tn-btn" type="submit">Save</button></div>
-   </form><div id="projectFilesList"></div><select id="documentCategory"><option>OTHER</option></select><input id="documentVersion" value="1.0"></div>
+   </form><div id="projectFilesList"></div></div>
  </section>
  <section id="view-projects" class="tn-view">
   <div class="row g-3"><div class="col-xl-8"><div class="tn-card"><div class="tn-card-head"><h2>All accessible projects</h2><span class="tn-muted">Select a project to open its workspace</span></div><div class="tn-scroll"><table class="tn-table table"><thead><tr><th>Reference No.</th><th>Project</th><th>Created</th><th></th></tr></thead><tbody id="projectsBody"></tbody></table></div></div></div>
@@ -61,6 +72,13 @@
     <div class="tn-field"><label class="form-label">Start / end dates</label><div class="row g-2"><div class="col-6"><input class="form-control" name="startDate" type="date" aria-label="Start date"></div><div class="col-6"><input class="form-control" name="endDate" type="date" aria-label="End date"></div></div></div>
     <div class="tn-field"><label class="form-label">Project attachments (optional)</label><div id="newProjectDrop" class="tn-drop" tabindex="0" role="button"><strong>Drop files here, or browse</strong><span class="tn-muted">Up to 5 MB per file</span></div><input id="newProjectFiles" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.txt,.csv,.zip"><div id="newProjectFileNames" class="tn-muted"></div></div><button type="submit" class="btn btn-primary tn-btn">Create project</button>
    </form></div></div></div></div>
+ </section>
+ <section id="view-attachments" class="tn-view">
+  <div class="tn-card"><div class="tn-card-head"><div><h2>Project attachments</h2><div class="tn-muted mt-1">Documents for this project are managed here or while editing its details.</div></div><button type="button" id="attachmentsEditProfile" class="btn btn-outline-secondary tn-btn">Edit project details</button></div>
+   <div class="tn-card-body"><div id="detailDrop" class="tn-drop mb-3" role="button" tabindex="0" aria-label="Upload project attachments"><strong>Drop documents here or browse</strong><span class="tn-muted">PDF, Office, images, ZIP · up to 5 MB per file</span></div>
+   <input id="detailFiles" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.csv,.zip" aria-label="Choose project documents">
+   <div id="detailDocumentsList" aria-live="polite"></div></div>
+  </div>
  </section>
  <section id="view-stories" class="tn-view">
   <div class="row g-3"><div class="col-xl-5"><div class="tn-card"><div class="tn-card-head"><h2>Project stories</h2><span class="tn-muted">Choose an existing story or write one</span></div><div id="storyList"></div></div></div>
