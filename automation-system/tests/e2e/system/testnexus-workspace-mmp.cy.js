@@ -69,11 +69,20 @@ describe('TestNexus workspace MMP browser acceptance',()=>{
   cy.get('#densityPreference').select('compact');
   cy.get('body').should('have.attr','data-density','compact');
  });
- it('has no critical axe-core accessibility violations on the task workspace',()=>{
-  cy.get('[data-view="tasks"]').click();
+ it('has no critical WCAG axe-core violations on any workspace view',()=>{
   cy.injectAxe();
-  cy.checkA11y(null,{includedImpacts:['critical'],runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}},violations=>{
-   if(violations.length){const summary=violations.map(v=>v.id+':'+v.nodes.map(n=>n.target.join(' ')).join(',')).join(';');throw new Error('Axe violations: '+summary);}
-  });
+  for(const view of ['overview','projects','stories','tasks','reports','team']){
+   cy.get('nav [data-view="'+view+'"]').click();
+   cy.checkA11y(null,{includedImpacts:['critical'],runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}},violations=>{
+    if(violations.length){const summary=violations.map(v=>v.id+':'+v.nodes.map(n=>n.target.join(' ')).join(',')).join(';');throw new Error(view+' accessibility: '+summary);}
+   });
+  }
+ });
+ it('keeps workspace controls operable on a mobile viewport',()=>{
+  cy.viewport(375,812);
+  cy.get('nav [data-view="tasks"]').click();
+  cy.get('#taskSearch').should('be.visible').type('Registration');
+  cy.get('#tasksBody').should('contain','Registration');
+  cy.get('#uiPreferences').click();cy.get('#themePreference').should('be.visible');
  });
 });
