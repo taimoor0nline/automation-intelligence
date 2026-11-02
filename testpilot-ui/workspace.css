@@ -101,3 +101,16 @@ body[data-density=compact] .form-control,body[data-density=compact] .form-select
 .tn-table tbody tr:hover{background:#f4f7ff}
 body[data-theme=dark] .tn-table thead th{color:#e0e9fa;background:#263448}
 body[data-theme=dark] .tn-empty,body[data-theme=dark] .tn-kv span:first-child,body[data-theme=dark] .tn-muted,body[data-theme=dark] .tn-timeline-meta{color:#c5d0e2}
+
+/* MMP form alignment: consistent field widths, label spacing and responsive rows. */
+.tn-container .row > [class*="col-"],.modal-body .row > [class*="col-"]{min-width:0}
+.tn-field{display:flex;flex-direction:column;gap:6px;min-width:0;margin-bottom:14px}
+.tn-field .form-label{margin-bottom:0}
+.tn-container .form-label,.modal-body .form-label{display:block;font-size:13px;font-weight:600;line-height:1.4;margin-bottom:6px}
+.tn-container :is(.form-control,.form-select),.modal-body :is(.form-control,.form-select){width:100%;max-width:100%;min-width:0;min-height:40px;box-sizing:border-box;border-radius:8px}
+.tn-container textarea.form-control,.modal-body textarea.form-control{min-height:94px;height:auto}
+.tn-container input[type="checkbox"],.modal-body input[type="checkbox"]{width:auto;min-height:auto;flex-shrink:0}
+.tn-container .row.g-2 > [class*="col-"],.modal-body .row.g-2 > [class*="col-"]{min-width:0}
+.tn-container .tn-card-body form .btn,.modal-body form .btn{min-height:40px}
+.tn-drop{width:100%;box-sizing:border-box}
+@media(max-width:767.98px){.tn-container .row > [class*="col-"],.modal-body .row > [class*="col-"]{flex:0 0 100%;max-width:100%}.tn-container .tn-card-head{flex-wrap:wrap;gap:10px}.tn-container .tn-field{margin-bottom:12px}}
