@@ -345,6 +345,7 @@ router.post('/api/teams/:teamId/members',requireAuth,async(req,res)=>{try{
  const targetProject=req.body?.projectId;
  if(targetProject){const ctx=await access(req,targetProject);manager(ctx.role);const attached=await db.query('select 1 from project_teams where project_id=$1 and team_id=$2',[targetProject,req.params.teamId]);if(!attached.rowCount)throw fail(403,'Team must be attached to the selected project.');const member=await db.query('select 1 from project_members where project_id=$1 and user_id=$2',[targetProject,req.body.userId]);if(!member.rowCount)throw fail(400,'User must belong to the project.');}
  else if(req.user.role!=='MANAGER')throw fail(403,'Global manager access required without a project.');
+ if(targetProject&&req.user.role!=='MANAGER'){const shared=await db.query('select count(*)::int as total from project_teams where team_id=$1',[req.params.teamId]);if(shared.rows[0].total>1)throw fail(409,'Team is shared across projects; global manager must change membership.');}
  const r=await db.query('insert into team_members(team_id,user_id) select $1,u.id from users u where u.id=$2 and u.is_active=true on conflict do nothing returning user_id',[req.params.teamId,req.body.userId]);
  res.status(r.rowCount?201:200).json({ok:true});
 }catch(e){respond(res,e);}});
