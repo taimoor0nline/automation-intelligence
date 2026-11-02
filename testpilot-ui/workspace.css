@@ -134,3 +134,9 @@ textarea.form-control{min-height:94px;resize:vertical}.form-select{appearance:au
 .tn-container :is(input.form-control,select.form-select),.modal-body :is(input.form-control,select.form-select){height:42px}
 .tn-container :is(.form-control,.form-select),.modal-body :is(.form-control,.form-select){font-size:13px}
 @media(max-width:600px){.tn-home-welcome{padding:18px}.tn-home-list{grid-template-columns:1fr;padding:12px}.tn-home-project{align-items:flex-start;flex-direction:column}.tn-detail-tabs{overflow-x:auto;flex-wrap:nowrap;padding-bottom:9px}.tn-detail-tabs button{flex-shrink:0}}
+
+/* Align buttons with searchable team selectors instead of stretching their height. */
+#teamAttachForm,#teamMemberForm{align-items:flex-end}
+#teamAttachForm > :is(.form-select,.btn),#teamMemberForm > [class*="col-"]{min-width:0}
+#teamMemberForm .btn{width:100%}
+#teamAttachForm .btn{min-height:42px;align-self:flex-end}
