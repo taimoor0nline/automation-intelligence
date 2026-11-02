@@ -20,13 +20,24 @@ function date(v){return v?new Date(v).toLocaleDateString():'—';}
 function dateTime(v){return v?new Date(v).toLocaleString():'—';}
 function display(v){return v?esc(v):'<span class="tn-muted">Not set</span>';}
 function statusTag(s){const x=String(s||'PENDING');const c=x==='COMPLETED'?'success':x==='ON_HOLD'?'warn':x==='PENDING'?'':'danger';return '<span class="tn-tag '+c+'">'+esc(x.replaceAll('_',' '))+'</span>';}
+const detailViews=new Set(['details','stories','inventory','tasks','team','attachments']);
 function show(view){
+ if(detailViews.has(view)&&!state.projectId)view='projects';
  state.view=view;
+ const inDetails=detailViews.has(view);
  document.querySelectorAll('.tn-view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));
- document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===view;el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
- const labels={overview:'Project overview',projects:'Projects',stories:'Stories & test generation',tasks:'Tasks & retesting',reports:'Test reports & evidence',inventory:'Test inventory & audit',team:'Team & roles'};
+ $('projectDetailTabs').classList.toggle('d-none',!inDetails);
+ document.querySelectorAll('[data-view]').forEach(el=>{
+  const tab=!!el.closest('#projectDetailTabs');
+  const active=tab?el.dataset.view===view:(el.dataset.view===view||(inDetails&&el.dataset.view==='details'));
+  el.classList.toggle('active',active);
+  if(tab){el.setAttribute('aria-selected',String(active));el.tabIndex=active?0:-1;}
+  else if(active)el.setAttribute('aria-current','page');
+  else el.removeAttribute('aria-current');
+ });
+ const labels={overview:'Home',projects:'Projects',details:'Project details',stories:'Project stories',tasks:'Project tasks & retesting',reports:'Test reports & evidence',inventory:'Project test cases & audit',team:'Project team',attachments:'Project attachments'};
  $('pageTitle').textContent=labels[view]||'TestNexus';
- $('pageSubtitle').textContent=view==='stories'?'Write or reuse a project story; generation/review/execution stays in the existing Test Studio':view==='tasks'?'Attach evidence, collaborate, close/defer tasks and retest one or many using the existing runner':'Scope, documents, assignments and quality history in one place';
+ $('pageSubtitle').textContent=inDetails?(state.context?.project?.name||'Select a project')+' · Related work in one project workspace':view==='overview'?'Open a project and continue where your team left off':view==='projects'?'Create or open a project':'Execution results and reports';
  clearNotice();
  if(view==='reports'&&state.projectId)loadSavedReports().catch(e=>notice(e.message));
  if(view==='inventory'&&state.projectId)loadInventory().catch(e=>notice(e.message));
@@ -42,6 +53,8 @@ async function loadProjects(){
  picker.value=state.projectId;
  localStorage.setItem('testnexus:currentProject',state.projectId);
  $('projectsBody').innerHTML=state.projects.map(p=>'<tr><td>'+display(p.reference_no)+'</td><td><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.description||'')+'</div></td><td>'+date(p.created_at)+'</td><td><button class="tn-link" data-open-project="'+esc(p.id)+'">Open →</button></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No projects yet. Create your first project.</td></tr>';
+ $('homeProjectsCount').textContent=state.projects.length;
+ $('homeProjects').innerHTML=state.projects.slice(0,6).map(p=>'<div class="tn-home-project"><div><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.reference_no||'Project')+' · '+date(p.created_at)+'</div></div><button type="button" class="btn btn-outline-primary tn-btn" data-open-project="'+esc(p.id)+'">Open project</button></div>').join('')||'<div class="tn-empty">No projects yet. Create your first project from Projects.</div>';
  let loaded=false,lastError=null;
  const ordered=[state.projectId,...state.projects.map(p=>p.id)].filter((v,i,a)=>v&&a.indexOf(v)===i);
  for(const candidate of ordered){state.projectId=candidate;try{await loadWorkspace();loaded=true;break;}catch(e){lastError=e;}}
@@ -69,6 +82,12 @@ function applyRoleUI(){
  const toggles=[['newProjectForm',globalManager],['memberForm',projectManager],['userForm',globalManager],['environmentForm',projectManager],['newTaskForm',canReview],['storyForm',canReview]];
  for(const [id,allowed] of toggles){const form=$(id);if(!form)continue;form.querySelectorAll('input,select,textarea,button').forEach(el=>{el.disabled=!allowed;});if(['newProjectForm','memberForm','userForm'].includes(id))form.hidden=!allowed;}
  $('editProfile').disabled=!projectManager;
+ $('attachmentsEditProfile').disabled=!projectManager;
+ for(const [zoneId,inputId] of [['detailDrop','detailFiles'],['projectDrop','projectFiles']]){
+  $(zoneId).setAttribute('aria-disabled',String(!canReview));
+  $(zoneId).tabIndex=canReview?0:-1;
+  $(inputId).disabled=!canReview;
+ }
  $('projectRunAll').disabled=!canReview;
  if(!canReview)$('batchRetest').disabled=true;
  document.querySelectorAll('[data-go="projects"]').forEach(el=>{if(el.textContent.includes('New project'))el.hidden=!globalManager;});
@@ -86,6 +105,7 @@ function renderOverview(){
  const latest=c.runs[0]||null;const pending=state.tasks.filter(t=>!t.deleted_at&&t.status==='READY_FOR_RETEST').length;const successes=c.runs.reduce((n,r)=>n+Number(r.passed||0),0),failures=c.runs.reduce((n,r)=>n+Number(r.failed||0),0);const rate=successes+failures?Math.round(100*successes/(successes+failures))+'%':'—';$('overviewHealth').innerHTML='<div class="tn-health-chip"><strong>'+rate+'</strong>Recorded pass rate</div><div class="tn-health-chip"><strong>'+pending+'</strong>Ready for retest</div><div class="tn-health-chip"><strong>'+(latest?'#'+esc(latest.run_number):'—')+'</strong>Latest run</div><div class="tn-health-chip"><strong>'+c.environments.length+'</strong>Environments</div>';
  $('environmentList').innerHTML=c.environments.map(e=>'<div class="tn-kv"><span>'+esc(e.name)+(e.is_default?' ★':'')+'</span><span>'+esc(e.base_url)+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
  $('profileDocumentList').innerHTML=c.documents.map(d=>'<div class="tn-kv"><span>'+esc(d.category)+'</span><span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button> <small class="tn-muted">'+Math.ceil(d.file_size/1024)+' KB</small></span></div>').join('')||'<div class="tn-muted">No documents attached yet.</div>';
+ $('detailDocumentsList').innerHTML=c.documents.map(d=>'<div class="tn-kv"><span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button></span><span class="tn-muted">'+Math.ceil(d.file_size/1024)+' KB · '+date(d.created_at)+'</span></div>').join('')||'<div class="tn-empty">No project attachments yet. Upload documents above.</div>';
 }
 function renderStoryList(){
  const c=state.context;
@@ -260,10 +280,10 @@ async function uploadMany(files,kind){
 }
 function dropZone(zoneId,inputId,kind){
  const zone=$(zoneId),input=$(inputId);
- zone.onclick=()=>input.click();zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();input.click();}};
+ zone.onclick=()=>{if(zone.getAttribute('aria-disabled')!=='true')input.click();};zone.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&zone.getAttribute('aria-disabled')!=='true'){e.preventDefault();input.click();}};
  for(const event of ['dragenter','dragover'])zone.addEventListener(event,e=>{e.preventDefault();zone.classList.add('drag');});
  for(const event of ['dragleave','drop'])zone.addEventListener(event,e=>{e.preventDefault();zone.classList.remove('drag');});
- zone.addEventListener('drop',e=>uploadMany([...e.dataTransfer.files],kind));
+ zone.addEventListener('drop',e=>{if(zone.getAttribute('aria-disabled')!=='true')uploadMany([...e.dataTransfer.files],kind);});
  input.onchange=e=>{uploadMany([...e.target.files],kind);input.value='';};
 }
 let evidenceObjectUrl='';
@@ -339,14 +359,14 @@ function bind(){
  document.addEventListener('keydown',e=>{if(!$('taskDrawer').classList.contains('open'))return;if(e.key==='Escape'){e.preventDefault();closeTask();}else if(e.key==='Tab'){const items=[...$('taskDrawer').querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]')].filter(x=>x.getClientRects().length);if(!items.length)return;const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
  document.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>show(el.dataset.view));
  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{show(el.dataset.go);if(el.dataset.go==='stories')clearStory();});
- $('projectPicker').onchange=async e=>{closeTask();state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();}catch(err){notice(err.message);}};
+ $('projectPicker').onchange=async e=>{closeTask();state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();show(state.projectId?'details':'projects');}catch(err){notice(err.message);}};
  const projectFileInput=$('newProjectFiles'),projectDrop=$('newProjectDrop');
  projectDrop.onclick=()=>projectFileInput.click();projectDrop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();projectFileInput.click();}};
  for(const event of ['dragenter','dragover'])projectDrop.addEventListener(event,e=>{e.preventDefault();projectDrop.classList.add('drag');});
  for(const event of ['dragleave','drop'])projectDrop.addEventListener(event,e=>{e.preventDefault();projectDrop.classList.remove('drag');});
  projectDrop.addEventListener('drop',e=>{const dt=new DataTransfer();for(const file of e.dataTransfer.files)dt.items.add(file);projectFileInput.files=dt.files;projectFileInput.dispatchEvent(new Event('change'));});
  projectFileInput.onchange=()=>{$('newProjectFileNames').textContent=[...projectFileInput.files].map(f=>f.name).join(', ');};
- $('newProjectForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target),d=await api('/api/projects',{method:'POST',body:JSON.stringify({name:vals.name,description:vals.description})});await api('/api/projects/'+encodeURIComponent(d.project.id)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:vals.referenceNo,startDate:vals.startDate,endDate:vals.endDate})});state.projectId=d.project.id;const files=[...projectFileInput.files];e.target.reset();$('newProjectFileNames').textContent='';await loadProjects();show('overview');if(files.length)await uploadMany(files,'project');notice('Project created'+(files.length?' with '+files.length+' attachment(s)':'')+'.','success');}catch(err){notice(err.message);}};
+ $('newProjectForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target),d=await api('/api/projects',{method:'POST',body:JSON.stringify({name:vals.name,description:vals.description})});await api('/api/projects/'+encodeURIComponent(d.project.id)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:vals.referenceNo,startDate:vals.startDate,endDate:vals.endDate})});state.projectId=d.project.id;const files=[...projectFileInput.files];e.target.reset();$('newProjectFileNames').textContent='';await loadProjects();show('details');if(files.length)await uploadMany(files,'project');notice('Project created'+(files.length?' with '+files.length+' attachment(s)':'')+'.','success');}catch(err){notice(err.message);}};
  $('environmentForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments',{method:'POST',body:JSON.stringify({...vals,isDefault:!!e.target.elements.namedItem('isDefault').checked})});e.target.reset();await loadWorkspace();notice('Environment saved.','success');}catch(err){notice(err.message);}};
  $('storyForm').onsubmit=async e=>{e.preventDefault();try{await saveStory();}catch(err){notice(err.message);}};
  $('storyClear').onclick=clearStory;
@@ -387,9 +407,10 @@ function bind(){
  bootstrap.Modal.getOrCreateInstance($('profileModal')).show();
  };
  $('profileForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/profile',{method:'PATCH',body:JSON.stringify(formPayload(e.target))});bootstrap.Modal.getOrCreateInstance($('profileModal')).hide();await loadWorkspace();notice('Project profile saved.','success');}catch(err){notice(err.message);}};
- dropZone('projectDrop','projectFiles','project');dropZone('taskDrop','taskFiles','task');
+ $('attachmentsEditProfile').onclick=()=> $('editProfile').click();
+ dropZone('projectDrop','projectFiles','project');dropZone('detailDrop','detailFiles','project');dropZone('taskDrop','taskFiles','task');
  document.body.addEventListener('click',async e=>{
- const p=e.target.closest('[data-open-project]');if(p){state.projectId=p.dataset.openProject;$('projectPicker').value=state.projectId;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();show('overview');}catch(err){notice(err.message);}return;}
+ const p=e.target.closest('[data-open-project]');if(p){state.projectId=p.dataset.openProject;$('projectPicker').value=state.projectId;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();show('details');}catch(err){notice(err.message);}return;}
  const st=e.target.closest('[data-story]');if(st){selectStory(st.dataset.story);return;}
  const t=e.target.closest('[data-task]');if(t){lastTaskTrigger=t;try{await openTask(t.dataset.task);}catch(err){notice(err.message);}return;}
  const doc=e.target.closest('[data-doc]');if(doc){try{await download('/api/projects/'+encodeURIComponent(requireProject())+'/documents/'+encodeURIComponent(doc.dataset.doc)+'/download');}catch(err){notice(err.message);}return;}
@@ -401,10 +422,10 @@ function bind(){
 }
 function enableSearchableSelects(){
  const setup=select=>{
-  if(select.multiple||select.dataset.searchEnhanced==='true'||select.closest('#preferencesPanel'))return;
+  if(select.multiple||select.dataset.searchEnhanced==='true'||!['memberUser','newTaskAssignee','teamDirectory','teamMemberUser','workflowDeveloper'].includes(select.id))return;
   select.dataset.searchEnhanced='true';
   const search=document.createElement('input');
-  search.type='search';search.className='form-control form-control-sm mb-1';
+  search.type='search';search.className='form-control form-control-sm tn-select-search mb-1';
   search.placeholder='Search options…';
   search.setAttribute('aria-label','Search '+(select.getAttribute('aria-label')||select.name||'options'));
   select.before(search);
@@ -437,7 +458,7 @@ async function initialize(){
  if(!token()){location.replace('/login.html');return;}
  const me=await api('/api/auth/me');state.user=me.user;$('currentUser').textContent=me.user?.name||me.user?.email||'';
  await loadProjects();await fetchDirectory();clearStory();
- const hash=window.location.hash.replace('#','');if(['projects','stories','tasks','reports','inventory','team'].includes(hash))show(hash);else show('projects');
+ const hash=window.location.hash.replace('#','');if(['overview','projects','details','stories','tasks','reports','inventory','team','attachments'].includes(hash))show(hash);else show('projects');
  }catch(e){if(/auth|token|unauthoriz|sign.in/i.test(e.message))location.replace('/login.html');else notice(e.message);}
 }
 initialize();
