@@ -72,6 +72,20 @@ async function main() {
          on conflict(project_id,user_id) do update set project_role=excluded.project_role,role=excluded.role`,
         [projectId,users.get(person.email),person.platform,person.project]);
     }
+    // Materialize the demo teams in the real relational tables, not only project metadata.
+    // Existing global teams are reused and links are inserted idempotently.
+    const teamIds=new Map();
+    for(const entry of metadata.teams){
+      const team=await client.query(
+        'insert into teams(name,description,created_by) values($1,$2,$3) on conflict ((lower(name))) do update set name=excluded.name returning id',
+        [entry.name,'Demo team associated with '+PROJECT_REF,creator]);
+      const teamId=team.rows[0].id;
+      teamIds.set(entry.name,teamId);
+      await client.query('insert into project_teams(project_id,team_id) values($1,$2) on conflict do nothing',[projectId,teamId]);
+    }
+    for(const person of PEOPLE){
+      await client.query('insert into team_members(team_id,user_id) values($1,$2) on conflict do nothing',[teamIds.get(person.team),users.get(person.email)]);
+    }
     const env=await client.query(
       `insert into project_environments(project_id,name,base_url,stage_type,is_default,created_by)
        values($1,'Local Demo','http://localhost:4000','QA',true,$2)
