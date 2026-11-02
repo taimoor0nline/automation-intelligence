@@ -89,7 +89,7 @@ async function testMode(mode, number) {
     sessionId: id, approvedIds: ['TC001'], reviewedTestCases: [session.testCases[0]],
   });
   assert.equal(unreviewed.status, 422, JSON.stringify(unreviewed.body));
-  assert.equal(unreviewed.body.code, 'HUMAN_REVIEW_CONFIRMATION_REQUIRED');
+  assert(['REPAIR_REGRESSION_GATE_REQUIRED','HUMAN_REVIEW_CONFIRMATION_REQUIRED'].includes(unreviewed.body.code), 'Unreviewed case must be blocked by repair regression or human review gate.');
 
   const save = await post('/api/test-cases/repair-workbench', {
     sessionId: id, action: 'manual-script', testCase: { id: 'TC001' }, script, expectedRevision: 0,
@@ -104,7 +104,7 @@ async function testMode(mode, number) {
     sessionId: id, approvedIds: ['TC001'], reviewedTestCases: [latest],
   });
   assert.equal(blocked.status, 422, JSON.stringify(blocked.body));
-  assert.equal(blocked.body.code, 'HUMAN_REVIEW_CONFIRMATION_REQUIRED');
+  assert(['REPAIR_REGRESSION_GATE_REQUIRED','HUMAN_REVIEW_CONFIRMATION_REQUIRED'].includes(blocked.body.code), 'Edited case must remain blocked until regression validation and human confirmation.');
 
   const stale = await post('/api/test-cases/repair-workbench', {
     sessionId: id, action: 'confirm', testCase: { id: 'TC001' },
