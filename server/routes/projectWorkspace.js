@@ -161,13 +161,14 @@ async function task(req){
 router.get('/api/work-items/:id/details',requireAuth,async(req,res)=>{
  try{
  const ctx=await task(req);
+ const closer=ctx.item.closed_by?await db.query('select display_name from users where id=$1',[ctx.item.closed_by]):null;
  const [children,attachments,history,comments]=await Promise.all([
  db.query('select id,title,status,priority,assigned_to,eta_at,completed_at from work_items where parent_work_item_id=$1 and deleted_at is null order by created_at',[req.params.id]),
  db.query('select id,filename,mime_type,file_size,created_at from work_item_attachments where work_item_id=$1 order by created_at desc',[req.params.id]),
  db.query('select event_type,old_status,new_status,comment,created_at,u.display_name by_name from work_item_history h left join users u on u.id=h.performed_by where work_item_id=$1 order by created_at desc limit 100',[req.params.id]),
  db.query('select c.id,c.comment,c.created_at,u.display_name user_name from work_item_comments c left join users u on u.id=c.user_id where work_item_id=$1 order by c.created_at',[req.params.id])
  ]);
- res.json({ok:true,task:ctx.item,subtasks:children.rows,attachments:attachments.rows,history:history.rows,comments:comments.rows,projectRole:ctx.role});
+ res.json({ok:true,task:{...ctx.item,closed_by_name:closer?.rows?.[0]?.display_name||null},subtasks:children.rows,attachments:attachments.rows,history:history.rows,comments:comments.rows,projectRole:ctx.role});
  }catch(e){respond(res,e);}
 });
 router.post('/api/work-items/:id/subtasks',requireAuth,async(req,res)=>{
@@ -241,6 +242,15 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  group.taskIds.push(item.id);groups.set(item.session_id,group);
  }
  res.json({ok:true,groups:[...groups.values()],blocked,executor:'existing /api/test-runs/start (isolated Cypress; screenshot/video evidence)'});
+ }catch(e){respond(res,e);}
+});
+
+
+router.get('/api/projects/:projectId/deleted-tasks',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const r=await db.query('select w.id,w.title,w.status,w.deleted_at,w.deleted_by,u.display_name deleted_by_name from work_items w left join users u on u.id=w.deleted_by where w.project_id=$1 and w.deleted_at is not null order by w.deleted_at desc limit 100',[req.params.projectId]);
+ res.json({ok:true,tasks:r.rows});
  }catch(e){respond(res,e);}
 });
 
