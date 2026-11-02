@@ -62,7 +62,18 @@ async function loadWorkspace(){
  if(results[1].status!=='fulfilled'||results[2].status!=='fulfilled')notice('Some project data could not be loaded. Check your access and database configuration.','warning');
  }finally{$('workspaceLoading').classList.add('d-none');document.querySelector('.tn-container').removeAttribute('aria-busy');}
 }
-function renderAll(){renderOverview();renderStoryList();renderTasks();renderReports();renderTeam();}
+function applyRoleUI(){
+ const globalManager=String(state.user?.role||'').toUpperCase()==='MANAGER';
+ const projectManager=state.context?.projectRole==='PROJECT_MANAGER';
+ const canReview=projectManager||state.context?.projectRole==='QA';
+ const toggles=[['newProjectForm',globalManager],['memberForm',projectManager],['userForm',globalManager],['environmentForm',projectManager],['newTaskForm',canReview],['storyForm',canReview]];
+ for(const [id,allowed] of toggles){const form=$(id);if(!form)continue;form.querySelectorAll('input,select,textarea,button').forEach(el=>{el.disabled=!allowed;});if(['newProjectForm','memberForm','userForm'].includes(id))form.hidden=!allowed;}
+ $('editProfile').disabled=!projectManager;
+ $('projectRunAll').disabled=!canReview;
+ if(!canReview)$('batchRetest').disabled=true;
+ document.querySelectorAll('[data-go="projects"]').forEach(el=>{if(el.textContent.includes('New project'))el.hidden=!globalManager;});
+}
+function renderAll(){renderOverview();renderStoryList();renderTasks();renderReports();renderTeam();applyRoleUI();}
 function renderOverview(){
  const c=state.context,p=c.project;
  $('statStories').textContent=c.stories.length;$('statRuns').textContent=c.runs.length;
@@ -177,6 +188,13 @@ async function fetchDirectory(){
 }
 async function openTask(id){
  const d=await api('/api/work-items/'+encodeURIComponent(id)+'/details');state.taskId=id;state.taskRole=d.projectRole;const t=d.task;
+ const canReview=['PROJECT_MANAGER','QA'].includes(d.projectRole),isManager=d.projectRole==='PROJECT_MANAGER',isDeveloper=d.projectRole==='DEVELOPER';
+ $('retestOne').disabled=!canReview;$('retestWithChildren').disabled=!canReview;
+ $('subtaskForm').querySelectorAll('input,button').forEach(el=>el.disabled=!canReview);
+ $('taskDrop').setAttribute('aria-disabled',String(d.projectRole==='VIEWER'));
+ $('taskDrop').tabIndex=d.projectRole==='VIEWER'?-1:0;
+ $('taskFiles').disabled=d.projectRole==='VIEWER';
+ for(const btn of document.querySelectorAll('[data-task-action]'))btn.disabled=!(canReview||(btn.dataset.taskAction==='ETA'&&isDeveloper))||(btn.dataset.taskAction==='DELETE'&&!isManager);
  $('drawerTitle').textContent=t.title;
  $('drawerInfo').innerHTML=(d.parent?'<div class="tn-kv"><span>Parent task</span><button class="tn-link" data-task="'+esc(d.parent.id)+'">'+esc(d.parent.title)+'</button></div>':'')+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+esc(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div><div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+' · '+(t.closed_by_name?'By '+esc(t.closed_by_name):'')+'</span></div><p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
  $('linkSession').value=t.session_id||'';$('linkCase').value=t.external_case_id||'';
@@ -186,6 +204,7 @@ async function openTask(id){
  function populateCases(){const sid=$('linkSession').value;const filtered=availableCases.filter(x=>x.session_id===sid);$('caseChoices').innerHTML=filtered.map(x=>'<option value="'+esc(x.external_case_id)+'" label="'+esc(x.title||x.external_case_id)+'"></option>').join('');}
  $('linkSession').oninput=populateCases;populateCases();
  const canLink=['PROJECT_MANAGER','QA'].includes(d.projectRole);$('testLinkForm').querySelectorAll('input,button').forEach(el=>el.disabled=!canLink);await loadTaskLinks(id);
+ $('saveTaskStatus').disabled=d.projectRole==='VIEWER';if(isDeveloper){const complete=$('taskStatusChange').querySelector('option[value="COMPLETED"]');if(complete)complete.disabled=true;}
  $('taskEta').value=t.eta_at?new Date(t.eta_at).toISOString().slice(0,16):'';
  $('taskDeferDate').value=t.deferred_until?new Date(t.deferred_until).toISOString().slice(0,16):'';
  $('taskReason').value='';
