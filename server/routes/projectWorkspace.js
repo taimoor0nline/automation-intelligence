@@ -236,7 +236,7 @@ router.get('/api/projects/:projectId/task-test-history',requireAuth,async(req,re
  if(!id(taskId))throw fail(400,'Valid taskId required.');
  const task=await db.query('select id from work_items where id=$1 and project_id=$2 and deleted_at is null',[taskId,req.params.projectId]);
  if(!task.rowCount)throw fail(404,'Task not found.');
- const rows=await db.query("select tr.id run_id,tr.run_number,tr.completed_at,tr.executed_by,u.display_name tester,te.external_case_id,te.title,te.passed,te.evidence_json from work_items w join test_runs tr on tr.session_id=w.session_id and tr.project_id=w.project_id join test_results te on te.run_id=tr.id and te.external_case_id=w.external_case_id left join users u on u.id=tr.executed_by where w.id=$1 and w.project_id=$2 order by tr.completed_at desc limit 100",[taskId,req.params.projectId]);
+ const rows=await db.query(`with linked_cases as (select session_id,external_case_id from task_test_case_links where work_item_id=$1 and project_id=$2 union select session_id,external_case_id from work_items where id=$1 and project_id=$2 and session_id is not null and external_case_id is not null) select tr.id run_id,tr.run_number,tr.completed_at,tr.executed_by,u.display_name tester,te.external_case_id,te.title,te.passed,te.evidence_json from linked_cases lc join test_runs tr on tr.session_id=lc.session_id and tr.project_id=$2 join test_results te on te.run_id=tr.id and te.external_case_id=lc.external_case_id left join users u on u.id=tr.executed_by order by tr.completed_at desc limit 100`,[taskId,req.params.projectId]);
  res.json({ok:true,results:rows.rows});
  }catch(e){respond(res,e);}
 });
