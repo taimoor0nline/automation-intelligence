@@ -1,0 +1,35 @@
+'use strict';
+const assert=require('assert');
+const fs=require('fs');
+const path=require('path');
+const root=path.join(__dirname,'..');
+const read=p=>fs.readFileSync(path.join(root,p),'utf8');
+const workspace=read('testpilot-ui/workspace.html');
+const js=read('testpilot-ui/workspace.js');
+const css=read('testpilot-ui/workspace.css');
+const server=read('server/index.js');
+const routes=read('server/routes/projectWorkspace.js');
+const workflow=read('server/services/projectWorkflowAutomation.js');
+const media=read('server/services/retainedExecutionEvidence.js');
+const old=read('testpilot-ui/index.html');
+const platform=read('testpilot-ui/platform-ui.js');
+const progressive=read('testpilot-ui/progressive-generation.js');
+const session=read('server/data/sessionStore.js');
+const codeFiles=['testpilot-ui/workspace.js','testpilot-ui/platform-ui.js','testpilot-ui/progressive-generation.js','server/routes/projectWorkspace.js','server/services/projectWorkflowAutomation.js','server/services/retainedExecutionEvidence.js','server/routes/isolatedExecution.js','server/routes/workManagement.js','server/routes/sessionContext.js','server/routes/progressiveGenerationCanonical.js','server/data/sessionStore.js','server/index.js'];
+for(const name of codeFiles)new Function(read(name));
+for(const id of ['projectPicker','profileForm','projectDrop','storyForm','taskDrawer','taskFiles','batchRetest','workflowForm','newTaskForm','evidenceModal','view-reports','view-team']){
+ assert(workspace.includes('id="'+id+'"'),'Missing workspace UI control: '+id);
+}
+assert(old.includes('1. Define the journey')&&old.includes('2. Review test cases')&&old.includes('3. Execution & analytics'),'Mature 3-phase runner must remain unchanged');
+assert(server.includes('projectWorkspaceRoutes')&&server.includes('express.json({ limit: "8mb" })'),'Workspace routes and upload limits missing');
+assert(routes.includes('/api/projects/:projectId/stories')&&routes.includes('/api/projects/:projectId/retest-plan'),'Project stories or retest planning routes missing');
+assert(routes.includes("router.get('/api/projects/:projectId/run-evidence"),'Retained evidence viewer route missing');
+assert(platform.includes('testnexus:runnerHandoff')&&platform.includes("url==='/api/generation/start'"),'Progressive generation handoff missing');
+assert(session.includes('session.projectStoryId = previous.projectStoryId'),'Generation reset must retain project story identity');
+assert(js.includes("'/api/test-runs/start'")&&js.includes("previewEvidence("),'Batch testing must reuse real runner with media preview');
+assert(workflow.includes('pg_advisory_xact_lock')&&workflow.includes("status='READY_FOR_RETEST'"),'Workflow must dedupe tasks and only close verified retests');
+assert(media.includes('test_run_evidence')&&media.includes('COPYFILE_EXCL'),'Run media needs durable storage');
+assert(css.includes('appearance:auto!important')&&css.includes('background-image:none!important'),'Dropdown chevron fix missing');
+for(const m of ['014_project_workspace.sql','015_story_workflow_link.sql','016_retained_execution_evidence.sql']) assert(fs.existsSync(path.join(root,'server/db',m)),'Missing migration '+m);
+for(const file of [workspace,js,css,routes])assert(!/learniq/i.test(file),'TestNexus workspace must be independent');
+console.log('TestNexus workspace smoke checks passed: '+codeFiles.length+' JavaScript files + UI, runner preservation, workflows, evidence, migrations.');
