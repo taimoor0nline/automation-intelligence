@@ -20,61 +20,31 @@
    <a class="nav-link" href="/runner" title="Generate, review and run tests">Run Tests ↗</a>
   </nav>
   <select id="projectPicker" class="form-select" aria-label="Current project" style="width:210px"></select>
-  <button id="uiPreferences" type="button" class="btn btn-outline-secondary tn-btn" aria-label="Appearance preferences" aria-expanded="false" aria-controls="preferencesPanel">Appearance</button><span id="currentUser" class="tn-muted text-nowrap"></span>
+  <span id="currentUser" class="tn-muted text-nowrap"></span>
  </div>
 </header>
-<div id="preferencesPanel" class="tn-preferences" hidden><div class="tn-preference-title">Display preferences</div><label for="themePreference">Theme</label><select id="themePreference" class="form-select"><option value="light">Light</option><option value="dark">Dark</option><option value="system">System</option></select><label for="densityPreference">Density</label><select id="densityPreference" class="form-select"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></div>
 <div class="tn-container">
  <div id="notice" class="alert alert-warning d-none" role="alert" aria-live="polite"></div><div id="workspaceLoading" class="tn-note mb-3 d-none" role="status" aria-live="polite">Loading project workspace…</div>
  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
   <div><div class="tn-eyebrow" id="breadcrumb">PROJECT WORKSPACE</div><h1 class="tn-title" id="pageTitle">Project overview</h1><div class="tn-muted" id="pageSubtitle">Scope, documents, stories, assignments and execution evidence</div></div>
   <div class="d-flex gap-2"><button class="btn btn-outline-secondary tn-btn" data-go="projects">+ New project</button><button class="btn btn-primary tn-btn" data-go="stories">Write a story</button><a href="/runner" class="btn btn-outline-secondary tn-btn">Run Tests ↗</a></div>
  </div>
- <section id="view-overview" class="tn-view active"><div id="overviewHealth" class="tn-health-strip mb-3" aria-live="polite"></div>
+ <section id="view-overview" class="tn-view active">
+  <div id="overviewHealth" class="tn-health-strip mb-3" aria-live="polite"></div>
   <div class="row g-3 mb-3">
    <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statStories">—</b><span class="label">Business stories</span></div></div>
    <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statRuns">—</b><span class="label">Test runs</span></div></div>
    <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statTasks">—</b><span class="label">Active tasks</span></div></div>
    <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statDocs">—</b><span class="label">Project documents</span></div></div>
   </div>
-  <div class="row g-3">
-   <div class="col-xl-8"><div class="tn-card h-100">
-    <div class="tn-card-head"><div><h2 id="profileName">Project profile</h2><div class="tn-muted" id="profileReference">Reference No. —</div></div><button id="editProfile" class="btn btn-outline-secondary tn-btn">Edit profile</button></div>
-    <div class="tn-card-body">
-     <div class="row g-3">
-      <div class="col-md-6"><h3 class="mb-2">Objectives & in-scope</h3><div id="profileScope" class="tn-info">—</div></div>
-      <div class="col-md-6"><h3 class="mb-2">Exclusions & acceptance</h3><div id="profileAcceptance" class="tn-info">—</div></div>
-      <div class="col-md-6"><h3 class="mb-2">Business rules</h3><div id="profileRules" class="tn-info">—</div></div>
-      <div class="col-md-6"><h3 class="mb-2">Project metadata</h3><div id="profileMeta" class="tn-info">—</div></div>
-     </div>
-    </div></div></div>
-   <div class="col-xl-4"><div class="tn-card h-100">
-    <div class="tn-card-head"><h2>Environments</h2></div><div class="tn-card-body">
-     <div id="environmentList" class="mb-3"></div>
-     <form id="environmentForm"><div class="row g-2"><div class="col-5"><input class="form-control" name="name" placeholder="QA" required aria-label="Environment name"></div><div class="col-7"><input class="form-control" name="baseUrl" placeholder="https://app.example.com" type="url" required aria-label="Environment URL"></div></div>
-     <div class="d-flex gap-2 align-items-center mt-2"><select class="form-select" name="stageType" aria-label="Environment type"><option>QA</option><option>DEV</option><option>STAGING</option><option>UAT</option><option>PRODUCTION</option></select><label class="tn-muted text-nowrap"><input name="isDefault" type="checkbox" aria-label="Default project environment"> Default</label><button class="btn btn-outline-secondary tn-btn" type="submit">Add</button></div></form>
-    </div></div></div>
-   <div class="col-xl-7"><div class="tn-card h-100">
-    <div class="tn-card-head"><h2>Project documents</h2><span class="tn-muted">Requirements · BRD · Specifications · Evidence</span></div>
-    <div class="tn-card-body">
-     <div class="row g-2 align-items-center mb-2"><div class="col"><select class="form-select" id="documentCategory" aria-label="Document category"><option>REQUIREMENTS</option><option>BRD</option><option>TEST_PLAN</option><option>API_SPEC</option><option>TECHNICAL</option><option>OTHER</option></select></div><div class="col-auto"><input id="documentVersion" class="form-control" value="1.0" aria-label="Document version" style="width:75px"></div></div>
-     <div class="tn-drop" id="projectDrop" tabindex="0" role="button"><strong>Drop files here, or click to browse</strong><span class="tn-muted">PDF, Word, Excel, images, ZIP · 5 MB per file</span></div><input id="projectFiles" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.csv,.zip" aria-label="Project documents upload">
-     <div id="projectFilesList" class="mt-3"></div>
-    </div></div></div>
-   <div class="col-xl-5"><div class="tn-card h-100">
-    <div class="tn-card-head"><h2>Continue testing</h2></div><div class="tn-card-body">
-     <p class="tn-muted">Use your project stories as input to the existing three-phase TestNexus flow.</p>
-     <div class="tn-project-summary mb-3"><strong>1.</strong> Generate evidence-grounded tests<br><strong>2.</strong> Review and approve test cases<br><strong>3.</strong> Run approved tests and capture evidence</div>
-     <button class="btn btn-primary tn-btn" data-go="stories">Select a story →</button><a href="/runner" class="btn btn-outline-secondary tn-btn ms-1">Existing runner ↗</a>
-    </div></div></div>
-   <div class="col-12"><div class="tn-card"><div class="tn-card-head"><h2>Project testing workflow</h2><span class="tn-muted">Project-specific automated tasks; off until enabled by the project manager</span></div>
-   <div class="tn-card-body"><form id="workflowForm" class="row g-3 align-items-end">
-    <div class="col-lg-4"><label class="d-flex align-items-center gap-2"><input type="checkbox" name="autoCreateFailedTasks" aria-label="Automatically create tasks for failed tests"> Auto-create tasks for failed tests</label><div class="tn-muted mt-1">Deduplicate active failures per project + session + case</div></div>
-    <div class="col-lg-4"><label class="d-flex align-items-center gap-2"><input type="checkbox" name="autoCloseVerifiedRetests" aria-label="Automatically close verified retests"> Close tasks after passing QA retest</label><div class="tn-muted mt-1">Only tasks in Ready for Retest status</div></div>
-    <div class="col-lg-3"><label class="form-label">Default developer (optional)</label><select name="defaultDeveloper" class="form-select" id="workflowDeveloper" aria-label="Default developer"></select></div>
-    <div class="col-lg-1"><button class="btn btn-outline-secondary tn-btn" type="submit">Save</button></div>
-   </form></div></div></div>
-  </div>
+  <div class="tn-card"><div class="tn-card-head"><div><h2 id="profileName">Project overview</h2><span class="tn-muted" id="profileReference">Reference No. —</span></div><button id="editProfile" class="btn btn-outline-secondary tn-btn">Edit project details</button></div>
+   <div class="tn-card-body"><div class="row g-3">
+    <div class="col-md-6"><h3>Objectives and scope</h3><div id="profileScope" class="tn-info">—</div></div>
+    <div class="col-md-6"><h3>Acceptance and exclusions</h3><div id="profileAcceptance" class="tn-info">—</div></div>
+    <div class="col-md-6"><h3>Business rules</h3><div id="profileRules" class="tn-info">—</div></div>
+    <div class="col-md-6"><h3>Project information</h3><div id="profileMeta" class="tn-info">—</div></div>
+   </div></div></div>
+  <div class="d-none"><div id="environmentList"></div><form id="environmentForm"></form><div id="workflowStatus"></div><form id="workflowForm"></form><div id="projectFilesList"></div><select id="documentCategory"><option>OTHER</option></select><input id="documentVersion" value="1.0"></div>
  </section>
  <section id="view-projects" class="tn-view">
   <div class="row g-3"><div class="col-xl-8"><div class="tn-card"><div class="tn-card-head"><h2>All accessible projects</h2><span class="tn-muted">Select a project to open its workspace</span></div><div class="tn-scroll"><table class="tn-table table"><thead><tr><th>Reference No.</th><th>Project</th><th>Created</th><th></th></tr></thead><tbody id="projectsBody"></tbody></table></div></div></div>
@@ -159,6 +129,7 @@
   <div class="col-md-6"><label class="form-label">In scope</label><textarea name="scopeIn" class="form-control" aria-label="In scope"></textarea></div><div class="col-md-6"><label class="form-label">Out of scope</label><textarea name="scopeOut" class="form-control" aria-label="Out of scope"></textarea></div>
   <div class="col-md-6"><label class="form-label">Business rules</label><textarea name="businessRules" class="form-control" aria-label="Business rules"></textarea></div><div class="col-md-6"><label class="form-label">Acceptance criteria</label><textarea name="acceptanceCriteria" class="form-control" aria-label="Acceptance criteria"></textarea></div>
   <div class="col-md-6"><label class="form-label">Default application URL</label><input class="form-control" name="targetUrl" type="url" aria-label="Application URL"></div><div class="col-md-6"><label class="form-label">Technology stack</label><input class="form-control" name="technologyStack" aria-label="Technology stack"></div>
+ <div class="col-12"><label class="form-label">Project documents</label><div id="projectDrop" class="tn-drop" role="button" tabindex="0"><strong>Drop documents here or browse</strong><span class="tn-muted">PDF, Office, images, ZIP · 5 MB each</span></div><input id="projectFiles" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.csv,.zip"><div id="profileDocumentList" class="mt-2"></div></div>
  </div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary tn-btn">Save project profile</button></div></form></div></div>
 </div>
 <div class="modal fade" id="evidenceModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h2>Execution evidence</h2><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body text-center" id="evidencePreview"></div></div></div></div>
