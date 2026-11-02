@@ -389,8 +389,23 @@ function bind(){
  const report=e.target.closest('[data-report]');if(report){try{await download('/api/reports/'+encodeURIComponent(report.dataset.report));}catch(err){notice(err.message);}}
  });
 }
+function enableSearchableSelects(){
+ const cache=new WeakMap();
+ const setup=select=>{
+  if(select.multiple||select.dataset.searchEnhanced==='true'||select.closest('#preferencesPanel'))return;
+  select.dataset.searchEnhanced='true';
+  const search=document.createElement('input');search.type='search';search.className='form-control form-control-sm mb-1';search.placeholder='Search options…';search.setAttribute('aria-label','Search '+(select.getAttribute('aria-label')||select.name||'options'));select.parentNode.insertBefore(search,select);
+  let options=[];
+  const snapshot=()=>{options=[...select.options].map(o=>({value:o.value,text:o.textContent,disabled:o.disabled}));};snapshot();
+  new MutationObserver(()=>{if(!search.value.trim())snapshot();}).observe(select,{childList:true,subtree:true});
+  search.addEventListener('input',()=>{const value=select.value,q=search.value.toLowerCase().trim();const matching=options.filter(o=>!q||o.text.toLowerCase().includes(q));select.replaceChildren(...matching.map(o=>new Option(o.text,o.value,false,o.value===value)));if(!matching.some(o=>o.value===value))select.selectedIndex=-1;});
+  search.addEventListener('blur',()=>{if(!search.value)return;});
+ };
+ document.querySelectorAll('select').forEach(setup);
+ new MutationObserver(()=>document.querySelectorAll('select:not([data-search-enhanced])').forEach(setup)).observe(document.body,{childList:true,subtree:true});
+}
 async function initialize(){
- bind();try{
+ bind();enableSearchableSelects();try{
  if(!token()){notice('Sign in through Run Tests first, then return Home. Project data is served from your TestNexus database.','warning');return;}
  const me=await api('/api/auth/me');state.user=me.user;$('currentUser').textContent=me.user?.name||me.user?.email||'';
  await loadProjects();await fetchDirectory();clearStory();
