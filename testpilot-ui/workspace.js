@@ -3,7 +3,6 @@
 const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const state={user:null,projects:[],projectId:'',context:null,tasks:[],deletedTasks:[],evidence:[],taskId:null,view:'overview'};
 const token=()=>sessionStorage.getItem('aiTestPilotToken')||'';
-function syncProjectRunnerMode(){const handoff=sessionStorage.getItem('testnexus:runnerHandoff');if(!handoff)return;try{const value=JSON.parse(handoff);if(value?.projectId)sessionStorage.setItem('testnexus:runnerOrigin','project');}catch{}}
 
 function notice(message,type='danger'){const el=$('notice');el.className='alert alert-'+type;el.textContent=message;el.scrollIntoView({block:'nearest'});}
 function clearNotice(){$('notice').className='alert alert-warning d-none';$('notice').textContent='';}
@@ -119,7 +118,6 @@ async function saveStory(){
  return d.story;
 }
 async function launchStory(){
- syncProjectRunnerMode();
  requireProject();const form=$('storyForm');if(!form.reportValidity())return;
  const current=$('storyId').value;const saved=await saveStory();
  const env=state.context.environments.find(e=>e.id===form.elements.namedItem('environmentId').value)||state.context.environments.find(e=>e.is_default)||state.context.environments[0];
@@ -127,10 +125,10 @@ async function launchStory(){
  const storyContext=[saved.story,saved.acceptance_criteria?'Acceptance criteria:\n'+saved.acceptance_criteria:'',project.scope_in?'Project scope:\n'+project.scope_in:'',project.scope_out?'Out of scope (do not test):\n'+project.scope_out:'',project.business_rules?'Business rules:\n'+project.business_rules:''].filter(Boolean).join('\n\n');
  const handoff={projectId:state.projectId,storyId:saved.id,story:storyContext,pagePaths:saved.page_paths||'',targetUrl:env?.base_url||project.target_url||'',environmentName:env?.name||'Test'};
  if(!handoff.targetUrl)throw Error('Configure a project environment or target URL before testing.');
- sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify(handoff));
+ sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify(handoff));sessionStorage.setItem('testnexus:runnerOrigin','project');
  window.location.href='/';
 }
-async function launchTaskTest(){const project=requireProject(),taskId=state.taskId;if(!taskId)throw Error('Select a task first.');const detail=await api('/api/work-items/'+encodeURIComponent(taskId)+'/details');const task=detail.task;if(!['QA','PROJECT_MANAGER'].includes(detail.projectRole))throw Error('QA or project manager role required.');const env=state.context.environments.find(e=>e.is_default)||state.context.environments[0];const profile=state.context.project;const targetUrl=env?.base_url||profile.target_url;if(!targetUrl)throw Error('Set a project target URL or environment before testing.');const story=['Test task: '+task.title,task.description||'',task.external_case_id?'Linked test case: '+task.external_case_id:'',profile.business_rules?'Project business rules: '+profile.business_rules:'',profile.scope_in?'In scope: '+profile.scope_in:''].filter(Boolean).join('\n\n');sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify({projectId:project,taskId,story,targetUrl,environmentName:env?.name||'Test'}));window.location.href='/';}
+async function launchTaskTest(){const project=requireProject(),taskId=state.taskId;if(!taskId)throw Error('Select a task first.');const detail=await api('/api/work-items/'+encodeURIComponent(taskId)+'/details');const task=detail.task;if(!['QA','PROJECT_MANAGER'].includes(detail.projectRole))throw Error('QA or project manager role required.');const env=state.context.environments.find(e=>e.is_default)||state.context.environments[0];const profile=state.context.project;const targetUrl=env?.base_url||profile.target_url;if(!targetUrl)throw Error('Set a project target URL or environment before testing.');const story=['Test task: '+task.title,task.description||'',task.external_case_id?'Linked test case: '+task.external_case_id:'',profile.business_rules?'Project business rules: '+profile.business_rules:'',profile.scope_in?'In scope: '+profile.scope_in:''].filter(Boolean).join('\n\n');sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify({projectId:project,taskId,story,targetUrl,environmentName:env?.name||'Test'}));sessionStorage.setItem('testnexus:runnerOrigin','project');window.location.href='/';}
 function updateTaskSelection(){
  const count=document.querySelectorAll('.task-select:checked').length;
  $('taskSelectionCount').textContent=count+' selected';
