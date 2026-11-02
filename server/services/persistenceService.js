@@ -210,6 +210,7 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
         [runId, caseId, result.title || caseId || 'Test', classification.category, classification.scenarioType, classification.priority, classification.securitySubcategory, classification.severity, Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
       );
     }
+    await persistRunReportSnapshots({sessionId,session,runId,userId,client});
     return runId;
   });
 }
@@ -292,7 +293,7 @@ async function persistReviewedCase(sessionId, session, testCase) {
   return true;
 }
 
-async function persistRunReportSnapshots({sessionId,session,runId,userId}) {
+async function persistRunReportSnapshots({sessionId,session,runId,userId,client=null}) {
  if(!enabled()||!runId)return false;
  const runNumber=session.lastResults?.runNumber;
  const summary=session.lastResults?.summary||{};
@@ -309,15 +310,16 @@ async function persistRunReportSnapshots({sessionId,session,runId,userId}) {
   {kind:'EXECUTION',payload:{sessionId,runNumber,summary,approvedIds:session.approvedIds||[],generatedAt:new Date().toISOString()},html:session.reportHtml||null},
   {kind:'AI_LEARNING',payload:{signatureCount:Array.isArray(learning.signatures)?learning.signatures.length:0,repairCount:repairs.length,verifiedRepairCount:verifiedRepairs.length,verifiedRepairs,recordedAt:new Date().toISOString(),source:'session_repair_learning'},html:null}
  ];
- await db.withTransaction(async client=>{
+ const write=async connection=>{
   for(const report of reports){
-   await client.query(`insert into test_report_snapshots(project_id,session_id,run_id,report_kind,revision,report_json,report_html,recorded_by)
+   await connection.query(`insert into test_report_snapshots(project_id,session_id,run_id,report_kind,revision,report_json,report_html,recorded_by)
     values($1,$2,$3,$4,1,$5::jsonb,$6,$7)
     on conflict(run_id,report_kind,revision) where run_id is not null
     do update set report_json=excluded.report_json,report_html=excluded.report_html`,
     [session.projectId||null,sessionId,runId,report.kind,JSON.stringify(report.payload),report.html,userId||session.createdBy||null]);
   }
- });
+ };
+ if(client)await write(client);else await db.withTransaction(write);
  return true;
 }
 
