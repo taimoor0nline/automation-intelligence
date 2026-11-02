@@ -89,11 +89,15 @@ async function recordReuse({projectId,memoryId,sessionId,runId,eventType,userId}
   if(row.rows[0].status==='REVOKED'&&eventType!=='REVOKED')throw Error('Revoked repairs cannot be reused');
   if(row.rows[0].status!=='VERIFIED'&&!['APPLIED','REVOKED'].includes(eventType))throw Error('Only verified repairs may be suggested or counted as reused');
   if(eventType==='SUCCEEDED')throw Error('Use the verified passing-run endpoint to record success');
+  if(eventType==='APPLIED'&&!uuid(runId))throw Error('Applied repairs require a valid run ID');
+  if(eventType==='FAILED'&&!uuid(runId))throw Error('Failed repairs require a valid run ID');
   if(eventType==='REVOKED')await client.query("update ai_repair_memory set status='REVOKED',updated_at=now() where id=$1",[memoryId]);
   if(eventType==='SUCCEEDED'||eventType==='FAILED'){
    if(!uuid(runId))throw Error('A completed run ID is required to record a repair outcome');
    const applied=await client.query("select 1 from ai_repair_reuse_events where memory_id=$1 and run_id=$2 and event_type='APPLIED'",[memoryId,runId]);
    if(!applied.rowCount)throw Error('Repair must be applied before recording an outcome');
+   const run=await client.query('select id from test_runs where id=$1 and project_id=$2',[runId,projectId]);
+   if(!run.rowCount)throw Error('Outcome run does not belong to this project');
   }
   const r=await client.query(`insert into ai_repair_reuse_events(memory_id,project_id,session_id,run_id,event_type,actor_id)
    values($1,$2,$3,$4,$5,$6) on conflict do nothing returning id`,
