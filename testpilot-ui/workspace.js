@@ -136,7 +136,7 @@ function renderTeam(){
  $('workflowDeveloper').innerHTML='<option value="">Manual assignment</option>'+state.context.members.filter(m=>m.project_role==='DEVELOPER').map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
 }
 async function fetchDirectory(){
- try{const r=await api('/api/users');state.users=r.users||[];renderTeam();}catch{state.users=null;renderTeam();}
+ try{const r=await api('/api/projects/'+encodeURIComponent(requireProject())+'/user-directory');state.users=r.users||[];renderTeam();}catch{state.users=null;renderTeam();}
 }
 async function openTask(id){
  const d=await api('/api/work-items/'+encodeURIComponent(id)+'/details');state.taskId=id;const t=d.task;
