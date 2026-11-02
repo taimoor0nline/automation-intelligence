@@ -183,6 +183,7 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
       ]
     );
     const runId = run.rows[0].id;
+    if(session.projectId)await client.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TEST_RUN_COMPLETED',$4::jsonb)",[session.projectId,sessionId,userId||null,JSON.stringify({runId,runNumber,total:summary.total||0,passed:summary.passed||0,failed:summary.failed||0})]);
     const classificationByCaseId = new Map(
       (session.testCases || []).map((testCase) => {
         const security = securityOf(testCase);
