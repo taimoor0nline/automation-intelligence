@@ -14,6 +14,21 @@ async function main(){
    filename text primary key, checksum text not null, applied_at timestamptz not null default now()
   )`);
   const files=fs.readdirSync(__dirname).filter(name=>/^\d+.*\.sql$/i.test(name)).sort();
+  const baseline=String(process.env.TESTNEXUS_MIGRATION_BASELINE||'').trim();
+  if(baseline){
+   if(!/^\\d+.*\\.sql$/i.test(baseline)||!files.includes(baseline))throw new Error('Unknown baseline migration: '+baseline);
+   if(process.env.TESTNEXUS_CONFIRM_BASELINE!=='I_HAVE_VERIFIED_SCHEMA')throw new Error('Set TESTNEXUS_CONFIRM_BASELINE=I_HAVE_VERIFIED_SCHEMA after verifying existing database schema.');
+   const recorded=await client.query('select count(*)::int as total from schema_migrations');
+   if(recorded.rows[0].total)throw new Error('Baseline is only allowed before any migrations have been recorded.');
+   const existing=await client.query("select to_regclass('public.test_sessions') as sessions,to_regclass('public.test_runs') as runs");
+   if(!existing.rows[0].sessions||!existing.rows[0].runs)throw new Error('Baseline requires an existing TestNexus database schema.');
+   await client.query('begin');
+   try{
+    for(const file of files){if(file>baseline)break;const sql=fs.readFileSync(path.join(__dirname,file),'utf8');const checksum=crypto.createHash('sha256').update(sql).digest('hex');await client.query('insert into schema_migrations(filename,checksum) values($1,$2)',[file,checksum]);}
+    await client.query('commit');
+   }catch(error){await client.query('rollback');throw error;}
+   console.log('[db:migrate] existing schema baselined through '+baseline);
+  }
   for(const file of files){
    const sql=fs.readFileSync(path.join(__dirname,file),'utf8');
    const checksum=crypto.createHash('sha256').update(sql).digest('hex');
