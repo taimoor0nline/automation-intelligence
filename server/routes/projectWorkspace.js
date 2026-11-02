@@ -361,6 +361,16 @@ router.get('/api/projects/:projectId/team-members',requireAuth,async(req,res)=>{
  const r=await db.query(`select pt.team_id,u.id as user_id,u.display_name,u.email from project_teams pt join team_members tm on tm.team_id=pt.team_id join users u on u.id=tm.user_id join project_members pm on pm.project_id=pt.project_id and pm.user_id=u.id where pt.project_id=$1 order by u.display_name`,[req.params.projectId]);
  res.json({ok:true,members:r.rows});
 }catch(e){respond(res,e);}});
+router.delete('/api/teams/:teamId/members/:userId',requireAuth,requireRole('MANAGER'),async(req,res)=>{try{
+ if(!id(req.params.teamId)||!id(req.params.userId))throw fail(400,'Valid team and user IDs required.');
+ await db.query('delete from team_members where team_id=$1 and user_id=$2',[req.params.teamId,req.params.userId]);
+ res.json({ok:true});
+}catch(e){respond(res,e);}});
+router.get('/api/teams/:teamId/members',requireAuth,requireRole('MANAGER'),async(req,res)=>{try{
+ if(!id(req.params.teamId))throw fail(400,'Valid team ID required.');
+ const r=await db.query('select u.id,u.display_name,u.email from team_members tm join users u on u.id=tm.user_id where tm.team_id=$1 order by u.display_name',[req.params.teamId]);
+ res.json({ok:true,members:r.rows});
+}catch(e){respond(res,e);}});
 router.get('/api/projects/:projectId/teams',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);
  const r=await db.query('select t.id,t.name,t.description from project_teams pt join teams t on t.id=pt.team_id where pt.project_id=$1 order by t.name',[req.params.projectId]);
