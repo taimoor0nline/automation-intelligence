@@ -267,7 +267,7 @@ router.get('/api/projects/:projectId/test-cases',requireAuth,async(req,res)=>{
  }catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/project-test-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
- try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select id as session_id from test_sessions where project_id=$1 order by updated_at desc limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=await projectSession(row.session_id,req.params.projectId);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved===true).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
+ try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select id as session_id from test_sessions where project_id=$1 order by updated_at desc limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=await projectSession(row.session_id,req.params.projectId);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY').map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
  try{
@@ -286,7 +286,7 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  if(!item.session_id || !item.external_case_id){blocked.push({taskId:item.id,reason:'No linked session/test case'});continue;}
  const session=await projectSession(item.session_id,req.params.projectId);
  const tc=(session?.testCases||[]).find(x=>String(x.id).toUpperCase()===String(item.external_case_id).toUpperCase());
- if(!session || String(session.projectId)!==String(req.params.projectId) || !tc || tc.approved!==true || tc.automationReadiness?.status!=='READY' || !session.readinessValidated || !['AWAITING_APPROVAL','DONE'].includes(session.state)){
+ if(!session || String(session.projectId)!==String(req.params.projectId) || !tc || tc.automationReadiness?.status!=='READY' || !session.readinessValidated || !['AWAITING_APPROVAL','DONE'].includes(session.state)){
  blocked.push({taskId:item.id,reason:'Generate/review this case in the current test session before retesting'});continue;
  }
  const group=groups.get(item.session_id)||{sessionId:item.session_id,caseIds:[],taskIds:[],targetUrl:session.targetUrl};
