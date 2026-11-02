@@ -13,6 +13,11 @@ async function api(url,options={}){
  if(!r.ok)throw Error(d.reply||'Request failed ('+r.status+')');
  return d;
 }
+const UI_KEY='testnexus:ui-preferences';
+function prefsRead(){try{return JSON.parse(localStorage.getItem(UI_KEY)||'{}')}catch{return {}}}
+function applyPreferences(){const p=prefsRead();const mode=['light','dark','system'].includes(p.theme)?p.theme:'light';const actual=mode==='system'&&window.matchMedia?.('(prefers-color-scheme: dark)').matches?'dark':mode==='system'?'light':mode;document.body.dataset.theme=actual;document.body.dataset.density=p.density==='compact'?'compact':'comfortable';$('themePreference').value=mode;$('densityPreference').value=document.body.dataset.density;}
+function savePreferences(){localStorage.setItem(UI_KEY,JSON.stringify({theme:$('themePreference').value,density:$('densityPreference').value}));applyPreferences();}
+async function loadTaskLinks(id){const box=$('drawerTestLinks');box.textContent='Loading linked cases…';try{const d=await api('/api/work-items/'+encodeURIComponent(id)+'/test-links');if(state.taskId!==id)return;box.innerHTML=d.links.length?d.links.map(x=>'<div class="tn-sub tn-row"><span><strong>'+esc(x.external_case_id)+'</strong><span class="tn-muted d-block">Session '+esc(x.session_id)+'</span></span><button class="tn-link" data-unlink-test="'+esc(x.id)+'" aria-label="Unlink case '+esc(x.external_case_id)+'">Unlink</button></div>').join(''):'<p class="tn-muted">No reusable test cases linked. Use the form below to add one.</p>'; }catch(err){box.textContent='Unable to load linked cases: '+err.message;}}
 function formPayload(form){return Object.fromEntries(new FormData(form).entries());}
 function date(v){return v?new Date(v).toLocaleDateString():'—';}
 function dateTime(v){return v?new Date(v).toLocaleString():'—';}
@@ -66,6 +71,7 @@ function renderOverview(){
  $('profileAcceptance').innerHTML='<strong>Excluded</strong><div>'+display(p.scope_out)+'</div><strong class="d-block mt-2">Acceptance</strong><div>'+display(p.acceptance_criteria)+'</div>';
  $('profileRules').innerHTML=display(p.business_rules);
  $('profileMeta').innerHTML='<strong>Dates:</strong> '+date(p.start_date)+' – '+date(p.end_date)+'<br><strong>Target:</strong> '+display(p.target_url)+'<br><strong>Technology:</strong> '+display(p.technology_stack);
+ const latest=c.runs[0]||null;const pending=state.tasks.filter(t=>!t.deleted_at&&t.status==='READY_FOR_RETEST').length;const successes=c.runs.reduce((n,r)=>n+Number(r.passed||0),0),failures=c.runs.reduce((n,r)=>n+Number(r.failed||0),0);const rate=successes+failures?Math.round(100*successes/(successes+failures))+'%':'—';$('overviewHealth').innerHTML='<div class="tn-health-chip"><strong>'+rate+'</strong>Recorded pass rate</div><div class="tn-health-chip"><strong>'+pending+'</strong>Ready for retest</div><div class="tn-health-chip"><strong>'+(latest?'#'+esc(latest.run_number):'—')+'</strong>Latest run</div><div class="tn-health-chip"><strong>'+c.environments.length+'</strong>Environments</div>';
  $('environmentList').innerHTML=c.environments.map(e=>'<div class="tn-kv"><span>'+esc(e.name)+(e.is_default?' ★':'')+'</span><span>'+esc(e.base_url)+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
  $('projectFilesList').innerHTML=c.documents.map(d=>'<div class="tn-kv"><span>'+esc(d.category)+'</span><span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button> <small class="tn-muted">v'+esc(d.version)+' · '+Math.ceil(d.file_size/1024)+' KB</small></span></div>').join('')||'<div class="tn-muted">No documents attached yet.</div>';
 }
@@ -138,6 +144,9 @@ function renderTasks(){
 function renderReports(){
  const runs=state.context.runs,passed=runs.reduce((n,r)=>n+Number(r.passed||0),0),failed=runs.reduce((n,r)=>n+Number(r.failed||0),0);
  $('reportPass').textContent=passed;$('reportFail').textContent=failed;
+ const total=passed+failed,rate=total?Math.round(passed/total*100):0;
+ $('qualitySummary').innerHTML=total?'<div class="tn-row mb-2"><strong>'+rate+'% pass rate</strong><span class="tn-muted">'+total+' recorded results across '+runs.length+' runs</span></div><div class="tn-quality-track" role="img" aria-label="'+rate+' percent passed"><div class="tn-quality-pass" style="width:'+rate+'%"></div><div class="tn-quality-fail" style="width:'+(100-rate)+'%"></div></div>':'<div class="tn-empty">No recorded test outcomes. Run approved tests to build your quality baseline.</div>';
+ $('runTimeline').innerHTML=runs.slice(0,12).map(x=>'<div class="tn-timeline-item"><div><strong>Run #'+esc(x.run_number)+'</strong><div class="tn-timeline-meta">'+dateTime(x.completed_at)+' · '+esc(x.executed_by_name||'Unknown tester')+' · '+esc(x.environment||'Default environment')+'</div></div><span>'+esc(x.passed)+' passed · '+esc(x.failed)+' failed</span></div>').join('');
  $('runsBody').innerHTML=runs.map(r=>'<tr><td>#'+esc(r.run_number)+'<div class="tn-muted">'+esc(r.session_id||'')+'</div></td><td>'+display(r.environment)+'</td><td>'+display(r.executed_by_name)+'</td><td>'+dateTime(r.completed_at)+'</td><td>'+esc(r.passed)+'</td><td>'+esc(r.failed)+'</td><td><button class="tn-link" data-report="'+esc(r.session_id)+'">Open ↗</button></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No saved execution history.</td></tr>';
  $('evidenceBody').innerHTML=state.evidence.map(x=>'<tr><td>'+esc(x.external_case_id||x.title||'Test')+'<div class="tn-muted">Run #'+esc(x.run_number)+'</div></td><td>'+statusTag(x.passed?'COMPLETED':'FAILED')+'</td><td>'+evidenceButtons(x.evidence_json)+'</td></tr>').join('')||'<tr><td colspan="3" class="tn-empty">No stored execution evidence yet.</td></tr>';
 }
@@ -169,6 +178,7 @@ async function openTask(id){
  const d=await api('/api/work-items/'+encodeURIComponent(id)+'/details');state.taskId=id;const t=d.task;
  $('drawerTitle').textContent=t.title;
  $('drawerInfo').innerHTML=(d.parent?'<div class="tn-kv"><span>Parent task</span><button class="tn-link" data-task="'+esc(d.parent.id)+'">'+esc(d.parent.title)+'</button></div>':'')+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+esc(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div><div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+' · '+(t.closed_by_name?'By '+esc(t.closed_by_name):'')+'</span></div><p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
+ $('linkSession').value=t.session_id||'';$('linkCase').value=t.external_case_id||'';await loadTaskLinks(id);
  $('taskEta').value=t.eta_at?new Date(t.eta_at).toISOString().slice(0,16):'';
  $('taskDeferDate').value=t.deferred_until?new Date(t.deferred_until).toISOString().slice(0,16):'';
  $('taskReason').value='';
@@ -272,6 +282,13 @@ async function retest(taskIds,includeChildren=false){
 }
 let lastTaskTrigger=null;
 function bind(){
+ applyPreferences();
+ $('uiPreferences').onclick=()=>{const panel=$('preferencesPanel');panel.hidden=!panel.hidden;$('uiPreferences').setAttribute('aria-expanded',String(!panel.hidden));};
+ $('themePreference').onchange=savePreferences;$('densityPreference').onchange=savePreferences;
+ window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change',()=>{if(prefsRead().theme==='system')applyPreferences()});
+ $('testLinkForm').onsubmit=async e=>{e.preventDefault();try{const id=state.taskId;if(!id)throw Error('Open a task first.');await api('/api/work-items/'+encodeURIComponent(id)+'/test-links',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTaskLinks(id);notice('Test case linked to task.','success');}catch(err){notice(err.message);}};
+ $('drawerTestLinks').addEventListener('click',async e=>{const b=e.target.closest('[data-unlink-test]');if(!b)return;try{const id=state.taskId;await api('/api/work-items/'+encodeURIComponent(id)+'/test-links/'+encodeURIComponent(b.dataset.unlinkTest),{method:'DELETE'});await loadTaskLinks(id);notice('Test case unlinked.','success');}catch(err){notice(err.message);}});
+
  document.addEventListener('keydown',e=>{if(!$('taskDrawer').classList.contains('open'))return;if(e.key==='Escape'){e.preventDefault();closeTask();}else if(e.key==='Tab'){const items=[...$('taskDrawer').querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]')].filter(x=>x.getClientRects().length);if(!items.length)return;const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
  document.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>show(el.dataset.view));
  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{show(el.dataset.go);if(el.dataset.go==='stories')clearStory();});
