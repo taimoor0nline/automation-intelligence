@@ -35,6 +35,32 @@ async function captureVerified({client,projectId,session,runId,userId}){
  }
  return count;
 }
+async function propose({projectId,entry,userId}){
+ if(!db.isConfigured()||!uuid(projectId))throw Error('Database and project required');
+ const item=normalize(entry);if(!item)throw Error('Failure signature and distinct selectors with a valid page path are required');
+ const r=await db.query(`insert into ai_repair_memory(project_id,fingerprint,failure_signature,original_selector,replacement_selector,page_path,created_by)
+ values($1,$2,$3,$4,$5,$6,$7) on conflict(project_id,fingerprint) do update set updated_at=now()
+ returning id,status,failure_signature,original_selector,replacement_selector,page_path`,
+ [projectId,item.fingerprint,item.failureSignature,item.originalSelector,item.replacementSelector,item.pagePath,uuid(userId)?userId:null]);
+ return r.rows[0];
+}
+async function verifyApplied({projectId,memoryId,runId,userId}){
+ if(!db.isConfigured()||!uuid(projectId)||!uuid(memoryId)||!uuid(runId))throw Error('Valid project, memory and run IDs required');
+ return db.withTransaction(async client=>{
+  const record=await client.query('select id,status from ai_repair_memory where id=$1 and project_id=$2 for update',[memoryId,projectId]);
+  if(!record.rowCount||record.rows[0].status==='REVOKED')throw Error('Repair memory unavailable or revoked');
+  const applied=await client.query("select 1 from ai_repair_reuse_events where memory_id=$1 and run_id=$2 and event_type='APPLIED'",[memoryId,runId]);
+  if(!applied.rowCount)throw Error('Repair must have an APPLIED event before verification');
+  const run=await client.query('select id from test_runs where id=$1 and project_id=$2',[runId,projectId]);
+  if(!run.rowCount)throw Error('Run does not belong to project');
+  const outcomes=await client.query('select count(*)::int as total,count(*) filter(where passed=true)::int as passed from test_results where run_id=$1',[runId]);
+  if(!outcomes.rows[0].total||outcomes.rows[0].passed!==outcomes.rows[0].total)throw Error('Verification requires a completed run with all test results passing');
+  await client.query("update ai_repair_memory set status='VERIFIED',verification_source='APPLIED_PASSING_RUN',verification_run_id=$2,verified_at=now(),updated_at=now() where id=$1",[memoryId,runId]);
+  const event=await client.query("insert into ai_repair_reuse_events(memory_id,project_id,run_id,event_type,actor_id) values($1,$2,$3,'SUCCEEDED',$4) on conflict do nothing returning id",[memoryId,projectId,runId,uuid(userId)?userId:null]);
+  if(event.rowCount)await client.query('update ai_repair_memory set success_count=success_count+1,last_used_at=now() where id=$1',[memoryId]);
+  return {verified:true};
+ });
+}
 async function suggestions(projectId,{pagePath,limit=20}={}){
  if(!db.isConfigured()||!uuid(projectId))return [];
  const values=[projectId];let condition='';
@@ -62,4 +88,4 @@ async function recordReuse({projectId,memoryId,sessionId,runId,eventType,userId}
   return {recorded:!!r.rowCount};
  });
 }
-module.exports={normalize,isVerified,captureVerified,suggestions,recordReuse};
+module.exports={normalize,isVerified,captureVerified,propose,verifyApplied,suggestions,recordReuse};
