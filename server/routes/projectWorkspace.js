@@ -225,7 +225,7 @@ router.get('/api/work-items/:id/attachments/:attachmentId/download',requireAuth,
  }catch(e){respond(res,e);}
 });
 router.get('/api/projects/:projectId/task-tree',requireAuth,async(req,res)=>{
- try{await access(req,req.params.projectId);
+ try{
  const role=await access(req,req.params.projectId);const values=[req.params.projectId];let filter='';if(role.role==='DEVELOPER'){values.push(req.user.sub);filter=' and assigned_to=$2';}const r=await db.query('select id,parent_work_item_id as parent_id,title,status,work_type,external_case_id,session_id,assigned_to,created_at from work_items where project_id=$1 and deleted_at is null'+filter+' order by created_at,id',values);
  const byId=new Map(r.rows.map(x=>[x.id,{...x,children:[]}]));const roots=[];
  for(const node of byId.values()){const parent=node.parent_id&&byId.get(node.parent_id);if(parent&&parent.id!==node.id)parent.children.push(node);else roots.push(node);}
@@ -254,7 +254,7 @@ router.delete('/api/work-items/:id/test-links/:linkId',requireAuth,async(req,res
 
 async function projectSession(sessionId,projectId){
  const session=getSession(sessionId);
- if(String(session.projectId)===String(projectId) && Array.isArray(session.testCases) && session.testCases.length)return session;
+ if(session && String(session.projectId)===String(projectId) && Array.isArray(session.testCases) && session.testCases.length)return session;
  const restored=await persistence.loadSession(sessionId);
  if(!restored||String(restored.projectId)!==String(projectId))return null;
  return hydrateSession(sessionId,restored);
@@ -267,7 +267,7 @@ router.get('/api/projects/:projectId/test-cases',requireAuth,async(req,res)=>{
  }catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/project-test-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
- try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select id as session_id from test_sessions where project_id=$1 order by updated_at desc limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=await projectSession(row.session_id,req.params.projectId);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved!==false).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
+ try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select id as session_id from test_sessions where project_id=$1 order by updated_at desc limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=await projectSession(row.session_id,req.params.projectId);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved===true).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
  try{
@@ -286,7 +286,7 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  if(!item.session_id || !item.external_case_id){blocked.push({taskId:item.id,reason:'No linked session/test case'});continue;}
  const session=await projectSession(item.session_id,req.params.projectId);
  const tc=(session?.testCases||[]).find(x=>String(x.id).toUpperCase()===String(item.external_case_id).toUpperCase());
- if(!session || String(session.projectId)!==String(req.params.projectId) || !tc || tc.automationReadiness?.status!=='READY' || !session.readinessValidated || !['AWAITING_APPROVAL','DONE'].includes(session.state)){
+ if(!session || String(session.projectId)!==String(req.params.projectId) || !tc || tc.approved!==true || tc.automationReadiness?.status!=='READY' || !session.readinessValidated || !['AWAITING_APPROVAL','DONE'].includes(session.state)){
  blocked.push({taskId:item.id,reason:'Generate/review this case in the current test session before retesting'});continue;
  }
  const group=groups.get(item.session_id)||{sessionId:item.session_id,caseIds:[],taskIds:[],targetUrl:session.targetUrl};
