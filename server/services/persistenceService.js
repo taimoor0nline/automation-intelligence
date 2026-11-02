@@ -279,6 +279,10 @@ async function persistReviewedCase(sessionId, session, testCase) {
     });
     await persistTestCases(sessionId, [testCase], client);
     await canonical.persistCaseIr(sessionId, testCase, client);
+    // Persist the reviewed contract, not runtime credentials or raw session state.
+    const reviewed={id:testCase.id,title:testCase.title,priority:testCase.priority,type:testCase.type,source:testCase.source,steps:testCase.steps,expectedResult:testCase.expectedResult,automationReadiness:testCase.automationReadiness,reviewedAt:new Date().toISOString()};
+    const rev=await client.query("select coalesce(max(revision),0)+1 as next from test_report_snapshots where session_id=$1 and external_case_id=$2 and report_kind='REVIEWED_CASE'",[sessionId,String(testCase.id)]);
+    await client.query("insert into test_report_snapshots(project_id,session_id,external_case_id,report_kind,revision,report_json,recorded_by) values($1,$2,$3,'REVIEWED_CASE',$4,$5::jsonb,$6)",[session.projectId||null,sessionId,String(testCase.id),rev.rows[0].next,JSON.stringify(reviewed),session.createdBy||null]);
   });
   return true;
 }
