@@ -52,7 +52,8 @@
     "test:repair-learning-route": "node scripts/repair-learning-route-smoke.js",
     "test:browser-execution-lease": "node scripts/browser-execution-lease-smoke.js",
     "test:project-workspace": "node scripts/project-workspace-smoke.js",
-    "db:seed:demo": "node scripts/seed-demo.js"
+    "db:seed:demo": "node scripts/seed-demo.js",
+    "db:seed:repair-memory": "node server/db/seedRepairMemory.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
