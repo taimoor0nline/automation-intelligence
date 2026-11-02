@@ -284,6 +284,8 @@ async function persistReviewedCase(sessionId, session, testCase) {
     if(session.projectId)await client.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TEST_CASE_REVIEWED',$4::jsonb)",[session.projectId,sessionId,session.createdBy||null,JSON.stringify({caseId:String(testCase.id),status:'SAVED'})]);
     // Persist the reviewed contract, not runtime credentials or raw session state.
     const reviewed={id:testCase.id,title:testCase.title,priority:testCase.priority,type:testCase.type,source:testCase.source,steps:testCase.steps,expectedResult:testCase.expectedResult,automationReadiness:testCase.automationReadiness,reviewedAt:new Date().toISOString()};
+    // Serialize revision allocation for a single case across concurrent reviewers.
+    await client.query('select pg_advisory_xact_lock(hashtext($1),hashtext($2))',[sessionId,String(testCase.id)]);
     const rev=await client.query("select coalesce(max(revision),0)+1 as next from test_report_snapshots where session_id=$1 and external_case_id=$2 and report_kind='REVIEWED_CASE'",[sessionId,String(testCase.id)]);
     await client.query("insert into test_report_snapshots(project_id,session_id,external_case_id,report_kind,revision,report_json,recorded_by) values($1,$2,$3,'REVIEWED_CASE',$4,$5::jsonb,$6)",[session.projectId||null,sessionId,String(testCase.id),rev.rows[0].next,JSON.stringify(reviewed),session.createdBy||null]);
   });
