@@ -106,13 +106,14 @@ function activateDirectoryActors(session, requestedRefs = []) {
 
 router.get('/api/sessions/:sessionId/context', requireAuth, (req, res) => {
   const session = getSession(req.params.sessionId);
-  res.json({ ok: true, projectId: session.projectId || null, repositoryId: session.repositoryId || null, createdBy: session.createdBy || null });
+  res.json({ ok: true, projectId: session.projectId || null, repositoryId: session.repositoryId || null, createdBy: session.createdBy || null, projectStoryId: session.projectStoryId || null });
 });
 
 router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
   try {
     const projectId = String(req.body?.projectId || '').trim();
     const repositoryId = String(req.body?.repositoryId || '').trim();
+    const storyId = String(req.body?.storyId || '').trim();
     if (!projectId) return res.status(400).json({ reply: 'projectId is required.' });
 
     const project = await db.query('select id from projects where id=$1', [projectId]);
@@ -123,12 +124,15 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
       if (!repository.rowCount) return res.status(400).json({ reply: 'Repository does not belong to this project or is disabled.' });
     }
 
+    if (storyId) { const story=await db.query('select id from project_stories where id=$1 and project_id=$2',[storyId,projectId]); if(!story.rowCount)return res.status(400).json({reply:'Story does not belong to selected project.'}); }
     const session = getSession(req.params.sessionId);
+    session.projectStoryId = storyId || null;
     session.projectId = projectId;
     session.repositoryId = repositoryId || null;
     session.createdBy = req.user.sub;
     await persistence.persistSession(req.params.sessionId, session, { projectId, repositoryId: repositoryId || null, userId: req.user.sub });
-    res.json({ ok: true, projectId, repositoryId: repositoryId || null });
+    await db.query('update test_sessions set project_story_id=$1 where id=$2 and project_id=$3',[storyId||null,req.params.sessionId,projectId]);
+    res.json({ ok: true, projectId, repositoryId: repositoryId || null, storyId: storyId||null });
   } catch (err) {
     res.status(500).json({ reply: err.message });
   }
