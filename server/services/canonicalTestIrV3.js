@@ -1,4 +1,5 @@
 const base = require('./canonicalTestIrV3Base');
+const { navigationStateFromPath } = require('./navigationContract');
 
 const EXTRA_ACTIONS = new Set([
   'SET_RANGE_VALUE','SET_COLOR_VALUE','DROP_FILE','SELECT_FILES','DROP_FILES','SELECT_MULTIPLE',
@@ -121,7 +122,56 @@ function extendedAssertionText(assertion) {
   return null;
 }
 
+// If the AI picked a field from another page (e.g. the /forgot-password email field while the
+// browser is on /login), swap it for the matching field on the page the browser is actually on.
+// Only swaps when exactly one clear match exists; otherwise the validator still reports it.
+function realignPageContext(ir, registry = {}) {
+  const elements = Array.isArray(registry.elements) ? registry.elements : [];
+  if (!ir || !Array.isArray(ir.actions) || !elements.length) return ir;
+  const byRef = new Map(elements.map((e) => [String(e.elementRef || ''), e]));
+  const norm = (v) => clean(v).toLowerCase();
+  const sig = (e) => ({
+    tag: norm(e.tag), type: norm(e.type), kind: norm(e.kind), role: norm(e.role),
+    name: norm(e.name || e.attributes?.name), auto: norm(e.autocomplete),
+    label: norm(e.label || e.ariaLabel || e.placeholder),
+  });
+  const pagePath = (value) => clean(navigationStateFromPath(value, registry)?.path);
+  function equivalentOn(source, path) {
+    const s = sig(source);
+    const candidates = elements.filter((e) => clean(e.path) === path && norm(e.tag) === s.tag && norm(e.type) === s.type && (!s.kind || norm(e.kind) === s.kind));
+    if (!candidates.length) return null;
+    const score = (e) => { const t = sig(e); return (s.name && t.name === s.name ? 4 : 0) + (s.auto && t.auto === s.auto ? 2 : 0) + (s.label && t.label === s.label ? 2 : 0) + (s.role && t.role === s.role ? 1 : 0); };
+    const ranked = candidates.map((e) => [score(e), e]).sort((a, b) => b[0] - a[0]);
+    if (ranked.length > 1 && ranked[0][0] === ranked[1][0]) return null; // ambiguous: leave it for the validator to report
+    return ranked[0][1];
+  }
+  let currentPath = null;
+  let changed = false;
+  const remap = (item) => {
+    if (!item?.elementRef || !currentPath) return item;
+    const element = byRef.get(String(item.elementRef));
+    if (!element || !clean(element.path) || clean(element.path) === currentPath) return item;
+    const match = equivalentOn(element, currentPath);
+    if (!match) return item;
+    changed = true;
+    return { ...item, elementRef: match.elementRef };
+  };
+  const actions = ir.actions.map((action) => {
+    const op = clean(action?.operation).toUpperCase();
+    if (op === 'NAVIGATE') { currentPath = pagePath(action.path ?? action.value) || null; return action; }
+    const out = ['LOGIN_VALID', 'LOGIN_AS_ACTOR', 'GO_BACK', 'GO_FORWARD'].includes(op) ? action : remap(action);
+    const target = byRef.get(String(out?.elementRef || ''));
+    const leavesPage = ['LOGIN_VALID', 'LOGIN_AS_ACTOR', 'GO_BACK', 'GO_FORWARD', 'SUBMIT', 'PRESS_KEY'].includes(op)
+      || (op === 'CLICK' && clean(target?.destinationUrl || target?.href));
+    if (leavesPage) currentPath = null;
+    return out;
+  });
+  const assertions = Array.isArray(ir.assertions) ? ir.assertions.map(remap) : ir.assertions;
+  return changed ? { ...ir, actions, assertions } : ir;
+}
+
 function validateCanonicalIr(ir, context = {}) {
+  ir = realignPageContext(ir, context.registry || {});
   const adjustedContext = hasValidLoginHelper(ir) ? { ...context, plannedUnit: loginFocusedPlannedUnit(context.plannedUnit) } : context;
   const originalActions = Array.isArray(ir?.actions) ? ir.actions : [];
   const originalAssertions = Array.isArray(ir?.assertions) ? ir.assertions : [];
@@ -164,4 +214,4 @@ function canonicalActionCatalog() {
   ];
 }
 
-module.exports = { ...base, validateCanonicalIr, canonicalActionCatalog, hasValidLoginHelper, EXTRA_ACTIONS, SUGGESTION_ASSERTIONS };
+module.exports = { ...base, validateCanonicalIr, realignPageContext, canonicalActionCatalog, hasValidLoginHelper, EXTRA_ACTIONS, SUGGESTION_ASSERTIONS };

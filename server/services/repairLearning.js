@@ -13,10 +13,19 @@ function originFor(session) {
 function contractIdentity(testCase) {
   return contractReviewHash(testCase);
 }
+// "URL equals /login" (path only) can never match the full URL, so it means "pathname equals /login".
+// Both forms are the same business requirement; compare them as one.
+function plainPath(value) {
+  const text = String(value ?? '').trim();
+  return text.startsWith('/') && !text.startsWith('//') && !/[?#]/.test(text) ? text : null;
+}
 function requirementShape(tc) {
   return (tc?.canonicalIr?.assertions || []).map((assertion) => {
     // A selector may be repaired; the business assertion and expected value may not silently change.
     const { elementRef, selector, pageRef, elementId, ...requirement } = assertion;
+    const operation = String(requirement.operation || '').toUpperCase();
+    if (operation === 'ASSERT_URL_EQUALS' && plainPath(requirement.url)) return { operation: 'ASSERT_PATH_EQUALS', path: plainPath(requirement.url) };
+    if (operation === 'ASSERT_PATH_EQUALS' && plainPath(requirement.path)) return { operation: 'ASSERT_PATH_EQUALS', path: plainPath(requirement.path) };
     return requirement;
   }).map((part) => JSON.stringify(part)).sort();
 }

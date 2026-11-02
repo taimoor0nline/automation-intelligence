@@ -1,5 +1,5 @@
 const v2 = require('./canonicalTestGenerationServiceV2');
-const { validateCanonicalIr } = require('./canonicalTestIrV3');
+const { validateCanonicalIr, realignPageContext } = require('./canonicalTestIrV3');
 const { generateCypressPreviewFromPlan } = require('./deterministicAutomationGeneratorV6');
 
 function clean(value) {
@@ -151,6 +151,9 @@ function postProcessCase(testCase, options) {
     emptyRemoved: empty.removed,
     dynamicText: text.changed,
   });
+
+  // Fix AI picks of a same-kind field from another page before validating and saving.
+  ir = realignPageContext(ir, registry);
 
   const actorRuntime = v2.resolveActorRuntime(options.actorCatalog || [], options.actorCredentialRefs || [], options.workflowRequirements || null);
   const validation = validateCanonicalIr(ir, {

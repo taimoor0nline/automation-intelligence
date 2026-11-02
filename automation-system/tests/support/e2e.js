@@ -26,6 +26,70 @@ function withDemoDelay(chain) {
   return chain.then((subject) => Cypress.Promise.delay(delayMs).then(() => subject));
 }
 
+// ---- Page settling + self-healing element lookup ----
+// Modern apps (React/Next.js/Vue/Angular) keep re-drawing the page for a moment after it loads
+// (hydration). Typing or clicking in that window can hit an element that is about to be replaced,
+// which fails with "the subject is no longer attached to the DOM". Before the first interaction on
+// each page we wait until it is loaded, has stopped changing, and the browser is idle.
+const SETTLE_QUIET_MS = 300;   // no element added/removed for this long = settled
+const SETTLE_MAX_MS = 6000;    // never wait longer than this per page
+
+function waitUntilSettled(win) {
+  return new Cypress.Promise((resolve) => {
+    if (!win || win.__tnSettled) return resolve();
+    const doc = win.document;
+    if (!win.__tnMutationObserver && win.MutationObserver && doc?.documentElement) {
+      win.__tnLastMutation = Date.now();
+      win.__tnMutationObserver = new win.MutationObserver(() => { win.__tnLastMutation = Date.now(); });
+      try { win.__tnMutationObserver.observe(doc.documentElement, { childList: true, subtree: true }); } catch {}
+    }
+    const started = Date.now();
+    const finish = () => { win.__tnSettled = true; try { win.__tnMutationObserver?.disconnect(); } catch {} resolve(); };
+    const idle = (fn) => (typeof win.requestIdleCallback === "function" ? win.requestIdleCallback(fn, { timeout: 1000 }) : win.setTimeout(fn, 50));
+    const check = () => {
+      const timedOut = Date.now() - started >= SETTLE_MAX_MS;
+      const loaded = doc?.readyState === "complete";
+      const quiet = Date.now() - (win.__tnLastMutation || started) >= SETTLE_QUIET_MS;
+      if (timedOut) return finish();
+      if (loaded && quiet) return idle(() => idle(finish)); // two idle turns: hydration work has run
+      win.setTimeout(check, 50);
+    };
+    check();
+  });
+}
+
+function settlePage() {
+  return cy.window({ log: false }).then({ timeout: SETTLE_MAX_MS + 5000 }, (win) => waitUntilSettled(win));
+}
+
+// Rebuild a lookup for an element the page replaced: the original query if Cypress kept it, else id/name.
+function selectorForDetached(subject) {
+  if (subject?.selector) return String(subject.selector);
+  const el = subject?.[0];
+  if (!el?.getAttribute) return null;
+  const tag = String(el.tagName || "").toLowerCase();
+  if (el.id) return `#${Cypress.$.escapeSelector(el.id)}`;
+  const name = el.getAttribute("name");
+  if (name) return `${tag}[name="${name.replace(/"/g, '\\"')}"]`;
+  return null;
+}
+
+function isDetached(subject) {
+  const el = subject?.[0];
+  return Boolean(el && el.nodeType === 1 && !el.isConnected);
+}
+
+// Wait for the page to settle, then re-find the element if the page swapped it out meanwhile.
+function freshSubject(subject) {
+  return settlePage().then(() => {
+    if (!isDetached(subject)) return subject;
+    const selector = selectorForDetached(subject);
+    if (!selector) return subject; // nothing safe to re-find by; let Cypress report the real error
+    Cypress.log({ name: "self-heal", message: `re-found ${selector} after the page re-rendered it` });
+    return cy.get(selector, { log: false });
+  });
+}
+
 function safeEvidenceName(title) {
   const raw = String(title || "test");
   const id = raw.match(/TC(?:\d{3}|-H\d{3})/i)?.[0]?.toUpperCase() || "TEST";
@@ -222,9 +286,14 @@ Cypress.Commands.add("pressNativeKey", (key) => {
 });
 
 ["click", "type", "select", "check", "uncheck", "clear"].forEach((commandName) => {
-  Cypress.Commands.overwrite(commandName, (originalFn, subject, ...args) => withDemoDelay(originalFn(subject, ...args)));
+  Cypress.Commands.overwrite(commandName, (originalFn, subject, ...args) =>
+    freshSubject(subject).then((fresh) => withDemoDelay(originalFn(fresh, ...args))));
 });
-Cypress.Commands.overwrite("visit", (originalFn, url, options) => withDemoDelay(originalFn(url, options)));
+// After opening or reloading a page, wait until it has settled before the next step.
+Cypress.Commands.overwrite("visit", (originalFn, url, options) =>
+  withDemoDelay(originalFn(url, options)).then((win) => settlePage().then(() => win)));
+Cypress.Commands.overwrite("reload", (originalFn, ...args) =>
+  originalFn(...args).then((win) => settlePage().then(() => win)));
 
 beforeEach(function () {
   currentRuntimeItem = null;

@@ -233,15 +233,19 @@ function normalizeNavigationAssertionShapes(assertions = []) {
     const operation = String(assertion.operation || '').trim().toUpperCase();
     const path = clean(assertion.path, 1200);
     const url = clean(assertion.url ?? assertion.value, 1500);
-    if (operation === 'ASSERT_URL_EQUALS' && !url && path.startsWith('/')) {
+    // cy.url() returns the full URL, so URL-equality with only a path ("/login") can never pass.
+    // Both shapes (path in "path" or in "url") mean "pathname equals". Paths with ?query/#hash are left as-is.
+    const urlIsPlainPath = url.startsWith('/') && !url.startsWith('//') && !/[?#]/.test(url);
+    if (operation === 'ASSERT_URL_EQUALS' && ((!url && path.startsWith('/')) || urlIsPlainPath)) {
+      const normalizedPath = url ? url : path;
       delete assertion.url;
       delete assertion.value;
       assertion.operation = 'ASSERT_PATH_EQUALS';
-      assertion.path = path;
+      assertion.path = normalizedPath;
       changes.push({
         from: 'ASSERT_URL_EQUALS',
         to: 'ASSERT_PATH_EQUALS',
-        path,
+        path: normalizedPath,
       });
     }
     normalized.push(assertion);

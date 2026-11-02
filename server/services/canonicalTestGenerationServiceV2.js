@@ -2,7 +2,7 @@ const { modelForProfile } = require('./aiModelProfiles');
 const { runtimeCapabilities } = require('./progressiveTestGenerator');
 const { registryForModel } = require('./canonicalElementRegistry');
 const { resolveRuntimeWorkflowContext } = require('./workflowRuntimeContext');
-const { IR_VERSION, canonicalActionCatalog, canonicalAssertionCatalog, validateCanonicalIr } = require('./canonicalTestIrV3');
+const { IR_VERSION, canonicalActionCatalog, canonicalAssertionCatalog, validateCanonicalIr, realignPageContext } = require('./canonicalTestIrV3');
 const { normalizeBehavioralIr } = require('./canonicalBehaviorGrounding');
 const { generateCypressPreviewFromPlan } = require('./deterministicAutomationGeneratorV6');
 
@@ -244,7 +244,8 @@ async function generateCanonicalBatch({
       error.validationErrors = behavior.unresolved;
       throw error;
     }
-    const canonicalIr = behavior.ir;
+    // Fix AI picks of a same-kind field from another page before validating and saving.
+    const canonicalIr = realignPageContext(behavior.ir, registry);
 
     const validation = validateCanonicalIr(canonicalIr, {
       registry,
