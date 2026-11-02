@@ -39,3 +39,21 @@ textarea.form-control{min-height:94px;resize:vertical}.form-select{appearance:au
 .tn-run-link{border:1px solid #e0e7fb;color:#324dba;border-radius:8px;padding:7px 10px;display:inline-block;text-decoration:none;font-size:11px;font-weight:700}
 @media(max-width:1050px){.tn-container{padding:20px 15px 60px}.tn-top .container-fluid{flex-wrap:wrap;gap:10px}.nav-pills{overflow:auto;width:100%;flex-wrap:nowrap}.tn-stat b{font-size:21px}}
 @media(max-width:600px){.tn-container{padding:16px 11px 50px}.tn-card-body{padding:13px}.tn-card-head{padding:13px}.tn-top .form-select{min-width:170px!important}}
+
+
+/* Workspace usability improvements */
+.tn-task-toolbar{padding:13px 18px;display:flex;align-items:center;gap:15px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tn-task-toolbar input[type=search]{max-width:350px;flex:1 1 230px}
+.tn-toolbar-label{display:inline-flex;align-items:center;gap:7px;color:#42516a;font-size:12px;white-space:nowrap;cursor:pointer}
+.tn-task-name{display:flex;align-items:flex-start;gap:7px;padding-left:calc(var(--task-depth,0)*16px);min-width:180px}
+.tn-tree-mark{font-weight:750;color:#8193bc;font-size:16px;line-height:1.15}
+.tn-task-title{text-align:left;font-size:13px;line-height:1.4}
+.tn-task-title:hover,.tn-link:hover{text-decoration:underline}
+.tn-top .nav-link:focus-visible,.tn-link:focus-visible,.tn-btn:focus-visible,.tn-side button:focus-visible,.tn-toolbar-label:focus-within{outline:3px solid #93b0ff;outline-offset:3px}
+.tn-table tbody tr:focus-within{background:#f5f8ff}
+.tn-table td{line-height:1.45}
+.tn-side{overscroll-behavior:contain}
+.tn-side:not(.open){visibility:hidden;pointer-events:none}
+.tn-side.open{visibility:visible}
+@media(max-width:760px){.tn-task-toolbar{align-items:stretch}.tn-task-toolbar input[type=search]{max-width:none;width:100%}.tn-task-name{padding-left:calc(var(--task-depth,0)*9px)}.tn-top .container-fluid{padding-left:12px!important;padding-right:12px!important}}
+@media(prefers-reduced-motion:reduce){.tn-side{transition:none!important}}
