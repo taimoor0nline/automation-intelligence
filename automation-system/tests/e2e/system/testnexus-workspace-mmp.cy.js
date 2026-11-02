@@ -72,6 +72,6 @@ describe('TestNexus workspace MMP browser acceptance',()=>{
  it('has no critical axe-core accessibility violations on the task workspace',()=>{
   cy.get('[data-view="tasks"]').click();
   cy.injectAxe();
-  cy.checkA11y(null,{includedImpacts:['critical']},{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});
+  cy.checkA11y(null,{includedImpacts:['critical'],runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});
  });
 });
