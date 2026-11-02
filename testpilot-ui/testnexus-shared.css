@@ -8,9 +8,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 button,.btn,input,select,textarea{border-radius:var(--testnexus-radius)}
 .platform-header-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 .platform-header-actions .btn{white-space:nowrap}
-body[data-density=compact] .card,body[data-density=compact] .panel{padding:12px!important}
-body[data-theme=dark]{--bg:#111827!important;--panel:#1d293b!important;--border:#36445c!important;--text:#e9efff!important;--muted:#b1c0d8!important;--blue:#91a9ff!important;--blue2:#afc1ff!important;color-scheme:dark}
-body[data-theme=dark] header,body[data-theme=dark] .card,body[data-theme=dark] .panel{background:var(--panel)!important;color:var(--text)}
-body[data-theme=dark] input,body[data-theme=dark] select,body[data-theme=dark] textarea{background:#192438;color:var(--text);border-color:var(--border)}
+
+
+
+
 @media(max-width:800px){header{height:auto!important;min-height:68px;flex-wrap:wrap;padding:10px 14px!important;gap:9px}.platform-header-actions{gap:6px}.platform-header-actions .btn{font-size:12px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
