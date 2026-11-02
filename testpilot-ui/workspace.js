@@ -26,7 +26,7 @@ function statusTag(s){const x=String(s||'PENDING');const c=x==='COMPLETED'?'succ
 function show(view){
  state.view=view;
  document.querySelectorAll('.tn-view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));
- document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
+ document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===view;el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
  const labels={overview:'Project overview',projects:'Projects',stories:'Stories & test generation',tasks:'Tasks & retesting',reports:'Test reports & evidence',team:'Team & roles'};
  $('pageTitle').textContent=labels[view]||'TestNexus';
  $('pageSubtitle').textContent=view==='stories'?'Write or reuse a project story; generation/review/execution stays in the existing Test Studio':view==='tasks'?'Attach evidence, collaborate, close/defer tasks and retest one or many using the existing runner':'Scope, documents, assignments and quality history in one place';
@@ -287,7 +287,9 @@ async function retest(taskIds,includeChildren=false){
 let lastTaskTrigger=null;
 function bind(){
  applyPreferences();
- $('uiPreferences').onclick=()=>{const panel=$('preferencesPanel');panel.hidden=!panel.hidden;$('uiPreferences').setAttribute('aria-expanded',String(!panel.hidden));};
+ $('uiPreferences').onclick=()=>{const panel=$('preferencesPanel');panel.hidden=!panel.hidden;$('uiPreferences').setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)$('themePreference').focus();};
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('preferencesPanel').hidden){$('preferencesPanel').hidden=true;$('uiPreferences').setAttribute('aria-expanded','false');$('uiPreferences').focus();}});
+ document.addEventListener('click',e=>{if(!$('preferencesPanel').hidden&&!e.target.closest('#preferencesPanel,#uiPreferences')){$('preferencesPanel').hidden=true;$('uiPreferences').setAttribute('aria-expanded','false');}});
  $('themePreference').onchange=savePreferences;$('densityPreference').onchange=savePreferences;
  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change',()=>{if(prefsRead().theme==='system')applyPreferences()});
  $('testLinkForm').onsubmit=async e=>{e.preventDefault();try{const id=state.taskId;if(!id)throw Error('Open a task first.');await api('/api/work-items/'+encodeURIComponent(id)+'/test-links',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTaskLinks(id);notice('Test case linked to task.','success');}catch(err){notice(err.message);}};
