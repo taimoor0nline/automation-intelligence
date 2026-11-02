@@ -1,7 +1,7 @@
 # TestNexus Project Workspace – Developer Handoff
 
 **Feature branch:** feature/testnexus-project-workspace-ui-v6  
-**Base branch:** live-browser-streaming (not modified)  
+**Integration target:** live-browser-streaming (merge authorized; PR #5)  
 **Repository:** taimoor0nline/automation-intelligence  
 **Product:** TestNexus, independent of LearnIQ
 
@@ -15,11 +15,11 @@
 UI: testpilot-ui/workspace.html, workspace.css, workspace.js. Uses Bootstrap CDN, native select chevrons (no duplicate dropdown arrows). This is a real authenticated API UI, **not** a browser-local sample-data prototype.
 
 ## Installation and migration
-1. Review feature branch changes. Do not deploy directly to live-browser-streaming.
+1. Review merged changes and prepare a staging environment before service deployment.
 2. Set DATABASE_URL and the current auth/AI/Cypress configuration as documented in .env.example.
 3. Back up PostgreSQL and the automation-system/artifacts directory.
-4. Run npm install and npm run db:migrate. New migrations 014_project_workspace.sql, 015_story_workflow_link.sql and 016_retained_execution_evidence.sql add project metadata, story/environment/document data, task lifecycle, workflow policies and retained evidence.
-5. Run npm run test:project-workspace (static contract checks). Run the existing tests and functional acceptance in staging.
+4. Run npm install and npm run db:migrate. New migrations 014_project_workspace.sql, 015_story_workflow_link.sql, 016_retained_execution_evidence.sql, and 017_task_test_links.sql add project metadata, story/environment/document data, task lifecycle, workflow policies and retained evidence.
+5. Run `npm run test:project-workspace` and the GitHub Actions workflow `TestNexus MMP workspace contracts` (Node route tests, isolated PostgreSQL schema and authenticated HTTP integration, Cypress fixture UI and axe-core). Run actual target-system automation in staging before opening to customers.
 6. Start existing server (npm run start:server) and sign in through /. Navigate to /workspace.html using Home / Projects.
 7. The new workspace has no dependency on LearnIQ.
 
@@ -28,7 +28,7 @@ The former index.html and progressive generation, approval, readiness validation
 
 A saved project story is linked to test_sessions.project_story_id during session-context attachment. Generated cases still belong to test_sessions; test runs and results retain their existing session/run IDs and per-user attribution.
 
-Single- and multi-task retesting uses /api/projects/:id/retest-plan for authorization/readiness then calls the existing /api/test-runs/start with selected approved case IDs. Cross-session batches execute sequentially. Sessions that are no longer loaded or not Automation Ready are explicitly blocked: reopen/regenerate/review in the existing runner rather than pretending they can execute.
+Single- and multi-task retesting uses /api/projects/:id/retest-plan for authorization/readiness then calls the existing /api/test-runs/start with selected approved case IDs. Cross-session batches execute sequentially. Persisted sessions can be restored from PostgreSQL for approved case planning and retesting; cases without a reviewed READY contract or runtime prerequisites remain blocked rather than silently running.
 
 ## Workflow policy
 GET /api/projects/:id/workflow and PUT /api/projects/:id/workflow.
@@ -47,8 +47,8 @@ Cypress captures screenshots and videos through the existing engine. After run p
 
 ## Production notes / explicit limitations
 - Existing role policy still allows global QA/MANAGER to run tests. Do not enable developer execution with a UI-only toggle; the backend runtime policy must first enforce project permissions across every execution API.
-- Current test sessions and their rehydration/readiness determine which old tasks can be retested immediately; offline historical cases might require reopening the original suite in the existing runner.
-- No browser E2E/PostgreSQL/Cypress runtime verification was possible from the connected GitHub-only environment. Static syntax and integration-contract checks are provided, not a production signoff.
+- Persisted sessions can be restored for planning, but runtime secrets intentionally never persist. Runs that require credentials or missing execution prerequisites must be reconfigured in Test Studio before re-execution.
+- GitHub Actions now runs isolated PostgreSQL migrations/schema checks, authenticated HTTP integration, Node route regression tests, Cypress/Electron UI contract tests and axe-core audits; inspect the latest PR checks for pass/fail status. These are **CI validation**, not a real customer-target Cypress execution or production deployment signoff.
 - File storage and media retention use server disk/DB, not a dedicated object store. Security and storage capacity must be reviewed for live usage.
 
 ## Acceptance checklist
@@ -65,3 +65,11 @@ Cypress captures screenshots and videos through the existing engine. After run p
 11. Run all existing TestNexus smoke/regression suites before PR merge.
 
 To validate just this work: npm run test:project-workspace
+
+## Automated acceptance
+- Workflow: `.github/workflows/testnexus-workspace-contracts.yml` (runs on PR/push).
+- Node workspace contracts: `node scripts/project-workspace-smoke.js` and `node --test scripts/testnexus-workspace-routes.test.js`.
+- Disposable PostgreSQL: `node server/db/migrate.js`, `node scripts/testnexus-db-schema.test.js`, `node scripts/testnexus-db-integration.test.js`.
+- Browser/UI: `automation-system/tests/e2e/system/testnexus-workspace-mmp.cy.js`, Cypress/Electron on static fixture server with mocked API; checks hierarchy navigation, link/unlink, appearance, WCAG axe, and mobile viewport.
+- Existing repair safeguard: `.github/workflows/repair-learning.yml`.
+- Remaining live acceptance: external application test execution, multi-browser/device matrix, storage monitoring/backup, deployment and user acceptance.
