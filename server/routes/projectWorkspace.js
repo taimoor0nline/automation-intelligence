@@ -3,6 +3,9 @@ const express=require('express');
 const db=require('../db');
 const {requireAuth,requireRole}=require('../services/authService');
 const {getSession}=require('../data/sessionStore');
+const fs=require('fs');
+const path=require('path');
+const {ROOT:ARTIFACT_ROOT}=require('../services/retainedExecutionEvidence');
 const router=express.Router();
 const MAX_FILE=5*1024*1024;
 const TYPES=new Set(['application/pdf','text/plain','text/csv','image/png','image/jpeg','image/webp','application/zip',
@@ -131,6 +134,22 @@ router.get('/api/projects/:projectId/evidence',requireAuth,async(req,res)=>{
  res.json({ok:true,results:r.rows});
  }catch(e){respond(res,e);}
 });
+
+router.get('/api/projects/:projectId/run-evidence/:runId/:caseId/:kind',requireAuth,async(req,res)=>{
+ try{
+ await access(req,req.params.projectId);
+ const kind=s(req.params.kind,20);
+ if(!id(req.params.runId)||!['screenshot','video'].includes(kind))throw fail(400,'Invalid evidence request.');
+ const r=await db.query('select ev.relative_path,ev.mime_type from test_run_evidence ev join test_runs tr on tr.id=ev.run_id where ev.run_id=$1 and ev.external_case_id=$2 and ev.kind=$3 and tr.project_id=$4',[req.params.runId,req.params.caseId,kind,req.params.projectId]);
+ if(!r.rowCount)throw fail(404,'Run evidence not found.');
+ const filename=path.resolve(ARTIFACT_ROOT,r.rows[0].relative_path);
+ if(!filename.startsWith(ARTIFACT_ROOT+path.sep) || !r.rows[0].relative_path.startsWith('run-evidence'+path.sep))throw fail(403,'Invalid evidence path.');
+ await fs.promises.access(filename,fs.constants.R_OK);
+ res.set('X-Content-Type-Options','nosniff');res.set('Cache-Control','private, no-store');res.type(r.rows[0].mime_type);
+ return res.sendFile(filename);
+ }catch(e){respond(res,e);}
+});
+
 async function task(req){
  if(!id(req.params.id))throw fail(400,'Invalid task ID.');
  const r=await db.query('select * from work_items where id=$1',[req.params.id]);
