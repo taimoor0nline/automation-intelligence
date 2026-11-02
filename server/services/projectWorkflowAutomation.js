@@ -13,7 +13,7 @@ async function applyProjectWorkflow({sessionId,projectId,runNumber,executedBy}){
   if(!r.external_case_id)continue;
   const outcome=await db.withTransaction(async client=>{
    await client.query('select pg_advisory_xact_lock(hashtext($1),hashtext($2))',[String(projectId),String(sessionId)+':'+String(r.external_case_id)]);
-   const active=await client.query("select id,status from work_items where project_id=$1 and session_id=$2 and external_case_id=$3 and deleted_at is null and status not in ('COMPLETED','CANCELLED') order by created_at desc limit 1 for update",[projectId,sessionId,r.external_case_id]);
+   const active=await client.query("select w.id,w.status from work_items w where w.project_id=$1 and w.deleted_at is null and w.status not in ('COMPLETED','CANCELLED') and ((w.session_id=$2 and upper(w.external_case_id)=upper($3)) or exists (select 1 from task_test_case_links l where l.work_item_id=w.id and l.project_id=$1 and l.session_id=$2 and upper(l.external_case_id)=upper($3))) order by w.created_at desc limit 1 for update of w",[projectId,sessionId,r.external_case_id]);
    if(!r.passed&&policy.auto_create_failed_tasks){
     if(active.rowCount)return 'existing';
     const assignee=policy.default_developer||null;
