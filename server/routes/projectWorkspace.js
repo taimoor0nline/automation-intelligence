@@ -327,4 +327,56 @@ router.put('/api/projects/:projectId/workflow',requireAuth,async(req,res)=>{
  res.json({ok:true,workflow:r.rows[0]});
  }catch(e){respond(res,e);}
 });
+
+// Team directory is reusable; attachment to a project is explicitly authorized.
+router.get('/api/teams',requireAuth,async(req,res)=>{try{
+ const r=await db.query('select t.id,t.name,t.description,count(tm.user_id)::int as member_count from teams t left join team_members tm on tm.team_id=t.id group by t.id order by t.name');
+ res.json({ok:true,teams:r.rows});
+}catch(e){respond(res,e);}});
+router.post('/api/teams',requireAuth,requireRole('MANAGER'),async(req,res)=>{try{
+ const name=s(req.body?.name,120);if(!name)throw fail(400,'Team name is required.');
+ const r=await db.query('insert into teams(name,description,created_by) values($1,$2,$3) on conflict ((lower(name))) do update set description=excluded.description returning *',[name,s(req.body?.description,1000),req.user.sub]);
+ res.status(201).json({ok:true,team:r.rows[0]});
+}catch(e){respond(res,e);}});
+router.post('/api/teams/:teamId/members',requireAuth,requireRole('MANAGER'),async(req,res)=>{try{
+ if(!id(req.params.teamId)||!id(req.body?.userId))throw fail(400,'Valid team and user IDs required.');
+ const r=await db.query('insert into team_members(team_id,user_id) select $1,u.id from users u where u.id=$2 and u.is_active=true on conflict do nothing returning user_id',[req.params.teamId,req.body.userId]);
+ res.status(r.rowCount?201:200).json({ok:true});
+}catch(e){respond(res,e);}});
+router.get('/api/projects/:projectId/teams',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const r=await db.query('select t.id,t.name,t.description from project_teams pt join teams t on t.id=pt.team_id where pt.project_id=$1 order by t.name',[req.params.projectId]);
+ res.json({ok:true,teams:r.rows});
+}catch(e){respond(res,e);}});
+router.post('/api/projects/:projectId/teams',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ if(!id(req.body?.teamId))throw fail(400,'Valid team ID required.');
+ const r=await db.query('insert into project_teams(project_id,team_id) select $1,id from teams where id=$2 on conflict do nothing returning team_id',[req.params.projectId,req.body.teamId]);
+ if(!r.rowCount)throw fail(404,'Team not found or already associated.');
+ res.status(201).json({ok:true});
+}catch(e){respond(res,e);}});
+router.delete('/api/projects/:projectId/teams/:teamId',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ await db.query('delete from project_teams where project_id=$1 and team_id=$2',[req.params.projectId,req.params.teamId]);
+ res.json({ok:true});
+}catch(e){respond(res,e);}});
+router.get('/api/projects/:projectId/team-assignees',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const r=await db.query(`select distinct u.id,u.display_name,u.email,pm.project_role from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and u.is_active=true and (exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=u.id) or not exists(select 1 from project_teams where project_id=$1)) order by u.display_name`,[req.params.projectId]);
+ res.json({ok:true,users:r.rows});
+}catch(e){respond(res,e);}});
+router.get('/api/projects/:projectId/test-inventory',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const [cases,runs,stories]=await Promise.all([
+ db.query(`select tc.session_id,tc.external_case_id,tc.title,tc.priority,tc.created_at,sts.story_id,ps.reference_no as story_reference from test_cases tc join test_sessions ts on ts.id=tc.session_id left join story_test_sessions sts on sts.session_id=ts.id left join project_stories ps on ps.id=sts.story_id where ts.project_id=$1 order by tc.created_at desc limit 1000`,[req.params.projectId]),
+ db.query('select id,session_id,run_number,total,passed,failed,executed_by,completed_at from test_runs where project_id=$1 order by completed_at desc limit 500',[req.params.projectId]),
+ db.query(`select ps.id,ps.reference_no,ps.title,count(distinct sts.session_id)::int as generation_count,count(distinct tc.id)::int as case_count,count(distinct tr.id)::int as execution_count from project_stories ps left join story_test_sessions sts on sts.story_id=ps.id left join test_cases tc on tc.session_id=sts.session_id left join test_runs tr on tr.session_id=sts.session_id where ps.project_id=$1 group by ps.id order by ps.created_at desc`,[req.params.projectId])
+ ]);
+ res.json({ok:true,cases:cases.rows,runs:runs.rows,stories:stories.rows});
+}catch(e){respond(res,e);}});
+router.get('/api/projects/:projectId/audit',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const r=await db.query(`select a.*,u.display_name as actor_name from project_audit_events a left join users u on u.id=a.actor_id where a.project_id=$1 order by a.created_at desc limit 300`,[req.params.projectId]);
+ res.json({ok:true,events:r.rows});
+}catch(e){respond(res,e);}});
 module.exports=router;
