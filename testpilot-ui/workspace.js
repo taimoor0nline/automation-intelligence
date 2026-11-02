@@ -37,7 +37,12 @@ async function loadProjects(){
  picker.value=state.projectId;
  localStorage.setItem('testnexus:currentProject',state.projectId);
  $('projectsBody').innerHTML=state.projects.map(p=>'<tr><td>'+display(p.reference_no)+'</td><td><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.description||'')+'</div></td><td>'+date(p.created_at)+'</td><td><button class="tn-link" data-open-project="'+esc(p.id)+'">Open →</button></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No projects yet. Create your first project.</td></tr>';
- await loadWorkspace();
+ let loaded=false,lastError=null;
+ const ordered=[state.projectId,...state.projects.map(p=>p.id)].filter((v,i,a)=>v&&a.indexOf(v)===i);
+ for(const candidate of ordered){state.projectId=candidate;try{await loadWorkspace();loaded=true;break;}catch(e){lastError=e;}}
+ if(!loaded&&lastError)throw lastError;
+ picker.value=state.projectId;
+ localStorage.setItem('testnexus:currentProject',state.projectId);
 }
 async function loadWorkspace(){
  const pid=state.projectId; state.context=null;state.tasks=[];state.evidence=[];
