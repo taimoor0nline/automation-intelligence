@@ -73,7 +73,7 @@ describe('TestNexus workspace MMP browser acceptance',()=>{
   cy.injectAxe();
   for(const view of ['overview','projects','stories','tasks','reports','team']){
    cy.get('nav [data-view="'+view+'"]').click();
-   cy.checkA11y(null,{includedImpacts:['critical'],runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}},violations=>{
+   cy.checkA11y(null,{includedImpacts:['critical','serious'],runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}},violations=>{
     if(violations.length){const summary=violations.map(v=>v.id+':'+v.nodes.map(n=>n.target.join(' ')).join(',')).join(';');throw new Error(view+' accessibility: '+summary);}
    });
   }
