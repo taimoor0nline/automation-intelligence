@@ -201,14 +201,7 @@ async function persistCompletedRun(sessionId, session, userId) {
       approvedIds: session.approvedIds || [],
       userId: userId || session.createdBy || null,
     });
-    if(persistedRunId){
-      const reportPayload={sessionId,runNumber:session.lastResults?.runNumber,summary:session.lastResults?.summary,approvedIds:session.approvedIds||[],generatedAt:new Date().toISOString()};
-      await require('../db').query("insert into test_report_snapshots(project_id,session_id,run_id,report_kind,revision,report_json,report_html,recorded_by) values($1,$2,$3,'EXECUTION',1,$4::jsonb,$5,$6) on conflict(run_id,report_kind,revision) where run_id is not null do update set report_json=excluded.report_json,report_html=excluded.report_html",[session.projectId||null,sessionId,persistedRunId,JSON.stringify(reportPayload),session.reportHtml||null,userId||session.createdBy||null]);
-      const learning=session.repairLearning||{};
-      const verifiedRepairs=(Array.isArray(learning.repairs)?learning.repairs:[]).filter(x=>x&&typeof x==='object'&&(x.verified===true||x.validationStatus==='PASSED'||x.validation?.status==='PASSED')).map(x=>({repairId:String(x.id||x.repairId||'').slice(0,100),failureSignature:String(x.failureSignature||x.signature||'').slice(0,300),validationStatus:'PASSED',validatedAt:x.validatedAt||null,confidence:Number.isFinite(Number(x.confidence))?Math.max(0,Math.min(1,Number(x.confidence))):null}));
-      const learningSummary={signatureCount:Array.isArray(learning.signatures)?learning.signatures.length:0,repairCount:Array.isArray(learning.repairs)?learning.repairs.length:0,verifiedRepairCount:verifiedRepairs.length,verifiedRepairs,recordedAt:new Date().toISOString(),source:'session_repair_learning',note:'Only repairs explicitly marked verified are included; full repair memory remains in its source service.'};
-      await require('../db').query("insert into test_report_snapshots(project_id,session_id,run_id,report_kind,revision,report_json,recorded_by) values($1,$2,$3,'AI_LEARNING',1,$4::jsonb,$5) on conflict(run_id,report_kind,revision) where run_id is not null do update set report_json=excluded.report_json",[session.projectId||null,sessionId,persistedRunId,JSON.stringify(learningSummary),userId||session.createdBy||null]);
-    }
+    await persistence.persistRunReportSnapshots({sessionId,session,runId:persistedRunId,userId:userId||session.createdBy||null});
     try { await retainExecutionEvidence({projectId:session.projectId,runId:persistedRunId,sessionArtifacts:session.artifacts}); }
     catch (evidenceError) { console.error('[evidence-retention] retention failed',evidenceError); }
     try { await applyProjectWorkflow({sessionId,projectId:session.projectId,runNumber:session.lastResults?.runNumber,executedBy:userId||session.createdBy||null}); }
