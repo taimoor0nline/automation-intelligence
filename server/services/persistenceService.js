@@ -211,6 +211,7 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
       );
     }
     await persistRunReportSnapshots({sessionId,session,runId,userId,client});
+    if(session.projectId)await require('./repairMemoryService').captureVerified({client,projectId:session.projectId,session,runId,userId});
     return runId;
   });
 }
