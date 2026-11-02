@@ -134,6 +134,7 @@ router.post('/api/projects/:projectId/work-items', requireAuth, async (req,res) 
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING',$11,$12,$13,$13,$14,$15::jsonb) returning *`,[req.params.projectId,req.body?.sessionId||null,uuid(req.body?.runId),uuid(req.body?.testCaseId),uuid(req.body?.testResultId),uuid(req.body?.defectAnalysisId),clean(req.body?.externalCaseId,100)||null,workType,title,clean(req.body?.description,10000)||null,priority,assignedTo,req.user.sub,req.body?.dueAt||null,JSON.stringify(req.body?.metadata||{})]);
       const row=inserted.rows[0];
       await addHistory(client,row.id,'WORK_ITEM_CREATED',null,'PENDING',req.user.sub,'',{ workType,assignedTo });
+      await client.query("insert into project_audit_events(project_id,work_item_id,actor_id,event_type,metadata) values($1,$2,$3,'TASK_CREATED',$4::jsonb)",[req.params.projectId,row.id,req.user.sub,JSON.stringify({workType,assignedTo})]);
       if(assignedTo) await enqueueNotification(client,{projectId:req.params.projectId,userId:assignedTo,eventType:'WORK_ITEM_ASSIGNED',subject:`Assigned: ${title}`,payload:{workItemId:row.id,externalCaseId:row.external_case_id,status:row.status}});
       return row;
     });
