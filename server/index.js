@@ -163,8 +163,11 @@ function serveUi(req, res, next) {
   });
 }
 function serveRestUi(req, res, next) { const uiFile = path.join(__dirname, "..", "testpilot-ui", "rest.html"); fs.readFile(uiFile, "utf8", (err, html) => { if (err) return next(err); res.type("html").send(html.replace("</body>", '<script src="/rest-request-template.js"></script></body>')); }); }
-app.get(["/", "/index.html"], serveUi);
+// The public entrypoint is authentication; project selection follows sign-in.
+app.get(["/", "/index.html"], (req,res)=>res.redirect("/login.html"));
+app.get("/runner", serveUi);
 app.get("/rest.html", serveRestUi);
+app.get("/workspace.html", (req,res)=>res.sendFile(path.join(__dirname,"..","testpilot-ui","workspace.html")));
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
 app.listen(PORT, HOST, async () => {
