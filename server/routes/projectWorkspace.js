@@ -98,6 +98,7 @@ router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  if(eid){const env=await db.query('select 1 from project_environments where id=$1 and project_id=$2',[eid,req.params.projectId]);if(!env.rowCount)throw fail(400,'Environment does not belong to project.');}
  const result=await db.query('insert into project_stories(project_id,environment_id,reference_no,title,story,acceptance_criteria,page_paths,priority,created_by,updated_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) returning *',
  [req.params.projectId,eid,'ST-'+require('crypto').randomUUID().slice(0,8).toUpperCase(),title,story,s(req.body?.acceptanceCriteria,8000)||null,s(req.body?.pagePaths,1500)||null,s(req.body?.priority,20)||'MEDIUM',req.user.sub]);
+ await db.query('insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,$4,$5::jsonb)',[req.params.projectId,result.rows[0].id,req.user.sub,'STORY_CREATED',JSON.stringify({referenceNo:result.rows[0].reference_no})]);
  res.status(201).json({ok:true,story:result.rows[0]});
  }catch(e){respond(res,e);}
 });
