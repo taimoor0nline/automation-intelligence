@@ -224,4 +224,26 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  res.json({ok:true,groups:[...groups.values()],blocked,executor:'existing /api/test-runs/start (isolated Cypress; screenshot/video evidence)'});
  }catch(e){respond(res,e);}
 });
+
+router.get('/api/projects/:projectId/workflow',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);
+ const r=await db.query('select auto_create_failed_tasks,auto_close_verified_retests,default_developer,updated_at from project_workflow_settings where project_id=$1',[req.params.projectId]);
+ res.json({ok:true,workflow:r.rows[0]||{auto_create_failed_tasks:false,auto_close_verified_retests:false,default_developer:null},projectRole:ctx.role});
+ }catch(e){respond(res,e);}
+});
+router.put('/api/projects/:projectId/workflow',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const developer=req.body?.defaultDeveloper||null;
+ if(developer){
+ const d=await db.query("select 1 from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and pm.user_id=$2 and pm.project_role='DEVELOPER' and u.is_active=true",[req.params.projectId,developer]);
+ if(!d.rowCount)throw fail(400,'Default assignee must be an active developer on this project.');
+ }
+ const a=Boolean(req.body?.autoCreateFailedTasks),b=Boolean(req.body?.autoCloseVerifiedRetests);
+ const r=await db.query('insert into project_workflow_settings(project_id,auto_create_failed_tasks,auto_close_verified_retests,default_developer,updated_by) values($1,$2,$3,$4,$5) on conflict(project_id) do update set auto_create_failed_tasks=excluded.auto_create_failed_tasks,auto_close_verified_retests=excluded.auto_close_verified_retests,default_developer=excluded.default_developer,updated_by=excluded.updated_by,updated_at=now() returning *',
+ [req.params.projectId,a,b,developer,req.user.sub]);
+ res.json({ok:true,workflow:r.rows[0]});
+ }catch(e){respond(res,e);}
+});
 module.exports=router;
