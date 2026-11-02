@@ -332,7 +332,13 @@ function bind(){
  document.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>show(el.dataset.view));
  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{show(el.dataset.go);if(el.dataset.go==='stories')clearStory();});
  $('projectPicker').onchange=async e=>{closeTask();state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();}catch(err){notice(err.message);}};
- $('newProjectForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target),d=await api('/api/projects',{method:'POST',body:JSON.stringify({name:vals.name,description:vals.description})});await api('/api/projects/'+encodeURIComponent(d.project.id)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:vals.referenceNo,startDate:vals.startDate,endDate:vals.endDate})});state.projectId=d.project.id;e.target.reset();await loadProjects();show('overview');notice('Project created successfully.','success');}catch(err){notice(err.message);}};
+ const projectFileInput=$('newProjectFiles'),projectDrop=$('newProjectDrop');
+ projectDrop.onclick=()=>projectFileInput.click();projectDrop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();projectFileInput.click();}};
+ for(const event of ['dragenter','dragover'])projectDrop.addEventListener(event,e=>{e.preventDefault();projectDrop.classList.add('drag');});
+ for(const event of ['dragleave','drop'])projectDrop.addEventListener(event,e=>{e.preventDefault();projectDrop.classList.remove('drag');});
+ projectDrop.addEventListener('drop',e=>{const dt=new DataTransfer();for(const file of e.dataTransfer.files)dt.items.add(file);projectFileInput.files=dt.files;projectFileInput.dispatchEvent(new Event('change'));});
+ projectFileInput.onchange=()=>{$('newProjectFileNames').textContent=[...projectFileInput.files].map(f=>f.name).join(', ');};
+ $('newProjectForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target),d=await api('/api/projects',{method:'POST',body:JSON.stringify({name:vals.name,description:vals.description})});await api('/api/projects/'+encodeURIComponent(d.project.id)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:vals.referenceNo,startDate:vals.startDate,endDate:vals.endDate})});state.projectId=d.project.id;const files=[...projectFileInput.files];e.target.reset();$('newProjectFileNames').textContent='';await loadProjects();show('overview');if(files.length)await uploadMany(files,'project');notice('Project created'+(files.length?' with '+files.length+' attachment(s)':'')+'.','success');}catch(err){notice(err.message);}};
  $('environmentForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments',{method:'POST',body:JSON.stringify({...vals,isDefault:!!e.target.elements.namedItem('isDefault').checked})});e.target.reset();await loadWorkspace();notice('Environment saved.','success');}catch(err){notice(err.message);}};
  $('storyForm').onsubmit=async e=>{e.preventDefault();try{await saveStory();}catch(err){notice(err.message);}};
  $('storyClear').onclick=clearStory;
@@ -388,7 +394,7 @@ async function initialize(){
  if(!token()){notice('Sign in through Run Tests first, then return Home. Project data is served from your TestNexus database.','warning');return;}
  const me=await api('/api/auth/me');state.user=me.user;$('currentUser').textContent=me.user?.name||me.user?.email||'';
  await loadProjects();await fetchDirectory();clearStory();
- const hash=window.location.hash.replace('#','');if(['overview','projects','stories','tasks','reports','team'].includes(hash))show(hash);
+ const hash=window.location.hash.replace('#','');if(['overview','projects','stories','tasks','reports','team'].includes(hash))show(hash);else show('projects');
  }catch(e){notice(e.message+' · Use the existing TestNexus sign-in screen to authenticate.');}
 }
 initialize();
