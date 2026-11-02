@@ -352,6 +352,7 @@ router.delete('/api/projects/:projectId/teams/:teamId/members/:userId',requireAu
  const ctx=await access(req,req.params.projectId);manager(ctx.role);
  const attached=await db.query('select 1 from project_teams where project_id=$1 and team_id=$2',[req.params.projectId,req.params.teamId]);
  if(!attached.rowCount)throw fail(404,'Team not associated with project.');
+ const shared=await db.query('select count(*)::int as total from project_teams where team_id=$1',[req.params.teamId]);if(shared.rows[0].total>1)throw fail(409,'Team is shared across projects; manage its global membership as a platform manager.');
  await db.query('delete from team_members where team_id=$1 and user_id=$2',[req.params.teamId,req.params.userId]);
  res.json({ok:true});
 }catch(e){respond(res,e);}});
