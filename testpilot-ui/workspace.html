@@ -24,7 +24,7 @@
  </div>
 </header>
 <div class="tn-container">
- <div id="notice" class="alert alert-warning d-none" role="alert"></div>
+ <div id="notice" class="alert alert-warning d-none" role="alert" aria-live="polite"></div>
  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
   <div><div class="tn-eyebrow" id="breadcrumb">PROJECT WORKSPACE</div><h1 class="tn-title" id="pageTitle">Project overview</h1><div class="tn-muted" id="pageSubtitle">Scope, documents, stories, assignments and execution evidence</div></div>
   <div class="d-flex gap-2"><button class="btn btn-outline-secondary tn-btn" data-go="projects">+ New project</button><button class="btn btn-primary tn-btn" data-go="stories">Write a story</button><a href="/" class="btn btn-outline-secondary tn-btn">Run Tests ↗</a></div>
@@ -103,7 +103,8 @@
    </form></div></div></div></div>
  </section>
  <section id="view-tasks" class="tn-view">
-  <div class="tn-card"><div class="tn-card-head flex-wrap"><div><h2>Project task board</h2><div class="tn-muted mt-1">Defects, investigations, retests and subtasks</div></div><div class="d-flex gap-2 align-items-center"><select id="taskStatusFilter" class="form-select" style="width:190px"><option value="">All statuses</option><option>PENDING</option><option>IN_PROGRESS</option><option>READY_FOR_RETEST</option><option>ON_HOLD</option><option>COMPLETED</option><option value="DELETED">Deleted (restore)</option></select><button id="projectRunAll" class="btn btn-outline-primary tn-btn" type="button">Run approved project tests</button><button id="batchRetest" class="btn btn-primary tn-btn">Retest selected</button></div></div>
+  <div class="tn-card"><div class="tn-card-head flex-wrap"><div><h2>Project task board <span id="taskVisibleCount" class="tn-badge-counter">0</span></h2><div class="tn-muted mt-1">Defects, investigations, retests and subtasks</div></div><div class="d-flex gap-2 align-items-center"><select id="taskStatusFilter" class="form-select" style="width:190px"><option value="">All statuses</option><option>PENDING</option><option>IN_PROGRESS</option><option>READY_FOR_RETEST</option><option>ON_HOLD</option><option>COMPLETED</option><option value="DELETED">Deleted (restore)</option></select><button id="projectRunAll" class="btn btn-outline-primary tn-btn" type="button">Run approved project tests</button><button id="batchRetest" class="btn btn-primary tn-btn">Retest selected</button></div></div>
+   <div class="tn-task-toolbar"><label class="visually-hidden" for="taskSearch">Search tasks</label><input id="taskSearch" class="form-control" type="search" placeholder="Search title, case or assignee"><label class="tn-toolbar-label"><input id="taskHierarchy" type="checkbox" checked> Show hierarchy</label><span id="taskSelectionCount" class="tn-muted" aria-live="polite">0 selected</span></div>
    <div class="tn-scroll"><table class="table tn-table"><thead><tr><th><input id="allTasks" type="checkbox" aria-label="Select all tasks"></th><th>Task</th><th>Test case</th><th>Assignee</th><th>ETA</th><th>Status</th><th></th></tr></thead><tbody id="tasksBody"></tbody></table></div>
   </div>
   <div id="retestOutput" class="mt-3"></div>
@@ -129,7 +130,7 @@
  </section>
 </div>
 <div class="tn-shade" id="taskShade"></div>
-<aside class="tn-side" id="taskDrawer" aria-label="Task details">
+<aside class="tn-side" id="taskDrawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true" tabindex="-1">
  <div class="tn-card-head sticky-top bg-white"><div><div class="tn-eyebrow">TASK DETAIL</div><h2 id="drawerTitle">Task</h2></div><button class="btn btn-outline-secondary tn-btn" id="closeTask">Close</button></div>
  <div class="p-4">
   <div id="drawerInfo"></div>
