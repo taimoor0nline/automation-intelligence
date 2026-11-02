@@ -107,10 +107,14 @@ router.patch('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,r
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
  const existing=await db.query('select * from project_stories where id=$1 and project_id=$2',[req.params.storyId,req.params.projectId]);
  if(!existing.rowCount)throw fail(404,'Story not found.');
- const old=existing.rows[0],b=req.body||{},updated=await db.query('update project_stories set title=$1,story=$2,acceptance_criteria=$3,page_paths=$4,priority=$5,updated_by=$6,updated_at=now() where id=$7 and project_id=$8 returning *',
+ const old=existing.rows[0],b=req.body||{};
+ const updated=await db.withTransaction(async client=>{
+ const updated=await client.query('update project_stories set title=$1,story=$2,acceptance_criteria=$3,page_paths=$4,priority=$5,updated_by=$6,updated_at=now() where id=$7 and project_id=$8 returning *',
  [s(b.title??old.title,250),s(b.story??old.story,12000),s(b.acceptanceCriteria??old.acceptance_criteria,8000),s(b.pagePaths??old.page_paths,1500),s(b.priority??old.priority,20),req.user.sub,req.params.storyId,req.params.projectId]);
- await db.query("insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,'STORY_UPDATED',$4::jsonb)",[req.params.projectId,req.params.storyId,req.user.sub,JSON.stringify({previousUpdatedAt:old.updated_at,newUpdatedAt:updated.rows[0].updated_at,fields:['title','story','acceptance_criteria','page_paths','priority'].filter(k=>String(old[k]??'')!==String(updated.rows[0][k]??''))})]);
- res.json({ok:true,story:updated.rows[0]});
+ await client.query("insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,'STORY_UPDATED',$4::jsonb)",[req.params.projectId,req.params.storyId,req.user.sub,JSON.stringify({previousUpdatedAt:old.updated_at,newUpdatedAt:updated.rows[0].updated_at,fields:['title','story','acceptance_criteria','page_paths','priority'].filter(k=>String(old[k]??'')!==String(updated.rows[0][k]??''))})]);
+ return updated.rows[0];
+ });
+ res.json({ok:true,story:updated});
  }catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/documents',requireAuth,async(req,res)=>{
