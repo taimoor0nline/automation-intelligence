@@ -223,6 +223,23 @@ router.get('/api/work-items/:id/attachments/:attachmentId/download',requireAuth,
  if(!a.rowCount)throw fail(404,'Attachment not found.');download(res,a.rows[0]);
  }catch(e){respond(res,e);}
 });
+router.get('/api/projects/:projectId/task-tree',requireAuth,async(req,res)=>{
+ try{await access(req,req.params.projectId);
+ const r=await db.query("select id,parent_id,title,status,work_type,external_case_id,session_id,assigned_to,created_at from work_items where project_id=$1 and deleted_at is null order by created_at,id",[req.params.projectId]);
+ const byId=new Map(r.rows.map(x=>[x.id,{...x,children:[]}]));const roots=[];
+ for(const node of byId.values()){const parent=node.parent_id&&byId.get(node.parent_id);if(parent&&parent.id!==node.id)parent.children.push(node);else roots.push(node);}
+ res.json({ok:true,roots,total:r.rows.length});
+ }catch(e){respond(res,e);}
+});
+router.get('/api/projects/:projectId/task-test-history',requireAuth,async(req,res)=>{
+ try{await access(req,req.params.projectId);const taskId=req.query.taskId;
+ if(!id(taskId))throw fail(400,'Valid taskId required.');
+ const task=await db.query('select id from work_items where id=$1 and project_id=$2 and deleted_at is null',[taskId,req.params.projectId]);
+ if(!task.rowCount)throw fail(404,'Task not found.');
+ const rows=await db.query("select tr.id run_id,tr.run_number,tr.completed_at,tr.executed_by,u.display_name tester,te.external_case_id,te.title,te.passed,te.evidence_json from work_items w join test_runs tr on tr.session_id=w.session_id and tr.project_id=w.project_id join test_results te on te.run_id=tr.id and te.external_case_id=w.external_case_id left join users u on u.id=tr.executed_by where w.id=$1 and w.project_id=$2 order by tr.completed_at desc limit 100",[taskId,req.params.projectId]);
+ res.json({ok:true,results:rows.rows});
+ }catch(e){respond(res,e);}
+});
 router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
  try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
