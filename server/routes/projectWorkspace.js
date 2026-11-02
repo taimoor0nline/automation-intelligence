@@ -380,4 +380,19 @@ router.get('/api/projects/:projectId/audit',requireAuth,async(req,res)=>{try{
  const r=await db.query(`select a.*,u.display_name as actor_name from project_audit_events a left join users u on u.id=a.actor_id where a.project_id=$1 order by a.created_at desc limit 300`,[req.params.projectId]);
  res.json({ok:true,events:r.rows});
 }catch(e){respond(res,e);}});
+router.get('/api/projects/:projectId/report-snapshots',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const kind=s(req.query.kind,30).toUpperCase();
+ if(kind&&!['REVIEWED_CASE','EXECUTION','AI_LEARNING'].includes(kind))throw fail(400,'Invalid report kind.');
+ const r=await db.query("select id,session_id,run_id,external_case_id,report_kind,revision,report_json,recorded_by,created_at from test_report_snapshots where project_id=$1 and ($2::text='' or report_kind=$2) order by created_at desc limit 250",[req.params.projectId,kind]);
+ res.json({ok:true,reports:r.rows});
+}catch(e){respond(res,e);}});
+router.get('/api/projects/:projectId/report-snapshots/:reportId',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ if(!id(req.params.reportId))throw fail(400,'Invalid report ID.');
+ const r=await db.query('select * from test_report_snapshots where project_id=$1 and id=$2',[req.params.projectId,req.params.reportId]);
+ if(!r.rowCount)throw fail(404,'Report not found.');
+ if(req.query.format==='html'){if(!r.rows[0].report_html)throw fail(404,'HTML report unavailable.');res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Content-Security-Policy',"sandbox; default-src 'none'; style-src 'unsafe-inline'");return res.send(r.rows[0].report_html);}
+ const {report_html,...report}=r.rows[0];res.json({ok:true,report,hasHtml:!!report_html});
+}catch(e){respond(res,e);}});
 module.exports=router;
