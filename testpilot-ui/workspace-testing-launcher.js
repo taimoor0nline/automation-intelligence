@@ -44,7 +44,7 @@
   if(!button)return;
   event.preventDefault();event.stopPropagation();
   const sourceType=button.hasAttribute('data-start-project')?'project':button.hasAttribute('data-start-story')?'story':'task';
-  const projectId=sourceType==='project'?button.dataset.startProject:$('projectPicker')?.value;
+  const projectId=sourceType==='project'?(button.dataset.startProject||$('projectPicker')?.value):$('projectPicker')?.value;
   const recordId=sourceType==='story'?button.dataset.startStory:sourceType==='task'?button.dataset.startTask:null;
   button.disabled=true;
   start(projectId,sourceType,recordId).catch(err=>{error(err.message);button.disabled=false;});
