@@ -50,7 +50,7 @@ router.get('/api/projects/:projectId/workspace',requireAuth,async(req,res)=>{
  try {
  const ctx=await access(req,req.params.projectId);
  const [envs,stories,docs,team,runs]=await Promise.all([
- db.query('select id,name,base_url,stage_type,is_default,created_at from project_environments where project_id=$1 order by is_default desc,name',[req.params.projectId]),
+ db.query('select id,name,base_url,stage_type,is_default,is_active,disabled_at,created_at,updated_at from project_environments where project_id=$1 order by is_default desc,name',[req.params.projectId]),
  db.query('select s.*,u.display_name created_by_name from project_stories s left join users u on u.id=s.created_by where s.project_id=$1 order by s.updated_at desc limit 200',[req.params.projectId]),
  db.query('select id,filename,mime_type,category,file_size,version,uploaded_by,created_at from project_documents where project_id=$1 order by created_at desc limit 200',[req.params.projectId]),
  db.query('select pm.user_id,pm.project_role,u.display_name,u.email from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and u.is_active=true order by u.display_name',[req.params.projectId]),
@@ -76,18 +76,100 @@ router.patch('/api/projects/:projectId/profile',requireAuth,async(req,res)=>{
  res.json({ok:true,project:updated.rows[0]});
  }catch(e){respond(res,e);}
 });
+const ENV_TYPES=new Set(['QA','DEV','STAGING','UAT','PRODUCTION']);
+function envFields(body={},existing=null){
+ const name=s(body.name??existing?.name,100),base=s(body.baseUrl??existing?.base_url,1500);
+ const stage=s(body.stageType??existing?.stage_type??'QA',30).toUpperCase();
+ if(!name||!/^https?:\/\//i.test(base))throw fail(400,'Name and valid HTTP(S) base URL are required.');
+ if(!ENV_TYPES.has(stage))throw fail(400,'Invalid environment stage type.');
+ try{const parsed=new URL(base);if(!['http:','https:'].includes(parsed.protocol)||!parsed.hostname)throw Error();}catch{throw fail(400,'Environment base URL must be a valid HTTP(S) address.');}
+ return {name,base,stage};
+}
+async function usageForEnvironment(client,projectId,env){
+ const result=await client.query(`select
+  (select count(*)::int from project_stories where project_id=$1 and environment_id=$2) as stories,
+  (select count(*)::int from test_sessions where project_id=$1 and lower(environment)=lower($3)) as sessions,
+  (select count(*)::int from test_runs r join test_sessions t on t.id=r.session_id where r.project_id=$1 and lower(t.environment)=lower($3)) as runs`,[projectId,env.id,env.name]);
+ const row=result.rows[0];
+ return {stories:row.stories,sessions:row.sessions,runs:row.runs,total:row.stories+row.sessions+row.runs};
+}
+async function auditEnv(client,projectId,envId,user,eventType,extra={}){
+ await client.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,$3,$4::jsonb)",
+  [projectId,user,eventType,JSON.stringify({environmentId:envId,...extra})]);
+}
+router.get('/api/projects/:projectId/environments',requireAuth,async(req,res)=>{
+ try{
+  const ctx=await access(req,req.params.projectId);
+  const environments=await db.query('select * from project_environments where project_id=$1 order by is_active desc,is_default desc,name',[req.params.projectId]);
+  const list=await Promise.all(environments.rows.map(async env=>{
+   const usage=await usageForEnvironment(db,req.params.projectId,env);
+   const {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at}=env;
+   return {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,usage,canDelete:usage.total===0};
+  }));
+  res.json({ok:true,environments:list,canManage:ctx.role==='PROJECT_MANAGER'});
+ }catch(e){respond(res,e);}
+});
 router.post('/api/projects/:projectId/environments',requireAuth,async(req,res)=>{
  try{
- const ctx=await access(req,req.params.projectId);manager(ctx.role);
- const name=s(req.body?.name,100),base=s(req.body?.baseUrl,1500);
- if(!name || !/^https?:\/\//i.test(base))throw fail(400,'Name and HTTP(S) base URL are required.');
- const stage=s(req.body?.stageType,30)||'QA',def=Boolean(req.body?.isDefault);
- const inserted=await db.withTransaction(async client=>{
- if(def)await client.query('update project_environments set is_default=false where project_id=$1',[req.params.projectId]);
- return client.query('insert into project_environments(project_id,name,base_url,stage_type,is_default,created_by) values($1,$2,$3,$4,$5,$6) returning *',[req.params.projectId,name,base,stage,def,req.user.sub]);
- });
- res.status(201).json({ok:true,environment:inserted.rows[0]});
- }catch(e){respond(res,e);}
+  const ctx=await access(req,req.params.projectId);manager(ctx.role);
+  const {name,base,stage}=envFields(req.body);
+  const def=Boolean(req.body?.isDefault);
+  const inserted=await db.withTransaction(async client=>{
+   if(def)await client.query('update project_environments set is_default=false where project_id=$1',[req.params.projectId]);
+   const result=await client.query('insert into project_environments(project_id,name,base_url,stage_type,is_default,is_active,created_by) values($1,$2,$3,$4,$5,true,$6) returning *',
+    [req.params.projectId,name,base,stage,def,req.user.sub]);
+   await auditEnv(client,req.params.projectId,result.rows[0].id,req.user.sub,'ENVIRONMENT_CREATED',{name});
+   return result.rows[0];
+  });
+  res.status(201).json({ok:true,environment:inserted});
+ }catch(e){if(e.code==='23505')return respond(res,fail(409,'An environment with this name already exists.'));respond(res,e);}
+});
+router.patch('/api/projects/:projectId/environments/:environmentId',requireAuth,async(req,res)=>{
+ try{
+  const ctx=await access(req,req.params.projectId);manager(ctx.role);
+  const envId=req.params.environmentId;
+  if(!id(envId))throw fail(400,'Invalid environment ID.');
+  const updated=await db.withTransaction(async client=>{
+   const found=await client.query('select * from project_environments where id=$1 and project_id=$2 for update',[envId,req.params.projectId]);
+   if(!found.rowCount)throw fail(404,'Environment not found.');
+   const previous=found.rows[0],isActive=Object.hasOwn(req.body||{},'isActive')?req.body.isActive:previous.is_active;
+   if(typeof isActive!=='boolean')throw fail(400,'isActive must be a boolean.');
+   const {name,base,stage}=envFields(req.body,previous);
+   const setDefault=Object.hasOwn(req.body||{},'isDefault')?req.body.isDefault:previous.is_default;
+   if(typeof setDefault!=='boolean')throw fail(400,'isDefault must be a boolean.');
+   if(!isActive&&setDefault&&Object.hasOwn(req.body||{},'isDefault')&&req.body.isDefault)throw fail(400,'Disabled environment cannot be default.');
+   const def=Boolean(isActive&&setDefault);
+   if(def)await client.query('update project_environments set is_default=false where project_id=$1 and id<>$2',[req.params.projectId,envId]);
+   const saved=await client.query(`update project_environments set name=$1,base_url=$2,stage_type=$3,is_default=$4,is_active=$5,
+     disabled_at=case when $5=false then coalesce(disabled_at,now()) else null end,
+     disabled_by=case when $5=false then coalesce(disabled_by,$6::uuid) else null end,updated_at=now()
+     where id=$7 and project_id=$8 returning *`,[name,base,stage,def,isActive,req.user.sub,envId,req.params.projectId]);
+   await auditEnv(client,req.params.projectId,envId,req.user.sub,previous.is_active===true&&isActive===false?'ENVIRONMENT_DISABLED':previous.is_active===false&&isActive===true?'ENVIRONMENT_ENABLED':'ENVIRONMENT_UPDATED',
+    {oldName:previous.name,newName:name,previousDefault:previous.is_default,isDefault:def});
+   return saved.rows[0];
+  });
+  res.json({ok:true,environment:updated});
+ }catch(e){if(e.code==='23505')return respond(res,fail(409,'An environment with this name already exists.'));respond(res,e);}
+});
+router.delete('/api/projects/:projectId/environments/:environmentId',requireAuth,async(req,res)=>{
+ try{
+  const ctx=await access(req,req.params.projectId);manager(ctx.role);
+  if(!id(req.params.environmentId))throw fail(400,'Invalid environment ID.');
+  await db.withTransaction(async client=>{
+   const found=await client.query('select * from project_environments where id=$1 and project_id=$2 for update',[req.params.environmentId,req.params.projectId]);
+   if(!found.rowCount)throw fail(404,'Environment not found.');
+   const env=found.rows[0];
+   const usage=await usageForEnvironment(client,req.params.projectId,env);
+   if(usage.total>0)throw fail(409,'Environment has existing stories or test transactions and cannot be deleted. Disable it for new transactions instead.');
+   const removed=await client.query('delete from project_environments where id=$1 and project_id=$2 returning id',[env.id,req.params.projectId]);
+   if(!removed.rowCount)throw fail(404,'Environment not found.');
+   await auditEnv(client,req.params.projectId,env.id,req.user.sub,'ENVIRONMENT_DELETED',{name:env.name});
+  });
+  res.json({ok:true,deleted:true});
+ }catch(e){
+  if(e.code==='23503')return respond(res,fail(409,'Environment is referenced by another record; disable it instead of deleting.'));
+  respond(res,e);
+ }
 });
 router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  try{
@@ -95,7 +177,7 @@ router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  const title=s(req.body?.title,250),story=s(req.body?.story,12000);
  if(!title || !story)throw fail(400,'Story title and business story are required.');
  const eid=req.body?.environmentId||null;
- if(eid){const env=await db.query('select 1 from project_environments where id=$1 and project_id=$2',[eid,req.params.projectId]);if(!env.rowCount)throw fail(400,'Environment does not belong to project.');}
+ if(eid){const env=await db.query('select 1 from project_environments where id=$1 and project_id=$2 and is_active=true',[eid,req.params.projectId]);if(!env.rowCount)throw fail(400,'Environment does not belong to project.');}
  const result=await db.query('insert into project_stories(project_id,environment_id,reference_no,title,story,acceptance_criteria,page_paths,priority,created_by,updated_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) returning *',
  [req.params.projectId,eid,'ST-'+require('crypto').randomUUID().slice(0,8).toUpperCase(),title,story,s(req.body?.acceptanceCriteria,8000)||null,s(req.body?.pagePaths,1500)||null,s(req.body?.priority,20)||'MEDIUM',req.user.sub]);
  await db.query('insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,$4,$5::jsonb)',[req.params.projectId,result.rows[0].id,req.user.sub,'STORY_CREATED',JSON.stringify({referenceNo:result.rows[0].reference_no})]);
