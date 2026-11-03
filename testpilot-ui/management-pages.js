@@ -16,8 +16,6 @@ async function api(url,init={}){
 function projectUrl(path){return path+'?projectId='+encodeURIComponent(projectId);}
 function projectWorkspaceUrl(section='details'){return '/workspace.html?projectId='+encodeURIComponent(projectId)+'#'+section;}
 function linkedNavigation(){
- $('navProject').href=projectId?projectWorkspaceUrl('details'):'/workspace.html#projects';
- $('navTasks').href=projectId?projectWorkspaceUrl('tasks'):'/workspace.html#projects';
  $('navEnvironment').href=projectId?projectUrl('/environment-config.html'):'/workspace.html#projects';
  if($('mgBack'))$('mgBack').href=page==='project-create'?'/workspace.html#projects':page==='environment-form'?projectUrl('/environment-config.html'):projectId?projectWorkspaceUrl(page==='task-create'?'tasks':'details'):'/workspace.html#projects';
  const cancel=$('mgEnvCancel');if(cancel)cancel.href=projectUrl('/environment-config.html');
