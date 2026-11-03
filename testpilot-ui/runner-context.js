@@ -53,11 +53,12 @@
   }
   function selectRecordOptions(){
     const kind=$('testContextMode').value,select=$('testContextRecord'),wrap=$('testContextRecordWrap');
-    const records=kind==='story'?state.stories:kind==='task'?state.tasks:[];
-    wrap.hidden=!['story','task'].includes(kind);
+    const records=(kind==='story'||kind==='project')?state.stories:kind==='task'?state.tasks:[];
+    // QA selects an existing story when launched from the project; task launches keep their own source.
+    wrap.hidden=!['story','project'].includes(kind);
     const prior=select.value;
     select.replaceChildren();
-    select.add(new Option(kind==='story'?'Choose a project story':'Choose a project task',''));
+    select.add(new Option('All project requirements (no specific story)',''));
     for(const record of records){
       const title=kind==='story'?record.title:record.title;
       select.add(new Option(clean(record.reference_no||record.external_case_id||'')+(record.reference_no||record.external_case_id?' · ':'')+clean(title),String(record.id)));
@@ -67,7 +68,8 @@
   }
   function selectedRecord(){
     const mode=$('testContextMode').value,id=$('testContextRecord').value;
-    return (mode==='story'?state.stories:state.tasks).find(r=>String(r.id)===id)||null;
+    const records=(mode==='story'||mode==='project')?state.stories:mode==='task'?state.tasks:[];
+    return records.find(r=>String(r.id)===id)||null;
   }
   function renderSelection(){
     const mode=$('testContextMode').value,project=state.project;
@@ -78,6 +80,16 @@
     if($('testContextSourceName'))$('testContextSourceName').textContent=mode==='story'?(item?'Story · '+item.title:'Story not found'):mode==='task'?(item?'Task · '+item.title:'Task not found'):mode==='manual'?'Custom story':'Project requirements';
     if($('testContextManualToggle'))$('testContextManualToggle').textContent=mode==='manual'?'Use selected context':'Write a custom story';
     const base=contextFields(project||{});
+    const details=$('testContextProjectDetails');
+    if(details){
+      details.hidden=mode==='task'||mode==='manual'||!project;
+      details.textContent=details.hidden?'':base.join('\n\n')||'No project description, objectives, scope, or acceptance criteria recorded.';
+    }
+    const back=$('testContextReturn');
+    if(back&&project){
+      back.href='/workspace.html?projectId='+encodeURIComponent($('platformProject').value)+'#'+(mode==='task'?'tasks':'details');
+      back.textContent=mode==='task'?'Back to project tasks':'Back to project details';
+    }
     const url=useEnvironment(mode==='story'?item:null);
     let text='';
     if(mode==='manual'){
@@ -89,7 +101,7 @@
     }else if(mode==='project'){
       text=join([segment('Generate test scenarios for project',project.name),...base]);
       setStoryText(text,false);
-      status(text&&base.length?'Project scope and business context loaded. Review the preview, then generate.':'Project has no testing requirements yet. Add objectives, scope or acceptance criteria in Project Details.',!base.length);
+      status(text&&base.length?(state.stories.length?'Project requirements loaded. Select a project story to test a specific journey, or generate project-wide scenarios.':'Project requirements loaded. Add a project story if you want targeted test coverage.'):'Project has no testing requirements yet. Add objectives, scope or acceptance criteria in Project Details.',!base.length);
     }else if(!item){
       setStoryText('',false);
       const noun=mode==='story'?'story':'task';
@@ -100,7 +112,8 @@
       setStoryText(text,false);
       status('Story and project scope loaded. The generated session will be associated with this story.');
     }else{
-      text=join([segment('Test scenarios for project task',item.title),segment('Task description',item.description),segment('Linked test case reference',item.external_case_id),...base]);
+      // Do not inject unrelated project requirements or business stories into a task-specific retest.
+      text=join([segment('Test scenarios for project task',item.title),segment('Task description',item.description),segment('Linked test case reference',item.external_case_id)]);
       setStoryText(text,false);
       status('Task and project scope loaded. The generated session will retain the task as its source.');
     }
@@ -110,6 +123,13 @@
   function modeChange(){
     if(state.mode==='manual')state.manualDraft=$('story').value;
     $('testContextRecord').value='';
+    renderSelection();
+  }
+  function storyChange(){
+    // An optional project story becomes the selected source. Clearing it returns to project scope.
+    if(!['project','story'].includes($('testContextMode').value))return;
+    const selected=$('testContextRecord').value;
+    $('testContextMode').value=selected?'story':'project';
     renderSelection();
   }
   function setup(){
@@ -122,11 +142,12 @@
     box.innerHTML='<strong class="testing-context-heading">Selected testing context</strong>'+
       '<div class="testing-context-grid"><div><label>Project</label><div class="testing-context-fixed" id="testContextProjectName">Loading…</div></div>'+
       '<div><label>Source</label><div class="testing-context-fixed" id="testContextSourceName">Loading…</div></div></div>'+
-      '<div hidden aria-hidden="true"><select id="testContextMode">'+
+      '<div id="testContextProjectDetails" class="testing-context-details" hidden></div>'+
+      '<select id="testContextMode" hidden aria-label="Testing source mode">'+
       '<option value="project">Project requirements</option><option value="story">Existing story</option>'+
       '<option value="task">Existing task</option><option value="manual">Write manually</option></select>'+
-      '<div id="testContextRecordWrap"><select id="testContextRecord"></select></div></div>'+
-      '<div class="testing-context-actions"><a href="/workspace.html#projects">Change project or task</a>'+
+      '<div id="testContextRecordWrap" hidden><label for="testContextRecord">Project story (optional)</label><select id="testContextRecord"></select></div>'+
+      '<div class="testing-context-actions"><a id="testContextReturn" href="/workspace.html#projects">Back to project</a>'+
       '<button id="testContextManualToggle" type="button" class="testing-context-link">Write a custom story</button></div>'+
       '<p id="testContextStatus" class="testing-context-note" role="status" aria-live="polite">Loading project context…</p>';
     const projectField=projectSelect.parentElement;
@@ -148,7 +169,7 @@
       }
       renderSelection();
     });
-    $('testContextRecord').addEventListener('change',renderSelection);
+    $('testContextRecord').addEventListener('change',storyChange);
     story.addEventListener('input',()=>{if($('testContextMode').value==='manual')state.manualDraft=story.value;});
     const generate=$('generateBtn');
     generate?.addEventListener('click',event=>{
@@ -172,6 +193,7 @@
       '.testing-context-card select{width:100%;max-width:100%;min-width:0;min-height:42px;border:1px solid #cbd6e8;border-radius:8px;background:#fff;padding:9px;font-size:12px}'+
       '.testing-context-card select:focus-visible{outline:2px solid #728af5;outline-offset:2px}'+
       '#testContextRecordWrap{margin-top:10px}'+
+      '.testing-context-details{white-space:pre-wrap;border:1px solid #e1e8f5;background:#fff;border-radius:8px;color:#3d506c;font-size:11px;line-height:1.5;padding:11px;margin-top:10px;max-height:160px;overflow:auto}'+
       '.testing-context-note{font-size:11px;color:#526179;margin:10px 0 0;line-height:1.5}'+
       '.testing-context-error{color:#b91c1c}'+
       '#story[readonly]{background:#f6f8fc;color:#334155;cursor:default}'+
