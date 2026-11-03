@@ -106,7 +106,7 @@ function activateDirectoryActors(session, requestedRefs = []) {
 
 router.get('/api/sessions/:sessionId/context', requireAuth, (req, res) => {
   const session = getSession(req.params.sessionId);
-  res.json({ ok: true, projectId: session.projectId || null, repositoryId: session.repositoryId || null, createdBy: session.createdBy || null, projectStoryId: session.projectStoryId || null });
+  res.json({ ok: true, projectId: session.projectId || null, repositoryId: session.repositoryId || null, createdBy: session.createdBy || null, projectStoryId: session.projectStoryId || null, contextSource: session.contextSource || null });
 });
 
 router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
@@ -114,6 +114,10 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     const projectId = String(req.body?.projectId || '').trim();
     const repositoryId = String(req.body?.repositoryId || '').trim();
     const storyId = String(req.body?.storyId || '').trim();
+    const taskId = String(req.body?.taskId || '').trim();
+    const sourceType = String(req.body?.sourceType || (storyId ? 'STORY' : taskId ? 'TASK' : 'MANUAL')).trim().toUpperCase();
+    if (!['PROJECT','STORY','TASK','MANUAL'].includes(sourceType)) return res.status(400).json({ reply:'Invalid testing context source.' });
+    if (sourceType==='STORY'&&!storyId || sourceType==='TASK'&&!taskId || storyId&&sourceType!=='STORY' || taskId&&sourceType!=='TASK') return res.status(400).json({ reply:'Story or task source must match its selected record.' });
     if (!projectId) return res.status(400).json({ reply: 'projectId is required.' });
 
     const project = await db.query('select id from projects where id=$1', [projectId]);
@@ -129,6 +133,7 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     }
 
     if (storyId) { const story=await db.query('select id from project_stories where id=$1 and project_id=$2',[storyId,projectId]); if(!story.rowCount)return res.status(400).json({reply:'Story does not belong to selected project.'}); }
+    if(taskId){const task=await db.query('select id from work_items where id=$1 and project_id=$2 and deleted_at is null',[taskId,projectId]);if(!task.rowCount)return res.status(400).json({reply:'Task does not belong to this project or has been deleted.'});}
     const existingSession=await db.query('select project_id,created_by from test_sessions where id=$1',[req.params.sessionId]);
     if(existingSession.rowCount){
       const row=existingSession.rows[0];
@@ -137,16 +142,18 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
     }
     const session = getSession(req.params.sessionId);
     session.projectStoryId = storyId || null;
+    session.contextSource = { type: sourceType, storyId: storyId || null, taskId: taskId || null };
     session.projectId = projectId;
     session.repositoryId = repositoryId || null;
     session.createdBy = req.user.sub;
     await persistence.persistSession(req.params.sessionId, session, { projectId, repositoryId: repositoryId || null, userId: req.user.sub });
     await db.query('update test_sessions set project_story_id=$1 where id=$2 and project_id=$3',[storyId||null,req.params.sessionId,projectId]);
+    if(taskId){await db.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TASK_SESSION_CONTEXT_SELECTED',$4::jsonb)",[projectId,req.params.sessionId,req.user.sub,JSON.stringify({taskId})]);}
     if(storyId){
       const linked=await db.query('insert into story_test_sessions(story_id,session_id) values($1,$2) on conflict do nothing returning story_id',[storyId,req.params.sessionId]);
       if(linked.rowCount)await db.query("insert into project_audit_events(project_id,story_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,$4,'STORY_SESSION_LINKED',$5::jsonb)",[projectId,storyId,req.params.sessionId,req.user.sub,JSON.stringify({repositoryId:repositoryId||null})]);
     }
-    res.json({ ok: true, projectId, repositoryId: repositoryId || null, storyId: storyId||null });
+    res.json({ ok: true, projectId, repositoryId: repositoryId || null, storyId: storyId||null, taskId: taskId||null, sourceType });
   } catch (err) {
     res.status(500).json({ reply: err.message });
   }
