@@ -29,6 +29,7 @@
   }
   const env=(sourceType==='story'&&(detail.environments||[]).find(x=>x.is_active!==false&&String(x.id)===String(record?.environment_id)))
    ||(detail.environments||[]).find(x=>x.is_active!==false&&x.is_default)||(detail.environments||[]).find(x=>x.is_active!==false);
+  if((detail.environments||[]).length&&!env)throw Error('All project environments are disabled. Enable an environment before starting new testing.');
   const targetUrl=env?.base_url||detail.project?.target_url||'';
   if(!targetUrl)throw Error('Set the project application URL or default environment in Project Details before starting testing.');
   const handoff={projectId,sourceType,targetUrl,environmentName:env?.name||'Test'};
