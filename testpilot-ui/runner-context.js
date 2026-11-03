@@ -45,7 +45,7 @@
   }
   function useEnvironment(story){
     const env=selectedEnvironment(story),project=state.project||{};
-    const url=clean(env?.base_url||project.target_url);
+    const url=state.environments.length&&!env?'':clean(env?.base_url||project.target_url);
     if($('targetUrl'))$('targetUrl').value=url;
     if($('environment'))$('environment').value=env?.name||'Test';
     if($('additionalPaths'))$('additionalPaths').value=clean(story?.page_paths);
