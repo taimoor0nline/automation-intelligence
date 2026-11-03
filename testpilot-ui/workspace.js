@@ -29,7 +29,7 @@ async function api(url,options={}){
  if(!r.ok)throw Error(d.reply||'Request failed ('+r.status+')');
  return d;
 }
-async function loadTaskLinks(id){const box=$('drawerTestLinks');box.textContent='Loading linked cases…';try{const d=await api('/api/work-items/'+encodeURIComponent(id)+'/test-links');if(state.taskId!==id)return;const canEdit=['PROJECT_MANAGER','QA'].includes(state.taskRole);box.innerHTML=d.links.length?d.links.map(x=>'<div class="tn-sub tn-row"><span><strong>'+esc(x.external_case_id)+'</strong><span class="tn-muted d-block">Session '+esc(x.session_id)+'</span></span><button class="tn-link" data-unlink-test="'+esc(x.id)+'" aria-label="Unlink case '+esc(x.external_case_id)+'">Unlink</button></div>').join(''):'<p class="tn-muted">No reusable test cases linked. Use the form below to add one.</p>'; }catch(err){box.textContent='Unable to load linked cases: '+err.message;}}
+async function loadTaskLinks(id){const box=$('drawerTestLinks');box.textContent='Loading linked cases…';try{const d=await api('/api/work-items/'+encodeURIComponent(id)+'/test-links');if(state.taskId!==id)return;const canEdit=['PROJECT_MANAGER','QA'].includes(state.taskRole);box.innerHTML=d.links.length?d.links.map(x=>'<div class="tn-sub tn-row"><span><strong>'+esc(x.external_case_id)+'</strong><span class="tn-muted d-block">Session '+esc(x.session_id)+'</span></span><span class="tn-icon-actions">'+actionIcon('remove','data-unlink-test="'+esc(x.id)+'"','Unlink case '+x.external_case_id)+'</span></div>').join(''):'<p class="tn-muted">No reusable test cases linked. Use the form below to add one.</p>'; }catch(err){box.textContent='Unable to load linked cases: '+err.message;}}
 function formPayload(form){return Object.fromEntries(new FormData(form).entries());}
 function date(v){return v?new Date(v).toLocaleDateString():'—';}
 function dateTime(v){return v?new Date(v).toLocaleString():'—';}
@@ -203,7 +203,7 @@ function renderReports(){
 function evidenceButtons(meta){
  if(!meta||typeof meta!=='object')return '<span class="tn-muted">No evidence stored</span>';
  const e=meta.evidence||meta;
- return ['screenshotUrl','videoUrl'].filter(k=>typeof e[k]==='string'&&(e[k].startsWith('/api/artifacts/')||(/^\/api\/projects\/[^/]+\/run-evidence\//.test(e[k])))).map(k=>'<button class="tn-link me-3" data-evidence="'+esc(e[k])+'">'+(k==='videoUrl'?'▶ Video':'▧ Screenshot')+'</button>').join('')||'<span class="tn-muted">No retained media URL</span>';
+ return ['screenshotUrl','videoUrl'].filter(k=>typeof e[k]==='string'&&(e[k].startsWith('/api/artifacts/')||(/^\/api\/projects\/[^/]+\/run-evidence\//.test(e[k])))).map(k=>'<span class="tn-icon-actions">'+actionIcon(k==='videoUrl'?'video':'image','data-evidence="'+esc(e[k])+'"',k==='videoUrl'?'View video evidence':'View screenshot evidence')+'</span>').join('')||'<span class="tn-muted">No retained media URL</span>';
 }
 async function loadWorkflow(){
  const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/workflow');
