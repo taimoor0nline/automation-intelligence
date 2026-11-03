@@ -141,6 +141,7 @@ router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','M
       if(row.created_by&&String(row.created_by)!==String(req.user.sub)&&String(req.user.role).toUpperCase()!=='MANAGER')return res.status(403).json({reply:'Only the session owner or platform manager may attach its project context.'});
     }
     const session = getSession(req.params.sessionId);
+    if(session.environment){const disabled=await db.query('select id from project_environments where project_id=$1 and lower(name)=lower($2) and is_active=false',[projectId,String(session.environment)]);if(disabled.rowCount)return res.status(409).json({reply:'The selected environment is disabled for new transactions. Start testing from an active environment.'});}
     session.projectStoryId = storyId || null;
     session.contextSource = { type: sourceType, storyId: storyId || null, taskId: taskId || null };
     session.projectId = projectId;
