@@ -40,7 +40,9 @@
     if(label)label.textContent=isManual?'Business user story (manual)':'Testing context preview (loaded automatically)';
   }
   function selectedEnvironment(story){
-    return state.environments.find(e=>e.is_active!==false&&story?.environment_id&&String(e.id)===String(story.environment_id))
+    // The environment chosen when starting from Project details wins, then the story's, then the default.
+    return state.environments.find(e=>e.is_active!==false&&state.environmentId&&String(e.id)===String(state.environmentId))
+      ||state.environments.find(e=>e.is_active!==false&&story?.environment_id&&String(e.id)===String(story.environment_id))
       ||state.environments.find(e=>e.is_active!==false&&e.is_default)||state.environments.find(e=>e.is_active!==false)||null;
   }
   function useEnvironment(story){
@@ -49,7 +51,25 @@
     if($('targetUrl'))$('targetUrl').value=url;
     if($('environment'))$('environment').value=env?.name||'Test';
     if($('additionalPaths'))$('additionalPaths').value=clean(story?.page_paths);
+    if(env&&String(env.id)!==String(state.loginEnvironmentId)){state.loginEnvironmentId=env.id;applyEnvironmentLogin(env);}
     return url;
+  }
+  // Fills "Application login" and the test user from the environment's saved test login (project settings).
+  async function applyEnvironmentLogin(env){
+    const projectId=$('platformProject')?.value;
+    if(!projectId||!env?.id)return;
+    let login;
+    try{login=await request('/api/projects/'+encodeURIComponent(projectId)+'/environments/'+encodeURIComponent(env.id)+'/test-login');}
+    catch(error){status('Could not load the test login for '+(env.name||'this environment')+': '+error.message,true);return;}
+    if(String(state.loginEnvironmentId)!==String(env.id))return;
+    const select=document.getElementById('webAuthMode')||[...document.querySelectorAll('select')].find(s=>[...s.options].some(o=>/no\s+login\s+required/i.test(o.textContent||'')));
+    if(select){
+      const wanted=[...select.options].find(o=>login.loginRequired?!/no\s+login/i.test(o.textContent||''):/no\s+login/i.test(o.textContent||''));
+      if(wanted&&select.value!==wanted.value){select.value=wanted.value;select.dispatchEvent(new Event('change',{bubbles:true}));}
+    }
+    if(login.loginRequired&&typeof window.setTestNexusTestActors==='function'){
+      window.setTestNexusTestActors([{role:'Default User',username:login.username,password:login.password}]);
+    }
   }
   function selectRecordOptions(){
     const kind=$('testContextMode').value,select=$('testContextRecord'),wrap=$('testContextRecordWrap');
@@ -265,8 +285,8 @@
     state.handoff=null;
   }
   document.addEventListener('testnexus:projects-loaded',()=>{loadProjectContext();});
-  document.addEventListener('testnexus:project-changed',()=>{state.handoff=null;state.manualDraft='';loadProjectContext();});
-  document.addEventListener('testnexus:workspace-handoff',event=>{state.handoff=event.detail||null;state.savedHandoff=event.detail||null;if(state.project)applyHandoff();});
+  document.addEventListener('testnexus:project-changed',()=>{state.handoff=null;state.manualDraft='';state.environmentId=null;state.loginEnvironmentId=null;loadProjectContext();});
+  document.addEventListener('testnexus:workspace-handoff',event=>{state.handoff=event.detail||null;state.savedHandoff=event.detail||null;state.environmentId=event.detail?.environmentId||null;state.loginEnvironmentId=null;if(state.project)applyHandoff();});
   if(!setup()){
     const observer=new MutationObserver(()=>{if(setup()){observer.disconnect();if($('platformProject').options.length>1)loadProjectContext();}});
     observer.observe(document.body,{childList:true,subtree:true});

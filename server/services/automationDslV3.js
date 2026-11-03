@@ -476,32 +476,36 @@ function compileExpected(expected, discovery) {
   const pathMatch = text.match(/\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)+(?:\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*)?/);
   const path = pathMatch?.[0] || "";
   if (path) {
-  const pathname = path.split("?")[0] || "/";
-  const escapedPathname = pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  //this fucntion for url tight
+    const pathname = path.split("?")[0] || "/";
+    const escapedPathname = pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Strict URL rule: an exact path check only when the expectation explicitly says the path equals it.
 
-  if (/not taken|not navigate|does not navigate|not include|does not include/.test(lower)) {
-    return [{ operation: "ASSERT_URL_NOT_INCLUDES", fragment: path }];
+    if (/not taken|not navigate|does not navigate|not include|does not include/.test(lower)) {
+      return { assertions: [{ operation: "ASSERT_URL_NOT_INCLUDES", fragment: path }] };
+    }
+
+    const explicitlyExpectedPath =
+      new RegExp(
+        `(?:path|pathname)\\s+(?:must\\s+)?(?:be\\s+)?(?:equal|exactly equal|exact)\\s+["']?${escapedPathname}["']?`,
+        "i"
+      ).test(lower);
+
+    if (explicitlyExpectedPath) {
+      return { assertions: [{ operation: "ASSERT_PATH_EQUALS", path: pathname }] };
+    }
+
+    if (/path.*(?:contain|include)|pathname.*(?:contain|include)/.test(lower)) {
+      return { assertions: [{ operation: "ASSERT_PATH_INCLUDES", fragment: pathname }] };
+    }
+
+    if (discovery.paths.has(path) || discovery.paths.has(pathname)) {
+      return { assertions: [{ operation: "ASSERT_URL_INCLUDES", fragment: path }] };
+    }
   }
+  const hashValue = text.match(/(?:hash|fragment)\s+(?:is|equals?|exactly|contains?|includes?)\s+["'`]([^"'`]+)["'`]/i)?.[1];
+  if (hashValue) return { assertions: [{ operation: /contains?|includes?/.test(lower) ? "ASSERT_HASH_INCLUDES" : "ASSERT_HASH_EQUALS", hash: hashValue }] };
 
-  const explicitlyExpectedPath =
-    new RegExp(
-      `(?:path|pathname)\\s+(?:must\\s+)?(?:be\\s+)?(?:equal|exactly equal|exact)\\s+["']?${escapedPathname}["']?`,
-      "i"
-    ).test(lower);
-
-  if (explicitlyExpectedPath) {
-    return [{ operation: "ASSERT_PATH_EQUALS", path: pathname }];
-  }
-
-  if (/path.*(?:contain|include)|pathname.*(?:contain|include)/.test(lower)) {
-    return [{ operation: "ASSERT_PATH_INCLUDES", fragment: pathname }];
-  }
-
-  if (discovery.paths.has(path) || discovery.paths.has(pathname)) {
-    return [{ operation: "ASSERT_URL_INCLUDES", fragment: path }];
-  }
-}
+  return { narrative: text, capabilitySuggestion: capabilitySuggestionFor(text) };
 }
 
 function ensureGroundedStartPage(actions, discovery) {

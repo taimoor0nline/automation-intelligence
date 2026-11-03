@@ -84,6 +84,9 @@ app.use(sessionPersistence);
 app.use(requestContext.middleware);
 
 function sanitizePublicPayload(value) {
+  // Dates (e.g. created_at from PostgreSQL) must pass through as-is; rebuilding them as plain
+  // objects turned every date into {} and the UI showed "Invalid Date".
+  if (value instanceof Date) return value;
   if (Array.isArray(value)) return value.map(sanitizePublicPayload);
   if (value && typeof value === "object") {
     const out = {};

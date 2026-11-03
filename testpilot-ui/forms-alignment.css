@@ -12,3 +12,11 @@
 .field :is(input,select,textarea):focus-visible,.form-control:focus-visible,.form-select:focus-visible{outline-offset:1px}
 @media(min-width:768px){.two > .field > label,.filters > .field > label{min-height:19px}}
 @media(max-width:767px){.two,.platform-row{grid-template-columns:1fr}.filters{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}}
+/* Table filter bars (search, column, value, rows per page) stay compact on one row.
+   The full-width + 42px field rule above made them stack as three tall boxes. */
+.tn-table-filters .form-control,.tn-table-filters .form-select{width:auto;flex:0 0 auto;min-height:36px!important;height:36px;max-height:36px;padding-top:0;padding-bottom:0;font-size:13px!important}
+.tn-table-filters .tn-table-query{width:240px;flex:0 1 260px}
+.tn-table-filters .tn-column-filter{max-width:170px}
+.tn-table-footer .tn-page-size{width:auto;max-width:110px;min-height:34px!important;height:34px!important;max-height:34px;line-height:1.2;padding-top:0;padding-bottom:0;font-size:12px!important;color:#36547a}
+.tn-table-filters .tn-table-create{min-height:36px;height:36px;padding-top:0;padding-bottom:0;display:inline-flex;align-items:center}
+@media(max-width:650px){.tn-table-filters .tn-table-query{width:100%;flex:1 1 100%}}

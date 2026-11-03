@@ -13,7 +13,7 @@
   const n=$('notice');if(!n)return;
   n.textContent=message;n.className='alert alert-danger';n.scrollIntoView({block:'nearest'});
  }
- async function start(projectId,sourceType,recordId){
+ async function start(projectId,sourceType,recordId,environmentId){
   if(!projectId)throw Error('Open a project before starting tests.');
   const detail=await api('/api/projects/'+encodeURIComponent(projectId)+'/workspace');
   if(!['PROJECT_MANAGER','QA'].includes(detail.projectRole))throw Error('QA or project manager access is required to start testing.');
@@ -27,12 +27,14 @@
    record=task.task;
    if(!record||String(record.project_id)!==String(projectId)||record.deleted_at)throw Error('The selected task is not available in this project.');
   }
-  const env=(sourceType==='story'&&(detail.environments||[]).find(x=>x.is_active!==false&&String(x.id)===String(record?.environment_id)))
+  // An environment chosen in the project's "Start testing" box wins; otherwise story → default → first active.
+  const env=(environmentId&&(detail.environments||[]).find(x=>x.is_active!==false&&String(x.id)===String(environmentId)))
+   ||(sourceType==='story'&&(detail.environments||[]).find(x=>x.is_active!==false&&String(x.id)===String(record?.environment_id)))
    ||(detail.environments||[]).find(x=>x.is_active!==false&&x.is_default)||(detail.environments||[]).find(x=>x.is_active!==false);
   if((detail.environments||[]).length&&!env)throw Error('All project environments are disabled. Enable an environment before starting new testing.');
   const targetUrl=env?.base_url||detail.project?.target_url||'';
   if(!targetUrl)throw Error('Set the project application URL or default environment in Project Details before starting testing.');
-  const handoff={projectId,sourceType,targetUrl,environmentName:env?.name||'Test'};
+  const handoff={projectId,sourceType,targetUrl,environmentName:env?.name||'Test',environmentId:env?.id||null};
   if(sourceType==='story')handoff.storyId=record.id;
   if(sourceType==='task')handoff.taskId=record.id;
   sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify(handoff));
@@ -48,6 +50,6 @@
   const projectId=sourceType==='project'?(button.dataset.startProject||$('projectPicker')?.value):$('projectPicker')?.value;
   const recordId=sourceType==='story'?button.dataset.startStory:sourceType==='task'?button.dataset.startTask:null;
   button.disabled=true;
-  start(projectId,sourceType,recordId).catch(err=>{error(err.message);button.disabled=false;});
+  start(projectId,sourceType,recordId,button.dataset.environmentId||null).catch(err=>{error(err.message);button.disabled=false;});
  },true);
 })();

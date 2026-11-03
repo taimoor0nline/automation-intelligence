@@ -127,6 +127,9 @@
       const username = row.querySelector('[data-actor-username]')?.value || '';
       const password = row.querySelector('[data-actor-password]')?.value || '';
       if (!role && !username && !password) continue;
+      // The automatically added "Default User" row with no username/password is an unused placeholder,
+      // not a half-filled user, so it must not block generation.
+      if (!username && !password && role === 'Default User') continue;
       if (validate && (!role || !username || !password)) throw new Error(`Test user ${index + 1} is incomplete. Role, username and password are all required.`);
       if (!role || !username || !password) continue;
       let actorRef = actorSlug(role, index);

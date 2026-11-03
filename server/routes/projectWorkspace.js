@@ -7,6 +7,7 @@ const persistence=require('../services/persistenceService');
 const fs=require('fs');
 const path=require('path');
 const {ROOT:ARTIFACT_ROOT}=require('../services/retainedExecutionEvidence');
+const vault=require('../services/credentialVault');
 const router=express.Router();
 const MAX_FILE=5*1024*1024;
 const TYPES=new Set(['application/pdf','text/plain','text/csv','image/png','image/jpeg','image/webp','application/zip',
@@ -50,7 +51,7 @@ router.get('/api/projects/:projectId/workspace',requireAuth,async(req,res)=>{
  try {
  const ctx=await access(req,req.params.projectId);
  const [envs,stories,docs,team,runs]=await Promise.all([
- db.query('select id,name,base_url,stage_type,is_default,is_active,disabled_at,created_at,updated_at from project_environments where project_id=$1 order by is_default desc,name',[req.params.projectId]),
+ db.query('select id,name,base_url,stage_type,is_default,is_active,disabled_at,created_at,updated_at,login_required from project_environments where project_id=$1 order by is_default desc,name',[req.params.projectId]),
  db.query('select s.*,u.display_name created_by_name from project_stories s left join users u on u.id=s.created_by where s.project_id=$1 order by s.updated_at desc limit 200',[req.params.projectId]),
  db.query('select id,filename,mime_type,category,file_size,version,uploaded_by,created_at from project_documents where project_id=$1 order by created_at desc limit 200',[req.params.projectId]),
  db.query('select pm.user_id,pm.project_role,u.display_name,u.email from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and u.is_active=true order by u.display_name',[req.params.projectId]),
@@ -97,14 +98,43 @@ async function auditEnv(client,projectId,envId,user,eventType,extra={}){
  await client.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,$3,$4::jsonb)",
   [projectId,user,eventType,JSON.stringify({environmentId:envId,...extra})]);
 }
+// Test login of the application under test, stored per environment. The password is encrypted and is
+// never returned by list/save responses; only QA / project managers can load it to start testing.
+function loginFields(body={},previous=null){
+ const loginRequired=Object.hasOwn(body,'loginRequired')?Boolean(body.loginRequired):Boolean(previous?.login_required);
+ const username=Object.hasOwn(body,'testUsername')?s(body.testUsername,200):s(previous?.test_username,200);
+ const newPassword=typeof body.testPassword==='string'&&body.testPassword.length?String(body.testPassword).slice(0,500):'';
+ const passwordEncrypted=body.clearTestPassword===true?null:newPassword?vault.encrypt(newPassword):(previous?.test_password_encrypted||null);
+ if(loginRequired&&!username)throw fail(400,'Test username is required when application login is required.');
+ if(loginRequired&&!passwordEncrypted)throw fail(400,'Test password is required when application login is required.');
+ return {loginRequired,username:username||null,passwordEncrypted};
+}
+function publicEnv(env){
+ if(!env)return env;
+ const {test_password_encrypted,...rest}=env;
+ return {...rest,has_test_password:Boolean(test_password_encrypted)};
+}
+router.get('/api/projects/:projectId/environments/:environmentId/test-login',requireAuth,async(req,res)=>{
+ try{
+  const ctx=await access(req,req.params.projectId);
+  if(!['PROJECT_MANAGER','QA'].includes(ctx.role))throw fail(403,'QA or project manager permission required.');
+  if(!id(req.params.environmentId))throw fail(400,'Invalid environment ID.');
+  const found=await db.query('select login_required,test_username,test_password_encrypted from project_environments where id=$1 and project_id=$2',[req.params.environmentId,req.params.projectId]);
+  if(!found.rowCount)throw fail(404,'Environment not found.');
+  const env=found.rows[0];
+  let password='';
+  try{password=vault.decrypt(env.test_password_encrypted);}catch{throw fail(409,'The saved test password cannot be read. Re-enter it in the environment settings.');}
+  res.json({ok:true,loginRequired:Boolean(env.login_required),username:env.test_username||'',password});
+ }catch(e){respond(res,e);}
+});
 router.get('/api/projects/:projectId/environments',requireAuth,async(req,res)=>{
  try{
   const ctx=await access(req,req.params.projectId);
   const environments=await db.query('select * from project_environments where project_id=$1 order by is_active desc,is_default desc,name',[req.params.projectId]);
   const list=await Promise.all(environments.rows.map(async env=>{
    const usage=await usageForEnvironment(db,req.params.projectId,env);
-   const {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at}=env;
-   return {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,usage,canDelete:usage.total===0};
+   const {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,login_required,test_username,test_password_encrypted}=env;
+   return {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,login_required:Boolean(login_required),test_username:test_username||'',has_test_password:Boolean(test_password_encrypted),usage,canDelete:usage.total===0};
   }));
   res.json({ok:true,environments:list,canManage:ctx.role==='PROJECT_MANAGER'});
  }catch(e){respond(res,e);}
@@ -114,14 +144,15 @@ router.post('/api/projects/:projectId/environments',requireAuth,async(req,res)=>
   const ctx=await access(req,req.params.projectId);manager(ctx.role);
   const {name,base,stage}=envFields(req.body);
   const def=Boolean(req.body?.isDefault);
+  const login=loginFields(req.body);
   const inserted=await db.withTransaction(async client=>{
    if(def)await client.query('update project_environments set is_default=false where project_id=$1',[req.params.projectId]);
-   const result=await client.query('insert into project_environments(project_id,name,base_url,stage_type,is_default,is_active,created_by) values($1,$2,$3,$4,$5,true,$6) returning *',
-    [req.params.projectId,name,base,stage,def,req.user.sub]);
+   const result=await client.query('insert into project_environments(project_id,name,base_url,stage_type,is_default,is_active,created_by,login_required,test_username,test_password_encrypted) values($1,$2,$3,$4,$5,true,$6,$7,$8,$9) returning *',
+    [req.params.projectId,name,base,stage,def,req.user.sub,login.loginRequired,login.username,login.passwordEncrypted]);
    await auditEnv(client,req.params.projectId,result.rows[0].id,req.user.sub,'ENVIRONMENT_CREATED',{name});
    return result.rows[0];
   });
-  res.status(201).json({ok:true,environment:inserted});
+  res.status(201).json({ok:true,environment:publicEnv(inserted)});
  }catch(e){if(e.code==='23505')return respond(res,fail(409,'An environment with this name already exists.'));respond(res,e);}
 });
 router.patch('/api/projects/:projectId/environments/:environmentId',requireAuth,async(req,res)=>{
@@ -140,16 +171,18 @@ router.patch('/api/projects/:projectId/environments/:environmentId',requireAuth,
    if(typeof setDefault!=='boolean')throw fail(400,'isDefault must be a boolean.');
    if(!isActive&&setDefault&&Object.hasOwn(req.body||{},'isDefault')&&req.body.isDefault)throw fail(400,'Disabled environment cannot be default.');
    const def=Boolean(isActive&&setDefault);
+   const login=loginFields(req.body,previous);
    if(def)await client.query('update project_environments set is_default=false where project_id=$1 and id<>$2',[req.params.projectId,envId]);
    const saved=await client.query(`update project_environments set name=$1,base_url=$2,stage_type=$3,is_default=$4,is_active=$5,
      disabled_at=case when $5=false then coalesce(disabled_at,now()) else null end,
-     disabled_by=case when $5=false then coalesce(disabled_by,$6::uuid) else null end,updated_at=now()
-     where id=$7 and project_id=$8 returning *`,[name,base,stage,def,isActive,req.user.sub,envId,req.params.projectId]);
+     disabled_by=case when $5=false then coalesce(disabled_by,$6::uuid) else null end,updated_at=now(),
+     login_required=$9,test_username=$10,test_password_encrypted=$11
+     where id=$7 and project_id=$8 returning *`,[name,base,stage,def,isActive,req.user.sub,envId,req.params.projectId,login.loginRequired,login.username,login.passwordEncrypted]);
    await auditEnv(client,req.params.projectId,envId,req.user.sub,previous.is_active===true&&isActive===false?'ENVIRONMENT_DISABLED':previous.is_active===false&&isActive===true?'ENVIRONMENT_ENABLED':'ENVIRONMENT_UPDATED',
     {oldName:previous.name,newName:name,previousDefault:previous.is_default,isDefault:def});
    return saved.rows[0];
   });
-  res.json({ok:true,environment:updated});
+  res.json({ok:true,environment:publicEnv(updated)});
  }catch(e){if(e.code==='23505')return respond(res,fail(409,'An environment with this name already exists.'));respond(res,e);}
 });
 router.delete('/api/projects/:projectId/environments/:environmentId',requireAuth,async(req,res)=>{

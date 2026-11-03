@@ -24,7 +24,7 @@
  <div id="notice" class="alert alert-warning d-none" role="alert" aria-live="polite"></div><div id="workspaceLoading" class="tn-note mb-3 d-none" role="status" aria-live="polite">Loading project workspace…</div>
  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
   <div><div class="tn-eyebrow" id="breadcrumb">PROJECT WORKSPACE</div><h1 class="tn-title" id="pageTitle">Project overview</h1><div class="tn-muted" id="pageSubtitle">Scope, documents, stories, assignments and execution evidence</div></div>
-  <div class="tn-page-actions"><button type="button" data-view="projects" class="btn btn-outline-secondary tn-btn" id="backToProjects">All projects</button><button type="button" data-start-project class="btn btn-outline-primary tn-btn">Start Testing</button></div>
+  <div class="tn-page-actions"><button type="button" data-view="projects" class="btn btn-outline-secondary tn-btn" id="backToProjects">All projects</button><button type="button" data-start-project class="btn btn-primary tn-btn">Start Testing</button></div>
  </div>
  <div id="projectDetailTabs" class="tn-detail-tabs d-none mb-3" role="tablist" aria-label="Project detail sections">
   <button type="button" role="tab" data-view="details" aria-controls="view-details">Context & scope</button>
@@ -40,20 +40,29 @@
   <div class="tn-card"><div class="tn-card-head"><h2>Recent projects <span id="homeProjectsCount" class="tn-badge-counter">0</span></h2><span class="tn-muted">Your accessible workspaces</span></div><div id="homeProjects" class="tn-home-list"></div></div>
  </section>
  <section id="view-details" class="tn-view" role="tabpanel">
-  <div id="overviewHealth" class="tn-health-strip mb-3" aria-live="polite"></div>
-  <div class="row g-3 mb-3">
-   <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statStories">—</b><span class="label">Business stories</span></div></div>
-   <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statRuns">—</b><span class="label">Test runs</span></div></div>
-   <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statTasks">—</b><span class="label">Active tasks</span></div></div>
-   <div class="col-sm-6 col-xl-3"><div class="tn-card tn-stat"><b id="statDocs">—</b><span class="label">Project documents</span></div></div>
+  <div id="overviewHealth" class="tn-health-strip d-none" aria-live="polite"></div>
+  <div class="tn-kpis">
+   <div class="tn-kpi"><div class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-green" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Pass rate</div><b id="statRate">—</b></div>
+   <div class="tn-kpi"><div class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-blue" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>Stories</div><b id="statStories">—</b></div>
+   <div class="tn-kpi"><div class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-violet" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20"/></svg></span>Test runs</div><b id="statRuns">—</b></div>
+   <div class="tn-kpi"><div class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-orange" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="13" y2="13"/></svg></span>Active tasks</div><b id="statTasks">—</b></div>
+   <div class="tn-kpi"><div class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-amber" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg></span>Ready for retest</div><b id="statRetest">—</b></div>
+   <div class="tn-kpi"><div class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-slate" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>Documents</div><b id="statDocs">—</b></div>
   </div>
-  <div class="tn-card"><div class="tn-card-head"><div><h2 id="profileName">Project overview</h2><span class="tn-muted" id="profileReference">Reference No. —</span></div><button id="editProfile" class="btn btn-outline-secondary tn-btn">Edit project details</button></div>
-   <div class="tn-card-body"><div class="row g-3">
-    <div class="col-md-6"><h3>Objectives and scope</h3><div id="profileScope" class="tn-info">—</div></div>
-    <div class="col-md-6"><h3>Acceptance and exclusions</h3><div id="profileAcceptance" class="tn-info">—</div></div>
-    <div class="col-md-6"><h3>Business rules</h3><div id="profileRules" class="tn-info">—</div></div>
-    <div class="col-md-6"><h3>Project information</h3><div id="profileMeta" class="tn-info">—</div></div>
-   </div></div></div>
+  <div class="tn-card tn-start-card" id="projectStartCard"><span class="tn-start-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20"/></svg></span><div class="tn-start-copy"><h2>Start testing this project</h2><span class="tn-muted">Opens the test page with this project's URL, environment and story filled in.</span></div><label class="tn-start-field">Environment<select id="startEnvironment" class="form-select"></select></label><label class="tn-start-field">Story<select id="startStory" class="form-select"><option value="">Whole project scope</option></select></label><button type="button" id="startProjectTesting" class="btn btn-primary tn-btn" data-start-project>Start Testing</button></div>
+  <div class="tn-details-grid">
+   <div class="tn-card"><div class="tn-card-head"><div><h2>Scope &amp; requirements</h2><span class="d-none" id="profileName"></span><span class="d-none" id="profileReference"></span></div><button id="editProfile" class="btn btn-outline-secondary tn-btn">Edit project details</button></div>
+    <div class="tn-card-body tn-scope-grid">
+     <div><div id="profileScope" class="tn-info">—</div></div>
+     <div><div id="profileAcceptance" class="tn-info">—</div></div>
+     <div class="tn-scope-full"><div class="tn-info-label">Business rules</div><div id="profileRules" class="tn-info">—</div></div>
+    </div></div>
+   <div class="tn-details-side">
+    <div class="tn-card"><div class="tn-card-head"><h2>Project information</h2></div><div class="tn-card-body" id="profileMeta">—</div></div>
+    <div class="tn-card"><div class="tn-card-head"><h2>Environments</h2><a id="detailEnvManage" class="tn-card-link" href="/environment-config.html">Manage</a></div><div class="tn-card-body" id="detailEnvironments"><div class="tn-muted">—</div></div></div>
+    <div class="tn-card"><div class="tn-card-head"><h2>Team</h2><button type="button" class="tn-card-link" data-view="team">Manage</button></div><div class="tn-card-body" id="detailTeam"><div class="tn-muted">—</div></div></div>
+   </div>
+  </div>
   <div class="d-none"><div id="environmentList"></div><form id="environmentForm"><div class="row g-2"><div class="col-5"><input class="form-control" name="name" placeholder="QA" required aria-label="Environment name"></div><div class="col-7"><input class="form-control" name="baseUrl" placeholder="https://app.example.com" type="url" required aria-label="Environment URL"></div></div>
      <div class="d-flex gap-2 align-items-center mt-2"><select class="form-select" name="stageType" aria-label="Environment type"><option>QA</option><option>DEV</option><option>STAGING</option><option>UAT</option><option>PRODUCTION</option></select><label class="tn-muted text-nowrap"><input name="isDefault" type="checkbox" aria-label="Default project environment"> Default</label><button class="btn btn-outline-secondary tn-btn" type="submit">Add</button></div></form><div id="workflowStatus"></div><form id="workflowForm" class="row g-3 align-items-end">
     <div class="col-lg-4"><label class="d-flex align-items-center gap-2"><input type="checkbox" name="autoCreateFailedTasks" aria-label="Automatically create tasks for failed tests"> Auto-create tasks for failed tests</label><div class="tn-muted mt-1">Deduplicate active failures per project + session + case</div></div>

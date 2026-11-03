@@ -26,7 +26,7 @@
     try{handoff=JSON.parse(source||'null');}catch{}
     if(!handoff||String(handoff.projectId)!==String(projectId)){location.replace('/workspace.html#projects');return;}
     sessionStorage.removeItem('testnexus:runnerHandoff');
-    sessionStorage.setItem('testnexus:runnerSelection',JSON.stringify({projectId,storyId:handoff.storyId||null,taskId:handoff.taskId||null,sourceType:handoff.sourceType||(handoff.storyId?'story':handoff.taskId?'task':'project')}));
+    sessionStorage.setItem('testnexus:runnerSelection',JSON.stringify({projectId,storyId:handoff.storyId||null,taskId:handoff.taskId||null,environmentId:handoff.environmentId||null,sourceType:handoff.sourceType||(handoff.storyId?'story':handoff.taskId?'task':'project')}));
     sessionStorage.setItem('testnexus:runnerOrigin','project');
     document.body.classList.add('project-runner');
     projectStoryId=String(handoff.storyId||'');

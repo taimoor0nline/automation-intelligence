@@ -32,7 +32,7 @@ function withDemoDelay(chain) {
 // which fails with "the subject is no longer attached to the DOM". Before the first interaction on
 // each page we wait until it is loaded, has stopped changing, and the browser is idle.
 const SETTLE_QUIET_MS = 300;   // no element added/removed for this long = settled
-const SETTLE_MAX_MS = 6000;    // never wait longer than this per page
+const SETTLE_MAX_MS = 2500;    // never wait longer than this per page (stays under Cypress's 4s step timeout)
 
 function waitUntilSettled(win) {
   return new Cypress.Promise((resolve) => {
@@ -45,7 +45,7 @@ function waitUntilSettled(win) {
     }
     const started = Date.now();
     const finish = () => { win.__tnSettled = true; try { win.__tnMutationObserver?.disconnect(); } catch {} resolve(); };
-    const idle = (fn) => (typeof win.requestIdleCallback === "function" ? win.requestIdleCallback(fn, { timeout: 1000 }) : win.setTimeout(fn, 50));
+    const idle = (fn) => (typeof win.requestIdleCallback === "function" ? win.requestIdleCallback(fn, { timeout: 300 }) : win.setTimeout(fn, 50));
     const check = () => {
       const timedOut = Date.now() - started >= SETTLE_MAX_MS;
       const loaded = doc?.readyState === "complete";
@@ -58,9 +58,6 @@ function waitUntilSettled(win) {
   });
 }
 
-function settlePage() {
-  return cy.window({ log: false }).then({ timeout: SETTLE_MAX_MS + 5000 }, (win) => waitUntilSettled(win));
-}
 
 // Rebuild a lookup for an element the page replaced: the original query if Cypress kept it, else id/name.
 function selectorForDetached(subject) {
@@ -79,15 +76,17 @@ function isDetached(subject) {
   return Boolean(el && el.nodeType === 1 && !el.isConnected);
 }
 
-// Wait for the page to settle, then re-find the element if the page swapped it out meanwhile.
+// If the page swapped the element out, re-find it right now (synchronously, no extra Cypress command).
+// Only a single, unambiguous match is used; otherwise Cypress reports its normal error.
 function freshSubject(subject) {
-  return settlePage().then(() => {
-    if (!isDetached(subject)) return subject;
-    const selector = selectorForDetached(subject);
-    if (!selector) return subject; // nothing safe to re-find by; let Cypress report the real error
-    Cypress.log({ name: "self-heal", message: `re-found ${selector} after the page re-rendered it` });
-    return cy.get(selector, { log: false });
-  });
+  if (!isDetached(subject)) return subject;
+  const selector = selectorForDetached(subject);
+  if (!selector) return subject;
+  const doc = (typeof cy.state === "function" && cy.state("document")) || subject?.[0]?.ownerDocument;
+  const found = doc ? Cypress.$(selector, doc) : null;
+  if (!found || found.length !== 1) return subject;
+  Cypress.log({ name: "self-heal", message: `re-found ${selector} after the page re-rendered it` });
+  return found;
 }
 
 function safeEvidenceName(title) {
@@ -287,13 +286,13 @@ Cypress.Commands.add("pressNativeKey", (key) => {
 
 ["click", "type", "select", "check", "uncheck", "clear"].forEach((commandName) => {
   Cypress.Commands.overwrite(commandName, (originalFn, subject, ...args) =>
-    freshSubject(subject).then((fresh) => withDemoDelay(originalFn(fresh, ...args))));
+    withDemoDelay(originalFn(freshSubject(subject), ...args)));
 });
 // After opening or reloading a page, wait until it has settled before the next step.
+// The wait is plain browser code inside the visit/reload promise: issuing Cypress commands here
+// (e.g. cy.window()) would deadlock, because they can only start after visit itself has finished.
 Cypress.Commands.overwrite("visit", (originalFn, url, options) =>
-  withDemoDelay(originalFn(url, options)).then((win) => settlePage().then(() => win)));
-Cypress.Commands.overwrite("reload", (originalFn, ...args) =>
-  originalFn(...args).then((win) => settlePage().then(() => win)));
+  withDemoDelay(originalFn(url, options)).then((win) => waitUntilSettled(win).then(() => win)));
 
 beforeEach(function () {
   currentRuntimeItem = null;

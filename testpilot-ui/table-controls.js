@@ -50,8 +50,9 @@ function initTable(table){
  for(const [button,title,symbol] of [[prev,'Previous page','‹'],[next,'Next page','›']]){
   button.type='button';button.textContent=symbol;button.title=title;button.setAttribute('aria-label',title);
  }
- nav.append(prev,pageNo,next);footer.append(info,nav);
- const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(search,filter,value,size);
+ // Rows-per-page belongs with the pagination in the footer, not with the search filters.
+ nav.append(size,prev,pageNo,next);footer.append(info,nav);
+ const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(search,filter,value);
  if(key==='tasksBody'){
   const status=document.getElementById('taskStatusFilter'),hierarchy=document.getElementById('taskHierarchy')?.closest('label');
   if(status){status.classList.add('tn-table-status');textFilters.append(status);}

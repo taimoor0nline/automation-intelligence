@@ -122,6 +122,8 @@ function extendedAssertionText(assertion) {
   return null;
 }
 
+const SELF_DESCRIBING_INPUT_TYPES = new Set(['email', 'password', 'tel', 'url', 'search', 'date', 'datetime-local', 'month', 'week', 'time', 'color']);
+
 // If the AI picked a field from another page (e.g. the /forgot-password email field while the
 // browser is on /login), swap it for the matching field on the page the browser is actually on.
 // Only swaps when exactly one clear match exists; otherwise the validator still reports it.
@@ -143,6 +145,10 @@ function realignPageContext(ir, registry = {}) {
     const score = (e) => { const t = sig(e); return (s.name && t.name === s.name ? 4 : 0) + (s.auto && t.auto === s.auto ? 2 : 0) + (s.label && t.label === s.label ? 2 : 0) + (s.role && t.role === s.role ? 1 : 0); };
     const ranked = candidates.map((e) => [score(e), e]).sort((a, b) => b[0] - a[0]);
     if (ranked.length > 1 && ranked[0][0] === ranked[1][0]) return null; // ambiguous: leave it for the validator to report
+    // A generic field (plain text box, textarea, select, button…) says nothing about its meaning by type
+    // alone, so it is only swapped when its name, autocomplete or label also matches (score >= 2).
+    // Self-describing input types (email, password, tel…) are safe to match by type.
+    if (!SELF_DESCRIBING_INPUT_TYPES.has(s.type) && ranked[0][0] < 2) return null;
     return ranked[0][1];
   }
   let currentPath = null;

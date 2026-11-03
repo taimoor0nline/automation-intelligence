@@ -225,7 +225,7 @@ const LOCATION_ASSERTION_OPERATIONS = new Set([
   'ASSERT_HASH_EQUALS','ASSERT_HASH_INCLUDES','ASSERT_ORIGIN_EQUALS','ASSERT_HOST_EQUALS','ASSERT_PROTOCOL_EQUALS',
 ]);
 
-function normalizeNavigationAssertionShapes(assertions = []) {
+function normalizeNavigationAssertionShapes(assertions = [], knownPaths = null) {
   const normalized = [];
   const changes = [];
   for (const source of assertions || []) {
@@ -233,19 +233,29 @@ function normalizeNavigationAssertionShapes(assertions = []) {
     const operation = String(assertion.operation || '').trim().toUpperCase();
     const path = clean(assertion.path, 1200);
     const url = clean(assertion.url ?? assertion.value, 1500);
-    // cy.url() returns the full URL, so URL-equality with only a path ("/login") can never pass.
-    // Both shapes (path in "path" or in "url") mean "pathname equals". Paths with ?query/#hash are left as-is.
-    const urlIsPlainPath = url.startsWith('/') && !url.startsWith('//') && !/[?#]/.test(url);
-    if (operation === 'ASSERT_URL_EQUALS' && ((!url && path.startsWith('/')) || urlIsPlainPath)) {
-      const normalizedPath = url ? url : path;
+    if (operation === 'ASSERT_URL_EQUALS' && !url && path.startsWith('/')) {
       delete assertion.url;
       delete assertion.value;
       assertion.operation = 'ASSERT_PATH_EQUALS';
-      assertion.path = normalizedPath;
+      assertion.path = path;
       changes.push({
         from: 'ASSERT_URL_EQUALS',
         to: 'ASSERT_PATH_EQUALS',
-        path: normalizedPath,
+        path,
+      });
+    } else if (operation === 'ASSERT_URL_EQUALS' && url.startsWith('/') && !url.startsWith('//') && !/[?#]/.test(url)
+      && (!knownPaths || knownPaths.has(url))) {
+      // cy.url() returns the full URL, so URL-equality with only a discovered path ("/login") can never
+      // pass; it means "pathname equals". Undiscovered paths (e.g. a post-login /dashboard) are left
+      // unchanged so the case is still generated (and flagged for review) instead of being rejected.
+      delete assertion.url;
+      delete assertion.value;
+      assertion.operation = 'ASSERT_PATH_EQUALS';
+      assertion.path = url;
+      changes.push({
+        from: 'ASSERT_URL_EQUALS',
+        to: 'ASSERT_PATH_EQUALS',
+        path: url,
       });
     }
     normalized.push(assertion);
@@ -326,7 +336,8 @@ function normalizeBehavioralIr(ir, { registry = {}, plannedUnit = null, story = 
   const objective = clean(plannedUnit?.objective || plannedUnit?.rationale || ir?.objective, 2000);
   const timingText = `${objective} ${clean(story, 6000)}`;
 
-  const shapeNormalization = normalizeNavigationAssertionShapes(assertions);
+  const knownPaths = new Set((registry?.pages || []).map((page) => clean(page?.path, 1200)).filter(Boolean));
+  const shapeNormalization = normalizeNavigationAssertionShapes(assertions, knownPaths.size ? knownPaths : null);
   assertions = shapeNormalization.assertions;
   if (shapeNormalization.changes.length) {
     notes.push({

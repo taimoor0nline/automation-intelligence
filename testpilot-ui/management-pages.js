@@ -172,6 +172,9 @@ async function initEnvironmentForm(){
   form.elements.namedItem('stageType').value=env.stage_type;
   $('mgEnvDefault').checked=env.is_default;
   $('mgUsage').textContent=(env.usage?.total||0)+' historical reference(s)';
+  $('mgEnvLoginRequired').checked=Boolean(env.login_required);
+  $('mgEnvTestUser').value=env.test_username||'';
+  $('mgEnvPasswordState').textContent=env.has_test_password?'Password saved ✓ — leave blank to keep it.':'No password saved yet.';
  }
  if(mode==='view'||mode==='delete'||!canManage){
   form.querySelectorAll('input,select').forEach(n=>n.disabled=true);
@@ -201,7 +204,10 @@ async function initEnvironmentForm(){
   event.preventDefault();clearFeedback();lock(null,true);
   try{
    const v=Object.fromEntries(new FormData(form).entries());
-   const body={name:v.name,baseUrl:v.baseUrl,stageType:v.stageType,isDefault:$('mgEnvDefault').checked};
+   const body={name:v.name,baseUrl:v.baseUrl,stageType:v.stageType,isDefault:$('mgEnvDefault').checked,
+    loginRequired:$('mgEnvLoginRequired').checked,testUsername:$('mgEnvTestUser').value.trim()};
+   // An empty password field keeps the saved password; only a typed value replaces it.
+   if($('mgEnvTestPassword').value)body.testPassword=$('mgEnvTestPassword').value;
    await api('/api/projects/'+encodeURIComponent(projectId)+'/environments'+(env?'/'+encodeURIComponent(env.id):''),{method:env?'PATCH':'POST',body:JSON.stringify(body)});
    location.assign(projectUrl('/environment-config.html'));
   }catch(err){feedback(err.message);lock(null,false);}
