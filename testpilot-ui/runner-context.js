@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const state={ready:false,project:null,stories:[],tasks:[],environments:[],mode:'manual',manualDraft:'',serial:0,handoff:null};
+  const state={ready:false,project:null,stories:[],tasks:[],environments:[],mode:'manual',manualDraft:'',serial:0,handoff:null,savedHandoff:null};
   const clean=value=>String(value==null?'':value).trim();
   const segment=(title,value)=>clean(value)?title+'\n'+clean(value):'';
   const join=parts=>parts.filter(Boolean).join('\n\n').slice(0,11000);
@@ -74,6 +74,9 @@
     state.mode=mode;
     selectRecordOptions();
     const item=selectedRecord();
+    if($('testContextProjectName'))$('testContextProjectName').textContent=project?.name||'No project loaded';
+    if($('testContextSourceName'))$('testContextSourceName').textContent=mode==='story'?(item?'Story · '+item.title:'Story not found'):mode==='task'?(item?'Task · '+item.title:'Task not found'):mode==='manual'?'Custom story':'Project requirements';
+    if($('testContextManualToggle'))$('testContextManualToggle').textContent=mode==='manual'?'Use selected context':'Write a custom story';
     const base=contextFields(project||{});
     const url=useEnvironment(mode==='story'?item:null);
     let text='';
@@ -116,22 +119,35 @@
     const box=document.createElement('section');
     box.className='testing-context-card';
     box.setAttribute('aria-label','Testing source');
-    box.innerHTML='<strong class="testing-context-heading">Select testing context</strong>'+
-      '<div class="testing-context-grid"><div id="testContextProjectSlot"></div>'+
-      '<div><label for="testContextMode">Test from</label><select id="testContextMode" class="testing-context-select">'+
+    box.innerHTML='<strong class="testing-context-heading">Selected testing context</strong>'+
+      '<div class="testing-context-grid"><div><label>Project</label><div class="testing-context-fixed" id="testContextProjectName">Loading…</div></div>'+
+      '<div><label>Source</label><div class="testing-context-fixed" id="testContextSourceName">Loading…</div></div></div>'+
+      '<div hidden aria-hidden="true"><select id="testContextMode">'+
       '<option value="project">Project requirements</option><option value="story">Existing story</option>'+
-      '<option value="task">Existing task</option><option value="manual">Write manually</option></select></div></div>'+
-      '<div id="testContextRecordWrap" hidden><label for="testContextRecord">Choose an item</label><select id="testContextRecord" class="testing-context-select"></select></div>'+
-      '<p id="testContextStatus" class="testing-context-note" role="status" aria-live="polite">Select a project to load its context.</p>';
+      '<option value="task">Existing task</option><option value="manual">Write manually</option></select>'+
+      '<div id="testContextRecordWrap"><select id="testContextRecord"></select></div></div>'+
+      '<div class="testing-context-actions"><a href="/workspace.html#projects">Change project or task</a>'+
+      '<button id="testContextManualToggle" type="button" class="testing-context-link">Write a custom story</button></div>'+
+      '<p id="testContextStatus" class="testing-context-note" role="status" aria-live="polite">Loading project context…</p>';
     const projectField=projectSelect.parentElement;
-    projectField.classList.add('testing-project-field');
-    const priorLabel=projectField.querySelector('.platform-label');
-    if(priorLabel){const label=document.createElement('label');label.htmlFor='platformProject';label.textContent='Project';priorLabel.replaceWith(label);}
-    box.querySelector('#testContextProjectSlot').appendChild(projectField);
+    projectField.hidden=true;
+    projectField.style.display='none';
     const aside=story.closest('aside');
     if(!aside)return false;
     aside.querySelector('.section-head')?.after(box);
     $('testContextMode').addEventListener('change',modeChange);
+    $('testContextManualToggle').addEventListener('click',()=>{
+      if(state.mode==='manual'){
+        const source=state.savedHandoff||{};
+        const mode=source.storyId?'story':source.taskId?'task':'project';
+        $('testContextMode').value=mode;
+        selectRecordOptions();
+        if(mode!=='project')$('testContextRecord').value=clean(source.storyId||source.taskId);
+      }else{
+        $('testContextMode').value='manual';
+      }
+      renderSelection();
+    });
     $('testContextRecord').addEventListener('change',renderSelection);
     story.addEventListener('input',()=>{if($('testContextMode').value==='manual')state.manualDraft=story.value;});
     const generate=$('generateBtn');
@@ -140,12 +156,12 @@
       const hasProject=!!$('platformProject').value;
       const item=selectedRecord();
       let error='';
-      if(mode!=='manual'&&!hasProject)error='Select a project before generating test cases.';
-      else if(mode!=='manual'&&!state.project)error='Project context could not be loaded. Refresh the project selection.';
+      if(!hasProject)error='Open a project from Projects before generating test cases.';
+      else if(mode!=='manual'&&!state.project)error='Project context could not be loaded. Return to the project list and start again.';
       else if((mode==='story'||mode==='task')&&!item)error='Select an existing '+mode+' before generating.';
       else if(mode==='project'&&!contextFields(state.project||{}).length)error='Add project objectives, scope or acceptance criteria before generating from project context.';
       else if(mode!=='manual'&&!clean($('targetUrl')?.value))error='Set a project application URL or default environment before generating.';
-      else if(source?.projectId!==$('platformProject').value)error='The testing context has changed. Select your source again.';
+      else if(source?.projectId!==$('platformProject').value)error='The testing context has changed. Return to the project and reopen testing.';
       if(error){event.preventDefault();event.stopImmediatePropagation();status(error,true);const errorBox=$('errorBox');if(errorBox){errorBox.textContent=error;errorBox.classList.add('show');}}
     },true);
     const css=document.createElement('style');
@@ -161,6 +177,10 @@
       '#story[readonly]{background:#f6f8fc;color:#334155;cursor:default}'+
       '#platformSignedIn .platform-row{grid-template-columns:1fr}'+
       '@media(max-width:560px){.testing-context-grid{grid-template-columns:1fr}}';
+    css.textContent += '.testing-context-fixed{min-height:42px;display:flex;align-items:center;font-weight:650;font-size:12px;color:#273b59;padding:9px 11px;background:#fff;border:1px solid #d7e1f0;border-radius:8px;overflow-wrap:anywhere}'+
+      '.testing-context-actions{display:flex;gap:15px;flex-wrap:wrap;align-items:center;margin-top:11px;font-size:11px}'+
+      '.testing-context-actions a,.testing-context-link{color:#305caa;text-decoration:underline;background:transparent;border:0;padding:3px 0;cursor:pointer;font:inherit}'+
+      '.testing-context-actions a:focus-visible,.testing-context-link:focus-visible{outline:2px solid #728af5;outline-offset:3px}';
     document.head.appendChild(css);
     state.manualDraft=story.value;
     state.ready=true;
@@ -224,7 +244,7 @@
   }
   document.addEventListener('testnexus:projects-loaded',()=>{loadProjectContext();});
   document.addEventListener('testnexus:project-changed',()=>{state.handoff=null;state.manualDraft='';loadProjectContext();});
-  document.addEventListener('testnexus:workspace-handoff',event=>{state.handoff=event.detail||null;if(state.project)applyHandoff();});
+  document.addEventListener('testnexus:workspace-handoff',event=>{state.handoff=event.detail||null;state.savedHandoff=event.detail||null;if(state.project)applyHandoff();});
   if(!setup()){
     const observer=new MutationObserver(()=>{if(setup()){observer.disconnect();if($('platformProject').options.length>1)loadProjectContext();}});
     observer.observe(document.body,{childList:true,subtree:true});
