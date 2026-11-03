@@ -140,3 +140,16 @@ textarea.form-control{min-height:94px;resize:vertical}.form-select{appearance:au
 #teamAttachForm > :is(.form-select,.btn),#teamMemberForm > [class*="col-"]{min-width:0}
 #teamMemberForm .btn{width:100%}
 #teamAttachForm .btn{min-height:42px;align-self:flex-end}
+
+/* Compact icon actions in rows and project cards, with usable hit targets. */
+.tn-icon-actions{display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;white-space:nowrap}
+.tn-icon-action{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:6px;border:1px solid transparent;border-radius:9px;color:#36547a;background:transparent;cursor:pointer;flex-shrink:0}
+.tn-icon-action:hover{background:#eaf0ff;color:#2457b4;border-color:#cfdbf5}
+.tn-icon-action:focus-visible{outline:3px solid #94adff;outline-offset:2px}
+.tn-icon-action:disabled{opacity:.45;cursor:not-allowed}
+.tn-icon-action[data-start-project],.tn-icon-action[data-start-story],.tn-icon-action[data-start-task]{color:#2457b4}
+.tn-icon-action[data-detach-team],.tn-icon-action[data-remove-team-member]{color:#ac3142}
+.tn-icon-action[data-detach-team]:hover,.tn-icon-action[data-remove-team-member]:hover{background:#fff0f2}
+.tn-table th:last-child,.tn-table td:last-child{text-align:right}
+.tn-home-project .tn-icon-actions{margin-left:auto}
+@media(max-width:600px){.tn-icon-action{width:38px;height:38px}.tn-home-project .tn-icon-actions{margin-left:0}}
