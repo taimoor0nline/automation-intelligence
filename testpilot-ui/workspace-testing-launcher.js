@@ -27,8 +27,8 @@
    record=task.task;
    if(!record||String(record.project_id)!==String(projectId)||record.deleted_at)throw Error('The selected task is not available in this project.');
   }
-  const env=(sourceType==='story'&&(detail.environments||[]).find(x=>String(x.id)===String(record?.environment_id)))
-   ||(detail.environments||[]).find(x=>x.is_default)||(detail.environments||[])[0];
+  const env=(sourceType==='story'&&(detail.environments||[]).find(x=>x.is_active!==false&&String(x.id)===String(record?.environment_id)))
+   ||(detail.environments||[]).find(x=>x.is_active!==false&&x.is_default)||(detail.environments||[]).find(x=>x.is_active!==false);
   const targetUrl=env?.base_url||detail.project?.target_url||'';
   if(!targetUrl)throw Error('Set the project application URL or default environment in Project Details before starting testing.');
   const handoff={projectId,sourceType,targetUrl,environmentName:env?.name||'Test'};
