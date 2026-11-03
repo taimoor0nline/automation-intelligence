@@ -16,7 +16,7 @@
    <button class="nav-link" data-view="projects">Projects</button>
    <button class="nav-link" data-view="details">Project details</button>
    <button class="nav-link" data-view="reports">Reports</button>
-   <a class="nav-link" href="/runner" title="Generate, review and run tests">Run Tests ↗</a>
+   <button type="button" class="nav-link" data-start-project title="Start testing the active project">Start Testing</button>
   </nav>
   <select id="projectPicker" class="form-select" aria-label="Current project" style="width:210px"></select>
   <span id="currentUser" class="tn-muted text-nowrap"></span>
@@ -26,7 +26,7 @@
  <div id="notice" class="alert alert-warning d-none" role="alert" aria-live="polite"></div><div id="workspaceLoading" class="tn-note mb-3 d-none" role="status" aria-live="polite">Loading project workspace…</div>
  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
   <div><div class="tn-eyebrow" id="breadcrumb">PROJECT WORKSPACE</div><h1 class="tn-title" id="pageTitle">Project overview</h1><div class="tn-muted" id="pageSubtitle">Scope, documents, stories, assignments and execution evidence</div></div>
-  <div class="d-flex gap-2"><button class="btn btn-outline-secondary tn-btn" data-go="projects">+ New project</button><button class="btn btn-primary tn-btn" data-go="stories">Write a story</button><a href="/runner" class="btn btn-outline-secondary tn-btn">Run Tests ↗</a></div>
+  <div class="d-flex gap-2"><button class="btn btn-outline-secondary tn-btn" data-go="projects">+ New project</button><button class="btn btn-primary tn-btn" data-go="stories">Write a story</button><button type="button" data-start-project class="btn btn-outline-secondary tn-btn">Start Testing</button></div>
  </div>
  <div id="projectDetailTabs" class="tn-detail-tabs d-none mb-3" role="tablist" aria-label="Project detail sections">
   <button type="button" role="tab" data-view="details" aria-controls="view-details">Context & scope</button>
@@ -159,5 +159,6 @@
 <div class="modal fade" id="evidenceModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h2>Execution evidence</h2><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body text-center" id="evidencePreview"></div></div></div></div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="/workspace.js"></script>
+<script src="/workspace-testing-launcher.js"></script>
 </body>
 </html>
