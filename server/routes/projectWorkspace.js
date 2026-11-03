@@ -135,6 +135,7 @@ router.patch('/api/projects/:projectId/environments/:environmentId',requireAuth,
    const previous=found.rows[0],isActive=Object.hasOwn(req.body||{},'isActive')?req.body.isActive:previous.is_active;
    if(typeof isActive!=='boolean')throw fail(400,'isActive must be a boolean.');
    const {name,base,stage}=envFields(req.body,previous);
+   if(name!==previous.name){const used=await usageForEnvironment(client,req.params.projectId,previous);if(used.total>0)throw fail(409,'Environment with existing stories or test transactions cannot be renamed; disable it and create a new environment.');}
    const setDefault=Object.hasOwn(req.body||{},'isDefault')?req.body.isDefault:previous.is_default;
    if(typeof setDefault!=='boolean')throw fail(400,'isDefault must be a boolean.');
    if(!isActive&&setDefault&&Object.hasOwn(req.body||{},'isDefault')&&req.body.isDefault)throw fail(400,'Disabled environment cannot be default.');
