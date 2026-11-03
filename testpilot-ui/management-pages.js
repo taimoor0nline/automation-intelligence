@@ -118,7 +118,7 @@ function renderEnvironments(){
  const view=icon('eye','View environment '+e.name,base+'&mode=view');
  const edit=canManage?icon('edit','Edit environment '+e.name,base):'';
  const toggle=canManage?icon(e.is_active?'pause':'play',e.is_active?'Disable environment':'Enable environment',e.id):'';
- const remove=canManage?icon('trash',e.canDelete?'Delete environment':'Deletion unavailable: transaction history exists',e.id,'danger'):'';
+ const remove=canManage?icon('trash',e.canDelete?'Review deletion of unused environment':'Review deletion restriction',base+'&mode=delete','danger'):'';
  return '<tr><td><strong>'+esc(e.name)+'</strong></td><td>'+esc(e.stage_type)+'</td><td>'+esc(e.base_url)+'</td><td><span class="mg-status '+(e.is_active?'':'inactive')+'">'+(e.is_active?'Active':'Disabled')+'</span></td><td>'+Number(e.usage?.total||0)+' reference(s)</td><td>'+(e.is_default?'Yes':'—')+'</td><td><div class="mg-icon-actions">'+view+edit+toggle+remove+'</div></td></tr>';
  }).join('')||'<tr><td colspan="7" class="mg-note">No environments match the filters.</td></tr>';
  $('mgEnvironmentCount').textContent=filtered.length+' environment(s)';
@@ -163,7 +163,7 @@ async function initEnvironmentForm(){
  const env=id?environments.find(e=>String(e.id)===String(id)):null;
  if(id&&!env)throw Error('Environment not found.');
  const form=$('mgEnvironmentForm');
- $('mgFormHeading').textContent=mode==='view'?'Environment details':env?'Edit environment':'Create environment';
+ $('mgFormHeading').textContent=mode==='delete'?'Delete environment':mode==='view'?'Environment details':env?'Edit environment':'Create environment';
  $('mgSubmit').textContent=env?'Save changes':'Create environment';
  $('mgEnvCancel').textContent=mode==='view'?'Back':'Cancel';
  if(env){
@@ -173,9 +173,16 @@ async function initEnvironmentForm(){
   $('mgEnvDefault').checked=env.is_default;
   $('mgUsage').textContent=(env.usage?.total||0)+' historical reference(s)';
  }
- if(mode==='view'||!canManage){
+ if(mode==='view'||mode==='delete'||!canManage){
   form.querySelectorAll('input,select').forEach(n=>n.disabled=true);
   $('mgSubmit').hidden=true;
+  if(mode==='delete'&&env&&canManage){
+   $('mgEnvDelete').hidden=false;
+   $('mgEnvDelete').disabled=!env.canDelete;
+   $('mgEnvDelete').textContent=env.canDelete?'Confirm permanent deletion':'Cannot delete: existing transactions';
+   $('mgEnvDisable').hidden=false;
+   $('mgEnvDisable').textContent=env.is_active?'Disable for new transactions':'Enable for new transactions';
+  }
  }else if(env){
   $('mgEnvDisable').hidden=false;
   $('mgEnvDisable').textContent=env.is_active?'Disable for new transactions':'Enable for new transactions';
