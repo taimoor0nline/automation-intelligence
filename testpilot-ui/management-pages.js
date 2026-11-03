@@ -38,6 +38,7 @@ async function loadProject(){
  if(!projectId)throw Error('Open a project from the Projects list first.');
  const projects=await api('/api/projects');
  if(!(projects.projects||[]).some(p=>String(p.id)===String(projectId)))throw Error('You do not have access to this project.');
+ localStorage.setItem('testnexus:currentProject',projectId);
  const workspace=await api('/api/projects/'+encodeURIComponent(projectId)+'/workspace');
  if($('mgSelectedProject'))$('mgSelectedProject').textContent=nameOfProject(workspace);
  if(page==='task-create'&&!['QA','PROJECT_MANAGER'].includes(workspace.projectRole))throw Error('Only QA and Project Managers can create tasks.');
