@@ -66,6 +66,8 @@ function buildSafeSessionPayload(session = {}) {
     state: session.state,
     targetType,
     story: session.story,
+    // Only source references, never task credentials or private attachment bytes.
+    contextSource: session.contextSource ? { type: session.contextSource.type || 'MANUAL', storyId: session.contextSource.storyId || null, taskId: session.contextSource.taskId || null } : null,
     workflowRequirements: normalizeWorkflowRequirements(session.workflowRequirements),
     targetUrl: session.targetUrl,
     environment: session.environment,
