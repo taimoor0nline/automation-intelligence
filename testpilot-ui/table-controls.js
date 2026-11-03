@@ -5,6 +5,8 @@ const PAGE_SIZES=[10,25,50];
 const TABLE_CONFIG={
  projectsBody:{create:'/project-create.html',createLabel:'Create project',search:'Search projects'},
  tasksBody:{create:'/task-create.html',createLabel:'Create task',search:'Search tasks'},
+ workItemsBody:{create:'/task-create.html',createLabel:'Create task',search:'Search work items'},
+ legacyTeamBody:{search:'Search team members'},
  storyList:{search:'Search stories'},
  teamBody:{search:'Search team members'},
  runsBody:{search:'Search test runs'},
@@ -16,7 +18,7 @@ const TABLE_CONFIG={
 };
 function initTable(table){
  if(table.dataset.paginationReady==='true')return;
- const tbody=table.tBodies[0],card=table.closest('.tn-card');
+ const tbody=table.tBodies[0],card=table.closest('.tn-card')||table.closest('.panel');
  if(!tbody||!card)return;
  table.dataset.paginationReady='true';
  const key=tbody.id,cfg=TABLE_CONFIG[key]||{},headers=[...table.tHead?.rows[0]?.cells||[]];
@@ -92,7 +94,7 @@ function initTable(table){
   prev.disabled=page<=1;next.disabled=page>=totalPages;
   if(create){
    const role=window.testnexusWorkspaceRole||{};
-   const allowed=key==='projectsBody'?role.platformManager:key==='tasksBody'?role.canReview:true;
+   const allowed=key==='projectsBody'?role.platformManager:key==='tasksBody'?role.canReview:key==='workItemsBody'?window.legacyWorkCanCreate:true;
    create.hidden=!allowed;
   }
  }
@@ -115,7 +117,8 @@ function initTable(table){
  render();
  table.tnRefresh=render;
 }
-function init(){document.querySelectorAll('.tn-view table').forEach(initTable);}
+function init(){document.querySelectorAll('.tn-view table,#team table,#work table').forEach(initTable);}
 window.TNTableControls={init,refresh:()=>document.querySelectorAll('.tn-view table').forEach(x=>x.tnRefresh?.())};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+for(const id of ['team','work']){const el=document.getElementById(id);if(el)new MutationObserver(init).observe(el,{childList:true});}
 })();
