@@ -20,6 +20,13 @@ function actionIcon(name,attributes,label){
 }
 
 
+function actionLink(name,href,label){
+ return '<a class="tn-icon-action" href="'+esc(href)+'" aria-label="'+esc(label)+'" title="'+esc(label)+'"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+(iconPaths[name]||iconPaths.eye)+'</svg></a>';
+}
+function projectRoute(projectId,section='details'){
+ return '/workspace.html?projectId='+encodeURIComponent(projectId)+'#'+section;
+}
+
 function notice(message,type='danger'){const el=$('notice');el.className='alert alert-'+type;el.textContent=message;el.scrollIntoView({block:'nearest'});}
 function clearNotice(){$('notice').className='alert alert-warning d-none';$('notice').textContent='';}
 async function api(url,options={}){
@@ -37,15 +44,17 @@ function dateTime(v){return v?new Date(v).toLocaleString():'—';}
 function display(v){return v?esc(v):'<span class="tn-muted">Not set</span>';}
 function statusTag(s){const x=String(s||'PENDING');const c=x==='COMPLETED'?'success':x==='ON_HOLD'?'warn':x==='PENDING'?'':'danger';return '<span class="tn-tag '+c+'">'+esc(x.replaceAll('_',' '))+'</span>';}
 const detailViews=new Set(['details','stories','inventory','tasks','team','attachments']);
-function show(view){
- if(detailViews.has(view)&&!state.projectId)view='projects';
+const regularViews=new Set(['overview','projects','reports']);
+function show(view,historyMode='push'){
+ if(!regularViews.has(view)&&!detailViews.has(view))view='projects';
+ if(detailViews.has(view)&&(!state.projectId||!state.context))view='projects';
  state.view=view;
  const inDetails=detailViews.has(view);
  document.querySelectorAll('.tn-view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));
  $('projectDetailTabs').classList.toggle('d-none',!inDetails);
  document.querySelectorAll('[data-view]').forEach(el=>{
   const tab=!!el.closest('#projectDetailTabs');
-  const active=tab?el.dataset.view===view:(el.dataset.view===view||(inDetails&&el.dataset.view==='details'));
+  const active=el.dataset.view===view;
   el.classList.toggle('active',active);
   if(tab){el.setAttribute('aria-selected',String(active));el.tabIndex=active?0:-1;}
   else if(active)el.setAttribute('aria-current','page');
@@ -53,23 +62,56 @@ function show(view){
  });
  const labels={overview:'Home',projects:'Projects',details:'Project details',stories:'Project stories',tasks:'Project tasks & retesting',reports:'Test reports & evidence',inventory:'Project test cases & audit',team:'Project team',attachments:'Project attachments'};
  $('pageTitle').textContent=labels[view]||'TestNexus';
- $('pageSubtitle').textContent=inDetails?(state.context?.project?.name||'Select a project')+' · Related work in one project workspace':view==='overview'?'Open a project and continue where your team left off':view==='projects'?'Create or open a project':'Execution results and reports';
+ $('pageSubtitle').textContent=inDetails?(state.context?.project?.name||'Selected project')+' · Scope, stories, tests, tasks, team and attachments':view==='overview'?'Open a project and continue where your team left off':view==='projects'?'Open a project using the View icon':'Execution results and reports';
+ $('breadcrumb').textContent=inDetails?'PROJECTS / '+(state.context?.project?.reference_no||state.context?.project?.name||'PROJECT'):'PROJECT WORKSPACE';
  clearNotice();
  if(view==='reports'&&state.projectId)loadSavedReports().catch(e=>notice(e.message));
  if(view==='inventory'&&state.projectId)loadInventory().catch(e=>notice(e.message));
  if(view==='team'&&state.projectId)loadTeams().catch(e=>notice(e.message));
- const startBtn=document.querySelector('.tn-page-actions [data-start-project]');if(startBtn)startBtn.hidden=!inDetails;
- window.history.replaceState(null,'','#'+view);
+ for(const el of document.querySelectorAll('.tn-page-actions [data-start-project],#backToProjects'))el.hidden=!inDetails;
+ const path=inDetails?projectRoute(state.projectId,view):'/workspace.html#'+view;
+ if(historyMode!=='none'&&window.location.pathname+window.location.search+window.location.hash!==path){
+  if(historyMode==='replace')window.history.replaceState(null,'',path);
+  else window.history.pushState(null,'',path);
+ }
+}
+async function openProject(id,section='details',historyMode='push'){
+ const selected=state.projects.find(p=>String(p.id)===String(id));
+ if(!selected)throw Error('This project is not available to your account.');
+ if(String(state.projectId)!==String(id)||String(state.context?.project?.id)!==String(id)){
+  closeTask();
+  state.projectId=String(id);
+  $('projectPicker').value=state.projectId;
+  await loadWorkspace();
+ }
+ localStorage.setItem('testnexus:currentProject',state.projectId);
+ show(section,historyMode);
+}
+async function routeFromUrl(){
+ const requested=new URLSearchParams(window.location.search).get('projectId');
+ const fragment=window.location.hash.replace('#','');
+ const view=fragment||(requested?'details':'projects');
+ if(detailViews.has(view)||requested&&(!fragment||fragment==='details')){
+  if(!requested||!state.projects.some(p=>String(p.id)===String(requested))){
+   show('projects','replace');
+   notice('Open a project using its View action to access project details.','warning');
+   return;
+  }
+  try{await openProject(requested,detailViews.has(view)?view:'details',fragment?'none':'replace');}
+  catch(error){show('projects','replace');notice('Unable to open this project: '+error.message); }
+ }else{
+  show(regularViews.has(view)?view:'projects',fragment?'none':'replace');
+ }
 }
 function requireProject(){if(!state.projectId)throw Error('Select or create a project first.');return state.projectId;}
 async function loadProjects(){
  const d=await api('/api/projects');state.projects=d.projects||[];
- const picker=$('projectPicker'),prior=state.projectId||localStorage.getItem('testnexus:currentProject')||'';
+ const picker=$('projectPicker'),prior=new URLSearchParams(window.location.search).get('projectId')||state.projectId||localStorage.getItem('testnexus:currentProject')||'';
  if(!state.projects.some(p=>p.id===prior))state.projectId=state.projects[0]?.id||'';else state.projectId=prior;
  picker.innerHTML='<option value="">Select project</option>'+state.projects.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
  picker.value=state.projectId;
  localStorage.setItem('testnexus:currentProject',state.projectId);
- $('projectsBody').innerHTML=state.projects.map(p=>'<tr><td>'+display(p.reference_no)+'</td><td><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.description||'')+'</div></td><td>'+date(p.created_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('folder','data-open-project="'+esc(p.id)+'"','Open project '+p.name)+actionIcon('edit','data-edit-project="'+esc(p.id)+'"','Edit project '+p.name)+actionIcon('play','data-start-project="'+esc(p.id)+'"','Start testing project '+p.name)+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No projects yet. Create your first project.</td></tr>';
+ $('projectsBody').innerHTML=state.projects.map(p=>'<tr><td>'+display(p.reference_no)+'</td><td><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.description||'')+'</div></td><td>'+date(p.created_at)+'</td><td><span class="tn-icon-actions">'+actionLink('eye',projectRoute(p.id),'View project details: '+p.name)+actionIcon('edit','data-edit-project="'+esc(p.id)+'"','Edit project '+p.name)+actionIcon('play','data-start-project="'+esc(p.id)+'"','Start testing project '+p.name)+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No projects yet. Create your first project.</td></tr>';
  $('homeProjectsCount').textContent=state.projects.length;
  $('homeProjects').innerHTML=state.projects.slice(0,6).map(p=>'<div class="tn-home-project"><div><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.reference_no||'Project')+' · '+date(p.created_at)+'</div></div><span class="tn-icon-actions">'+actionIcon('folder','data-open-project="'+esc(p.id)+'"','Open project '+p.name)+actionIcon('play','data-start-project="'+esc(p.id)+'"','Start testing project '+p.name)+'</span></div>').join('')||'<div class="tn-empty">No projects yet. Create your first project from Projects.</div>';
  let loaded=false,lastError=null;
@@ -452,9 +494,7 @@ function bind(){
  document.body.addEventListener('click',async e=>{
  const removeMember=e.target.closest('[data-remove-project-member]');if(removeMember){if(!confirm('Remove this member from the project?'))return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/members/'+encodeURIComponent(removeMember.dataset.removeProjectMember),{method:'DELETE'});await loadWorkspace();notice('Member removed.','success');}catch(err){notice(err.message);}return;}
  const editProject=e.target.closest('[data-edit-project]');if(editProject){
-  state.projectId=editProject.dataset.editProject;$('projectPicker').value=state.projectId;
-  localStorage.setItem('testnexus:currentProject',state.projectId);
-  try{await loadWorkspace();show('details');if($('editProfile').disabled)throw Error('Project manager permission required to edit this project.');$('editProfile').click();}catch(err){notice(err.message);}
+  try{await openProject(editProject.dataset.editProject);if($('editProfile').disabled)throw Error('Project manager permission required to edit this project.');$('editProfile').click();}catch(err){notice(err.message);}
   return;
  }
  const editTask=e.target.closest('[data-edit-task]');if(editTask){lastTaskTrigger=editTask;try{await openTask(editTask.dataset.editTask);}catch(err){notice(err.message);}return;}
@@ -463,7 +503,6 @@ function bind(){
   try{await api('/api/work-items/'+encodeURIComponent(deleteTask.dataset.deleteTask)+'/lifecycle',{method:'PATCH',body:JSON.stringify({action:'DELETE',reason:'Deleted from task table'})});await loadWorkspace();notice('Task moved to deleted items.','success');}catch(err){notice(err.message);}
   return;
  }
- const p=e.target.closest('[data-open-project]');if(p){state.projectId=p.dataset.openProject;$('projectPicker').value=state.projectId;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();show('details');}catch(err){notice(err.message);}return;}
  const st=e.target.closest('[data-story]');if(st){selectStory(st.dataset.story);return;}
  const t=e.target.closest('[data-task]');if(t){lastTaskTrigger=t;try{await openTask(t.dataset.task);}catch(err){notice(err.message);}return;}
  const doc=e.target.closest('[data-doc]');if(doc){try{await download('/api/projects/'+encodeURIComponent(requireProject())+'/documents/'+encodeURIComponent(doc.dataset.doc)+'/download');}catch(err){notice(err.message);}return;}
@@ -511,8 +550,9 @@ async function initialize(){
  if(!token()){location.replace('/login.html');return;}
  const me=await api('/api/auth/me');state.user=me.user;$('currentUser').textContent=me.user?.name||me.user?.email||'';
  await loadProjects();await fetchDirectory();clearStory();
- const hash=window.location.hash.replace('#','');if(['overview','projects','details','stories','tasks','reports','inventory','team','attachments'].includes(hash))show(hash);else show('projects');
+ await routeFromUrl();
  }catch(e){if(/auth|token|unauthoriz|sign.in/i.test(e.message))location.replace('/login.html');else notice(e.message);}
 }
+window.addEventListener('popstate',()=>routeFromUrl().catch(e=>notice(e.message)));
 initialize();
 })();
