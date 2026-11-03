@@ -22,9 +22,10 @@ function initTable(table){
  if(!tbody||!card)return;
  table.dataset.paginationReady='true';
  const key=tbody.id,cfg=TABLE_CONFIG[key]||{},headers=[...table.tHead?.rows[0]?.cells||[]];
+ for(const old of card.querySelectorAll('.tn-table-filters[data-table-key="'+key+'"],.tn-table-footer[data-table-key="'+key+'"]'))old.remove();
  const holder=table.closest('.tn-scroll')||table.parentNode;
  const toolbar=document.createElement('div');
- toolbar.className='tn-table-filters';
+ toolbar.className='tn-table-filters';toolbar.dataset.tableKey=key;
  toolbar.setAttribute('role','group');toolbar.setAttribute('aria-label','Filters for '+(card.querySelector('h2')?.textContent||'table'));
  const search=document.createElement('input');
  search.type='search';search.className='form-control tn-table-query';search.placeholder=cfg.search||'Filter rows…';
@@ -42,7 +43,7 @@ function initTable(table){
  const create=cfg.create?document.createElement('a'):null;
  if(create){create.href=cfg.create;create.className='btn btn-primary tn-btn tn-table-create';create.textContent='+ Create';
  create.title=cfg.createLabel||'Create';create.setAttribute('aria-label',cfg.createLabel||'Create');}
- const footer=document.createElement('div');footer.className='tn-table-footer';
+ const footer=document.createElement('div');footer.className='tn-table-footer';footer.dataset.tableKey=key;
  const info=document.createElement('span');info.setAttribute('aria-live','polite');
  const nav=document.createElement('div');nav.className='tn-table-pager';
  const prev=document.createElement('button'),next=document.createElement('button'),pageNo=document.createElement('span');
