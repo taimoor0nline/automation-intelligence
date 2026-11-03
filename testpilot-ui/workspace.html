@@ -14,9 +14,7 @@
   <nav class="nav nav-pills flex-grow-1" aria-label="Main navigation">
    <button class="nav-link active" data-view="overview">Home</button>
    <button class="nav-link" data-view="projects">Projects</button>
-   <button class="nav-link" data-view="details">Project details</button>
    <button class="nav-link" data-view="reports">Reports</button>
-   <button type="button" class="nav-link" data-start-project title="Start testing the active project">Start Testing</button>
   </nav>
   <select id="projectPicker" aria-label="Current project" hidden></select>
   <a href="/environment-config.html" class="nav-link tn-nav-config" id="navEnvironmentConfig" title="Environment configuration">Configuration</a><span id="currentUser" class="tn-muted text-nowrap"></span><a class="btn btn-outline-secondary tn-btn tn-signout" href="/logout.html" aria-label="Sign out">Sign out</a>
@@ -26,7 +24,7 @@
  <div id="notice" class="alert alert-warning d-none" role="alert" aria-live="polite"></div><div id="workspaceLoading" class="tn-note mb-3 d-none" role="status" aria-live="polite">Loading project workspace…</div>
  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
   <div><div class="tn-eyebrow" id="breadcrumb">PROJECT WORKSPACE</div><h1 class="tn-title" id="pageTitle">Project overview</h1><div class="tn-muted" id="pageSubtitle">Scope, documents, stories, assignments and execution evidence</div></div>
-  <div class="tn-page-actions"><button type="button" data-start-project class="btn btn-outline-primary tn-btn">Start Testing</button></div>
+  <div class="tn-page-actions"><button type="button" data-view="projects" class="btn btn-outline-secondary tn-btn" id="backToProjects">All projects</button><button type="button" data-start-project class="btn btn-outline-primary tn-btn">Start Testing</button></div>
  </div>
  <div id="projectDetailTabs" class="tn-detail-tabs d-none mb-3" role="tablist" aria-label="Project detail sections">
   <button type="button" role="tab" data-view="details" aria-controls="view-details">Context & scope</button>
