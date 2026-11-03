@@ -40,8 +40,8 @@
     if(label)label.textContent=isManual?'Business user story (manual)':'Testing context preview (loaded automatically)';
   }
   function selectedEnvironment(story){
-    return state.environments.find(e=>story?.environment_id&&String(e.id)===String(story.environment_id))
-      ||state.environments.find(e=>e.is_default)||state.environments[0]||null;
+    return state.environments.find(e=>e.is_active!==false&&story?.environment_id&&String(e.id)===String(story.environment_id))
+      ||state.environments.find(e=>e.is_active!==false&&e.is_default)||state.environments.find(e=>e.is_active!==false)||null;
   }
   function useEnvironment(story){
     const env=selectedEnvironment(story),project=state.project||{};
