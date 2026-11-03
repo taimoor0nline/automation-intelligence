@@ -49,6 +49,15 @@ function initTable(table){
  }
  nav.append(prev,pageNo,next);footer.append(info,nav);
  const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(search,filter,value,size);
+ if(key==='tasksBody'){
+  const status=document.getElementById('taskStatusFilter'),hierarchy=document.getElementById('taskHierarchy')?.closest('label');
+  if(status){status.classList.add('tn-table-status');textFilters.append(status);}
+  if(hierarchy)textFilters.append(hierarchy);
+  const selection=document.getElementById('taskSelectionCount');
+  if(selection)textFilters.append(selection);
+  const oldToolbar=document.querySelector('#view-tasks .tn-task-toolbar');
+  if(oldToolbar)oldToolbar.hidden=true;
+ }
  toolbar.append(textFilters);if(create)toolbar.append(create);
  holder.parentNode.insertBefore(toolbar,holder);
  holder.after(footer);
