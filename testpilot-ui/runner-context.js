@@ -211,7 +211,7 @@
       $('testContextMode').value='project';
       state.mode='project';
       renderSelection();
-      if(state.handoff&&String(state.handoff.projectId)===String(projectId))applyHandoff();
+      const restoring=state.handoff||state.savedHandoff;if(restoring&&String(restoring.projectId)===String(projectId)){state.handoff=restoring;applyHandoff();}
     }catch(error){
       if(serial!==state.serial)return;
       state.project=null;state.mode='manual';$('testContextMode').value='manual';
