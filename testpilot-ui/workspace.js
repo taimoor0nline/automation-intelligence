@@ -43,14 +43,14 @@ function date(v){return v?new Date(v).toLocaleDateString():'—';}
 function dateTime(v){return v?new Date(v).toLocaleString():'—';}
 function display(v){return v?esc(v):'<span class="tn-muted">Not set</span>';}
 function statusTag(s){const x=String(s||'PENDING');const c=x==='COMPLETED'?'success':x==='ON_HOLD'?'warn':x==='PENDING'?'':'danger';return '<span class="tn-tag '+c+'">'+esc(x.replaceAll('_',' '))+'</span>';}
-const detailViews=new Set(['details','stories','inventory','tasks','team','attachments']);
+const detailViews=new Set(['details','stories','inventory','executions','tasks','team','attachments']);
 const regularViews=new Set(['overview','projects','reports']);
 function show(view,historyMode='push'){
  if(!regularViews.has(view)&&!detailViews.has(view))view='projects';
  if(detailViews.has(view)&&(!state.projectId||!state.context))view='projects';
  state.view=view;
  const inDetails=detailViews.has(view);
- document.querySelectorAll('.tn-view').forEach(el=>el.classList.toggle('active',el.id==='view-'+view));
+ document.querySelectorAll('.tn-view').forEach(el=>el.classList.toggle('active',el.id==='view-'+(view==='executions'?'reports':view)));
  $('projectDetailTabs').classList.toggle('d-none',!inDetails);
  document.querySelectorAll('[data-view]').forEach(el=>{
   const tab=!!el.closest('#projectDetailTabs');
@@ -60,12 +60,12 @@ function show(view,historyMode='push'){
   else if(active)el.setAttribute('aria-current','page');
   else el.removeAttribute('aria-current');
  });
- const labels={overview:'Home',projects:'Projects',details:'Project details',stories:'Project stories',tasks:'Project tasks & retesting',reports:'Test reports & evidence',inventory:'Project test cases & audit',team:'Project team',attachments:'Project attachments'};
+ const labels={overview:'Home',projects:'Projects',details:'Project details',stories:'Project stories',tasks:'Project tasks & retesting',reports:'Test reports & evidence',executions:'Project runs & reports',inventory:'Project test cases & audit',team:'Project team',attachments:'Project attachments'};
  $('pageTitle').textContent=labels[view]||'TestNexus';
  $('pageSubtitle').textContent=inDetails?(state.context?.project?.name||'Selected project')+' · Scope, stories, tests, tasks, team and attachments':view==='overview'?'Open a project and continue where your team left off':view==='projects'?'Open a project using the View icon':'Execution results and reports';
  $('breadcrumb').textContent=inDetails?'PROJECTS / '+(state.context?.project?.reference_no||state.context?.project?.name||'PROJECT'):'PROJECT WORKSPACE';
  clearNotice();
- if(view==='reports'&&state.projectId)loadSavedReports().catch(e=>notice(e.message));
+ if((view==='reports'||view==='executions')&&state.projectId)loadSavedReports().catch(e=>notice(e.message));
  if(view==='inventory'&&state.projectId)loadInventory().catch(e=>notice(e.message));
  if(view==='team'&&state.projectId)loadTeams().catch(e=>notice(e.message));
  for(const el of document.querySelectorAll('.tn-page-actions [data-start-project],#backToProjects'))el.hidden=!inDetails;
