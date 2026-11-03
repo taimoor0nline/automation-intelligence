@@ -20,7 +20,7 @@
 <div class="wrap">
   <div class="grid">
     <aside class="panel pad">
-      <div class="section-head"><div><h2>1. Define the journey</h2></div></div>
+      <div class="section-head"><div><h2>1. Select testing context</h2></div></div>
       <div class="field" data-project-setting><label>Target URL</label><input id="targetUrl" value="https://academy.demoibsservices.com"></div>
       <div class="field" data-project-setting><label>Known pages (optional)</label><input id="additionalPaths" value="" placeholder="/feedback, /profile"><small>Optional same-origin page hints. The demo can also discover simple same-origin route hints from the starting page.</small></div>
       <div class="two">
@@ -28,7 +28,7 @@
         <div class="field"><label>Username</label><input id="username" value="" autocomplete="off"></div>
       </div>
       <div class="field" data-project-setting><label>Password</label><input id="password" type="password" value="" autocomplete="off"></div>
-      <div class="field"><label>Business user story</label><textarea id="story" placeholder="Describe the user journey to test"></textarea></div>
+      <div class="field"><label for="story">Business user story (manual)</label><textarea id="story" placeholder="Select a project source above, or write a user journey manually"></textarea></div>
       <button id="generateBtn" class="btn primary">Generate AI Test Cases</button>
       <div id="errorBox" class="errorbox"></div>
     </aside>
@@ -36,7 +36,7 @@
     <main class="workflow">
       <section class="panel">
         <div class="pad section-head">
-          <div><h2>2. Review test cases</h2><div class="sub" id="caseSubtitle">Enter a story and generate cases.</div></div>
+          <div><h2>2. Review test cases</h2><div class="sub" id="caseSubtitle">Select a project, existing story, task, or manual context to generate cases.</div></div>
           <div class="section-actions"><button id="addCaseBtn" class="btn ghost" disabled>+ Add Test Case</button><span id="caseCount" class="pill">0</span></div>
         </div>
         <div class="human-note">
