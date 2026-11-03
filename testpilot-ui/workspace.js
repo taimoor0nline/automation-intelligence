@@ -69,6 +69,7 @@ function show(view,historyMode='push'){
  if(view==='inventory'&&state.projectId)loadInventory().catch(e=>notice(e.message));
  if(view==='team'&&state.projectId)loadTeams().catch(e=>notice(e.message));
  for(const el of document.querySelectorAll('.tn-page-actions [data-start-project],#backToProjects'))el.hidden=!inDetails;
+ const configLink=$('navEnvironmentConfig');if(configLink)configLink.hidden=!inDetails;
  const path=inDetails?projectRoute(state.projectId,view):'/workspace.html#'+view;
  if(historyMode!=='none'&&window.location.pathname+window.location.search+window.location.hash!==path){
   if(historyMode==='replace')window.history.replaceState(null,'',path);
@@ -150,7 +151,7 @@ function applyRoleUI(){
  }
  $('projectRunAll').disabled=!canReview;
  if(!canReview)$('batchRetest').disabled=true;
- if($('navEnvironmentConfig')){$('navEnvironmentConfig').href=state.projectId?'/environment-config.html?projectId='+encodeURIComponent(state.projectId):'/workspace.html#projects';$('navEnvironmentConfig').hidden=!state.projectId;}
+ if($('navEnvironmentConfig')){$('navEnvironmentConfig').href=state.projectId?'/environment-config.html?projectId='+encodeURIComponent(state.projectId):'/workspace.html#projects';$('navEnvironmentConfig').hidden=!state.projectId||!detailViews.has(state.view);}
  window.TNTableControls?.refresh();
 }
 function renderAll(){renderOverview();renderStoryList();renderTasks();renderReports();renderTeam();applyRoleUI();}
