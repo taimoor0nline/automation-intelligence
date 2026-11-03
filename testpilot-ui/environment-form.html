@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Environment | TestNexus</title><link rel="stylesheet" href="/management.css"><link rel="stylesheet" href="/forms-alignment.css"></head>
+<body data-management-page="environment-form">
+<header class="mg-top"><a class="mg-brand" href="/workspace.html#projects"><span class="mg-logo">TN</span> TestNexus</a><nav class="mg-nav" aria-label="Management navigation"><a href="/workspace.html#projects">Projects</a><a id="navProject" href="/workspace.html#details">Project details</a><a id="navTasks" href="/workspace.html#tasks">Tasks</a><a id="navEnvironment" href="/environment-config.html">Environments</a><button type="button" id="mgSignOut">Sign out</button></nav></header>
+<main class="mg-main"><div class="mg-heading"><div><h1>Environment</h1><p class="mg-subtitle">Create, view, edit, disable, or safely delete a project environment.</p></div><a id="mgBack" href="/workspace.html#projects" class="mg-btn">Back to list</a></div>
+<div id="mgFeedback" class="mg-feedback" role="alert" hidden></div><section class="mg-card"><div class="mg-card-head"><h2 id="mgFormHeading">Environment details</h2><span id="mgUsage" class="mg-note"></span></div><div class="mg-card-body"><form id="mgEnvironmentForm"><div class="mg-grid">
+<div class="mg-field mg-full"><label>Project</label><div id="mgSelectedProject" class="mg-note">Loading project…</div></div>
+<div class="mg-field"><label for="mgEnvName">Environment name *</label><input id="mgEnvName" name="name" required maxlength="100" placeholder="QA / Staging"></div>
+<div class="mg-field"><label for="mgEnvStage">Environment type</label><select id="mgEnvStage" name="stageType"><option value="QA">QA</option><option value="DEV">Development</option><option value="STAGING">Staging</option><option value="UAT">UAT</option><option value="PRODUCTION">Production</option></select></div>
+<div class="mg-field mg-full"><label for="mgEnvUrl">Application base URL *</label><input id="mgEnvUrl" name="baseUrl" type="url" required placeholder="https://qa.example.com"></div>
+<div class="mg-field mg-full"><label class="mg-checkbox"><input id="mgEnvDefault" name="isDefault" type="checkbox"> Default active environment</label></div>
+</div><p class="mg-note">Once stories or testing transactions use this environment, it cannot be deleted. Disable it to prevent new transactions and preserve history.</p>
+<div class="mg-actions"><a id="mgEnvCancel" class="mg-btn" href="/environment-config.html">Cancel</a><button type="button" id="mgEnvDisable" class="mg-btn" hidden>Disable for new transactions</button><button type="button" id="mgEnvDelete" class="mg-btn mg-btn-danger" hidden>Delete environment</button><button id="mgSubmit" class="mg-btn mg-btn-primary" type="submit">Save environment</button></div>
+</form></div></section></main>
+<script src="/management-pages.js"></script></body></html>
