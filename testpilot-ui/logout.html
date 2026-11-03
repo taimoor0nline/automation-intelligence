@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out | TestNexus</title>
+<link rel="stylesheet" href="/management.css"><link rel="stylesheet" href="/forms-alignment.css"></head><body>
+<header class="mg-top"><a href="/login.html" class="mg-brand"><span class="mg-logo">TN</span> TestNexus</a></header>
+<main class="mg-main" style="max-width:540px;padding-top:9vh"><section class="mg-card"><div class="mg-card-body" style="text-align:center;padding:44px 25px">
+<h1 style="font-size:23px;margin:0 0 12px">You are signed out</h1><p class="mg-subtitle">Your TestNexus session has ended on this device.</p>
+<a class="mg-btn mg-btn-primary" href="/login.html" style="margin-top:20px">Back to sign in</a>
+</div></section></main>
+<script>
+sessionStorage.removeItem('aiTestPilotToken');
+sessionStorage.removeItem('testnexus:runnerSelection');
+sessionStorage.removeItem('testnexus:runnerHandoff');
+sessionStorage.removeItem('testnexus:runnerOrigin');
+</script></body></html>
