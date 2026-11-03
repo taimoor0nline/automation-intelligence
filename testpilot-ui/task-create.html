@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Create task | TestNexus</title><link rel="stylesheet" href="/management.css"><link rel="stylesheet" href="/forms-alignment.css"></head>
+<body data-management-page="task-create">
+<header class="mg-top"><a class="mg-brand" href="/workspace.html#projects"><span class="mg-logo">TN</span> TestNexus</a><nav class="mg-nav" aria-label="Management navigation"><a href="/workspace.html#projects">Projects</a><a id="navEnvironment" href="/environment-config.html">Environments</a><button type="button" id="mgSignOut">Sign out</button></nav></header>
+<main class="mg-main"><div class="mg-heading"><div><h1>Create task</h1><p class="mg-subtitle">Add an assignment to the selected project.</p></div><a id="mgBack" href="/workspace.html#projects" class="mg-btn">Back to list</a></div>
+<div id="mgFeedback" class="mg-feedback" role="alert" hidden></div><section class="mg-card"><div class="mg-card-head"><h2>Task details</h2></div><div class="mg-card-body"><form id="mgTaskForm"><div class="mg-grid">
+<div class="mg-field mg-full"><label>Project</label><div id="mgSelectedProject" class="mg-note">Loading project…</div></div>
+<div class="mg-field mg-full"><label for="mgTaskTitle">Task title *</label><input name="title" id="mgTaskTitle" required maxlength="500"></div>
+<div class="mg-field"><label for="mgTaskType">Task type</label><select id="mgTaskType" name="workType"><option value="GENERAL">General</option><option value="INVESTIGATION">Investigation</option><option value="DEFECT_FIX">Defect fix</option><option value="TEST_REVIEW">Test review</option><option value="RETEST">Retest</option></select></div>
+<div class="mg-field"><label for="mgTaskPriority">Priority</label><select id="mgTaskPriority" name="priority"><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option><option value="LOW">Low</option></select></div>
+<div class="mg-field"><label for="mgTaskAssignee">Assigned to</label><select id="mgTaskAssignee" name="assignedTo"><option value="">Unassigned</option></select></div>
+<div class="mg-field"><label for="mgTaskDue">Due date</label><input type="datetime-local" id="mgTaskDue" name="dueAt"></div>
+<div class="mg-field mg-full"><label for="mgTaskDescription">Description</label><textarea id="mgTaskDescription" name="description" maxlength="10000"></textarea></div>
+<div class="mg-field"><label for="mgTaskCase">Linked test case reference (optional)</label><input id="mgTaskCase" name="externalCaseId" maxlength="100"></div></div>
+<div class="mg-actions"><a id="mgTaskCancel" class="mg-btn" href="/workspace.html#tasks">Cancel</a><button type="submit" class="mg-btn mg-btn-primary" id="mgSubmit">Create task</button></div></form></div></section></main>
+<script src="/management-pages.js"></script></body></html>

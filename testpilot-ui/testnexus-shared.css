@@ -1,0 +1,16 @@
+/* Unified TestNexus surface rules for the existing Test Studio.
+   Deliberately scoped so the three-phase runner continues to work unchanged. */
+:root{--testnexus-accent:#3158ea;--testnexus-line:#dfe6f1;--testnexus-radius:11px;--testnexus-focus:#91adff}
+body{font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+header .brand strong{letter-spacing:-.35px}
+button,a,input,select,textarea{accent-color:var(--testnexus-accent)}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--testnexus-focus)!important;outline-offset:2px}
+button,.btn,input,select,textarea{border-radius:var(--testnexus-radius)}
+.platform-header-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.platform-header-actions .btn{white-space:nowrap}
+
+
+
+
+@media(max-width:800px){header{height:auto!important;min-height:68px;flex-wrap:wrap;padding:10px 14px!important;gap:9px}.platform-header-actions{gap:6px}.platform-header-actions .btn{font-size:12px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}

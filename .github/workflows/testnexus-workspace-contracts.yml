@@ -1,0 +1,88 @@
+name: TestNexus MMP workspace contracts
+on:
+  pull_request:
+    branches: [live-browser-streaming]
+  push:
+    branches: [feature/testnexus-project-workspace-ui-v6]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  workspace-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and Workspace contract checks
+        run: node scripts/project-workspace-smoke.js
+      - name: Route security and task regression tests
+        run: node --test scripts/testnexus-workspace-routes.test.js
+
+  postgres-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testnexus
+          POSTGRES_PASSWORD: testnexus
+          POSTGRES_DB: testnexus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U testnexus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_ENABLED: 'true'
+      DATABASE_REQUIRED: 'true'
+      DATABASE_URL: postgresql://testnexus:testnexus@127.0.0.1:5432/testnexus_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install server dependencies without Cypress postinstall
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Apply all database migrations
+        run: node server/db/migrate.js
+      - name: Verify TestNexus workspace schema
+        run: node scripts/testnexus-db-schema.test.js
+      - name: Exercise authenticated PostgreSQL workspace routes
+        run: node scripts/testnexus-db-integration.test.js
+
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      DATABASE_ENABLED: 'false'
+      AUTH_REQUIRED: 'false'
+      AUTOMATION_BASE_URL: http://127.0.0.1:4008
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Cypress browser dependencies
+        run: npm install --prefix automation-system --include=dev --no-audit --no-fund
+      - name: Start isolated workspace fixture
+        run: |
+          node scripts/testnexus-static-server.js > /tmp/testnexus-fixture.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4008/workspace.html >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4008/workspace.html >/dev/null
+      - name: Cypress hierarchy, case-link and accessibility UI
+        run: npm --prefix automation-system run engine:run -- --browser electron --spec tests/e2e/system/testnexus-workspace-mmp.cy.js --config video=false
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: testnexus-cypress-failure
+          path: automation-system/artifacts/screenshots
+          if-no-files-found: ignore

@@ -14,6 +14,7 @@ const approvalContractGuardRoutes = require("./routes/approvalContractGuard");
 const liveBrowserRoutes = require("./routes/liveBrowser");
 const authRoutes = require("./routes/auth");
 const projectRoutes = require("./routes/projects");
+const projectWorkspaceRoutes = require("./routes/projectWorkspace");
 const sessionContextRoutes = require("./routes/sessionContext");
 const reportingRoutes = require("./routes/reporting");
 const failureAnalysisStreamRoutes = require("./routes/failureAnalysisStream");
@@ -67,6 +68,7 @@ const HOST = process.env.SERVER_HOST || "0.0.0.0";
 const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || "false").toLowerCase() === "true";
 
 app.use(cors());
+app.use(["/api/projects/:projectId/documents", "/api/work-items/:id/attachments"], express.json({ limit: "8mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(optionalAuth);
 app.use((req, res, next) => {
@@ -104,6 +106,7 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
 
 app.use(authRoutes);
 app.use(projectRoutes);
+app.use(projectWorkspaceRoutes);
 app.use(sessionContextRoutes);
 app.use(reportingRoutes);
 app.use(restApiRoutes);
@@ -155,7 +158,7 @@ function serveUi(req, res, next) {
       .replace("$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · ${data.qwenModel||'Qwen'}`", "$('caseSubtitle').textContent=`${data.feature||'Story'} · ${data.pageDiscoveries?.length||0} page(s) discovered · AI generated + readiness checking`")
       .replace("Automation is running.<small>Watch the Chrome window that opens automatically.</small>", "Automation is running.<small>The automation system is executing on the server. If you are working directly on the server, you may see the browser window open; from another PC, execution continues in the background.</small>")
       .replace("Qwen failure analysis", "AI failure analysis")
-      .replace("</body>", `<script src="/top-bar.js"></script><script src="/platform-ui.js"></script><script src="/defect-assignment.js"></script><script src="/generation-experience.js"></script><script src="/readiness.js"></script><script src="/test-case-repair-workbench.js"></script><script src="/add-test-mode.js"></script><script src="/results-analysis.js"></script><script src="/streaming-failure-analysis.js"></script><script src="/test-case-export.js"></script><script src="/behavior-rules-ui.js"></script><script src="/behavior-rules-xlsx-compat.js"></script><script src="/reporting-entry.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
+      .replace("</body>", `<script src="/top-bar.js"></script><script src="/platform-ui.js"></script><script src="/runner-context.js"></script><script src="/defect-assignment.js"></script><script src="/generation-experience.js"></script><script src="/readiness.js"></script><script src="/test-case-repair-workbench.js"></script><script src="/add-test-mode.js"></script><script src="/results-analysis.js"></script><script src="/streaming-failure-analysis.js"></script><script src="/test-case-export.js"></script><script src="/behavior-rules-ui.js"></script><script src="/behavior-rules-xlsx-compat.js"></script><script src="/reporting-entry.js"></script><script>if(document.getElementById("aiModelTier")){document.getElementById("aiModelTier").value=${JSON.stringify(defaultProfile)};}</script></body>`);
     res.type("html").send(adjusted);
   });
 }
@@ -163,8 +166,11 @@ function serveRestUi(req, res, next) { const uiFile = path.join(__dirname, "..",
 app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "testpilot-ui", "login.html"));
 });
-app.get(["/", "/index.html"], serveUi);
+// The public entrypoint is authentication; project selection follows sign-in.
+app.get(["/", "/index.html"], (req,res)=>res.redirect("/login.html"));
+app.get("/runner", serveUi);
 app.get("/rest.html", serveRestUi);
+app.get("/workspace.html", (req,res)=>res.sendFile(path.join(__dirname,"..","testpilot-ui","workspace.html")));
 app.use(express.static(path.join(__dirname, "..", "testpilot-ui")));
 
 app.listen(PORT, HOST, async () => {

@@ -1,0 +1,14 @@
+/* Shared TestNexus MMP field rhythm. Keep native checkboxes, radios and file inputs. */
+:root{--tn-input-height:42px}
+.field,.tn-field,.platform-row > div,.filters > div{min-width:0}
+.field label,.tn-field .form-label{line-height:1.4}
+.field :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select),.field textarea,
+.form-control:not([type=checkbox]):not([type=radio]),.form-select{box-sizing:border-box;width:100%;max-width:100%;min-width:0;border-radius:8px}
+.field :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select),
+.form-control:not(textarea):not([type=checkbox]):not([type=radio]),.form-select{min-height:var(--tn-input-height)}
+.field textarea,textarea.form-control{min-height:94px;resize:vertical}
+.two,.platform-row,.filters{align-items:start}
+.two > *,.platform-row > *,.filters > *{min-width:0}
+.field :is(input,select,textarea):focus-visible,.form-control:focus-visible,.form-select:focus-visible{outline-offset:1px}
+@media(min-width:768px){.two > .field > label,.filters > .field > label{min-height:19px}}
+@media(max-width:767px){.two,.platform-row{grid-template-columns:1fr}.filters{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}}

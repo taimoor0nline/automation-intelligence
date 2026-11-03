@@ -93,10 +93,13 @@
     return id ? (document.getElementById(id)?.value || '') : '';
   }
 
+  // The Web UI test page lives at /runner ("/" now opens the sign-in page).
+  const TESTING_PAGE = '/runner';
+
   // On the Start Testing page, click the original button (opens its popup); elsewhere go there and open it.
   function openOnTestingPage(buttonId, hash) {
     const b = page === 'web' ? document.getElementById(buttonId) : null;
-    if (b) b.click(); else location.href = '/' + hash;
+    if (b) b.click(); else location.href = TESTING_PAGE + hash;
   }
   function go(url) { location.href = url; }
 
@@ -109,7 +112,7 @@
     section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return true;
   }
-  function openSection(key) { if (!scrollToSection(key)) go('/#' + key); }
+  function openSection(key) { if (!scrollToSection(key)) go(TESTING_PAGE + '#' + key); }
 
   function closeMenus(except) {
     document.querySelectorAll('.tn-menu.open').forEach((m) => { if (m !== except) m.classList.remove('open'); });
@@ -217,7 +220,7 @@
     } }));
     if (canTest) {
       nav.appendChild(dropdown('Start Testing', [
-        { label: 'Web UI testing', current: page === 'web', onClick: () => go('/') },
+        { label: 'Web UI testing', current: page === 'web', onClick: () => go(TESTING_PAGE) },
         { label: 'REST API testing', current: page === 'rest', onClick: () => go('/rest.html') },
       ], { active: testing }));
     }

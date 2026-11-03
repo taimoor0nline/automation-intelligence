@@ -66,6 +66,8 @@ function buildSafeSessionPayload(session = {}) {
     state: session.state,
     targetType,
     story: session.story,
+    // Only source references, never task credentials or private attachment bytes.
+    contextSource: session.contextSource ? { type: session.contextSource.type || 'MANUAL', storyId: session.contextSource.storyId || null, taskId: session.contextSource.taskId || null } : null,
     workflowRequirements: normalizeWorkflowRequirements(session.workflowRequirements),
     targetUrl: session.targetUrl,
     environment: session.environment,
@@ -145,6 +147,7 @@ async function persistTestCases(sessionId, testCases = [], client = null) {
         [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, security.subcategory, security.severity, tc.source || null, JSON.stringify(normalizedCase)]
       );
     }
+    if(testCases.length){await connection.query("insert into project_audit_events(project_id,session_id,event_type,metadata) select project_id,$1,'TEST_CASES_SAVED',$2::jsonb from test_sessions where id=$1 and project_id is not null",[sessionId,JSON.stringify({caseCount:testCases.length})]);}
   };
   if (client) await work(client);
   else await db.withTransaction(work);
@@ -183,6 +186,7 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
       ]
     );
     const runId = run.rows[0].id;
+    if(session.projectId)await client.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TEST_RUN_COMPLETED',$4::jsonb)",[session.projectId,sessionId,userId||null,JSON.stringify({runId,runNumber,total:summary.total||0,passed:summary.passed||0,failed:summary.failed||0})]);
     const classificationByCaseId = new Map(
       (session.testCases || []).map((testCase) => {
         const security = securityOf(testCase);
@@ -208,6 +212,8 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
         [runId, caseId, result.title || caseId || 'Test', classification.category, classification.scenarioType, classification.priority, classification.securitySubcategory, classification.severity, Boolean(result.pass), result.durationMs || null, result.err?.message || null, JSON.stringify(result.evidence || {})]
       );
     }
+    await persistRunReportSnapshots({sessionId,session,runId,userId,client});
+    if(session.projectId)await require('./repairMemoryService').captureVerified({client,projectId:session.projectId,session,runId,userId});
     return runId;
   });
 }
@@ -279,8 +285,45 @@ async function persistReviewedCase(sessionId, session, testCase) {
     });
     await persistTestCases(sessionId, [testCase], client);
     await canonical.persistCaseIr(sessionId, testCase, client);
+    if(session.projectId)await client.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TEST_CASE_REVIEWED',$4::jsonb)",[session.projectId,sessionId,session.createdBy||null,JSON.stringify({caseId:String(testCase.id),status:'SAVED'})]);
+    // Persist the reviewed contract, not runtime credentials or raw session state.
+    const reviewed={id:testCase.id,title:testCase.title,priority:testCase.priority,type:testCase.type,source:testCase.source,steps:testCase.steps,expectedResult:testCase.expectedResult,automationReadiness:testCase.automationReadiness,reviewedAt:new Date().toISOString()};
+    // Serialize revision allocation for a single case across concurrent reviewers.
+    await client.query('select pg_advisory_xact_lock(hashtext($1),hashtext($2))',[sessionId,String(testCase.id)]);
+    const rev=await client.query("select coalesce(max(revision),0)+1 as next from test_report_snapshots where session_id=$1 and external_case_id=$2 and report_kind='REVIEWED_CASE'",[sessionId,String(testCase.id)]);
+    await client.query("insert into test_report_snapshots(project_id,session_id,external_case_id,report_kind,revision,report_json,recorded_by) values($1,$2,$3,'REVIEWED_CASE',$4,$5::jsonb,$6)",[session.projectId||null,sessionId,String(testCase.id),rev.rows[0].next,JSON.stringify(reviewed),session.createdBy||null]);
   });
   return true;
+}
+
+async function persistRunReportSnapshots({sessionId,session,runId,userId,client=null}) {
+ if(!enabled()||!runId)return false;
+ const runNumber=session.lastResults?.runNumber;
+ const summary=session.lastResults?.summary||{};
+ const learning=session.repairLearning||{};
+ const repairs=Array.isArray(learning.repairs)?learning.repairs:[];
+ const verifiedRepairs=repairs.filter(x=>x&&typeof x==='object'&&(x.verified===true||x.validationStatus==='PASSED'||x.validation?.status==='PASSED')).map(x=>({
+  repairId:String(x.id||x.repairId||'').slice(0,100),
+  failureSignature:String(x.failureSignature||x.signature||'').slice(0,300),
+  validationStatus:'PASSED',
+  validatedAt:x.validatedAt||null,
+  confidence:Number.isFinite(Number(x.confidence))?Math.max(0,Math.min(1,Number(x.confidence))):null,
+ }));
+ const reports=[
+  {kind:'EXECUTION',payload:{sessionId,runNumber,summary,approvedIds:session.approvedIds||[],generatedAt:new Date().toISOString()},html:session.reportHtml||null},
+  {kind:'AI_LEARNING',payload:{signatureCount:Array.isArray(learning.signatures)?learning.signatures.length:0,repairCount:repairs.length,verifiedRepairCount:verifiedRepairs.length,verifiedRepairs,recordedAt:new Date().toISOString(),source:'session_repair_learning'},html:null}
+ ];
+ const write=async connection=>{
+  for(const report of reports){
+   await connection.query(`insert into test_report_snapshots(project_id,session_id,run_id,report_kind,revision,report_json,report_html,recorded_by)
+    values($1,$2,$3,$4,1,$5::jsonb,$6,$7)
+    on conflict(run_id,report_kind,revision) where run_id is not null
+    do update set report_json=excluded.report_json,report_html=excluded.report_html`,
+    [session.projectId||null,sessionId,runId,report.kind,JSON.stringify(report.payload),report.html,userId||session.createdBy||null]);
+  }
+ };
+ if(client)await write(client);else await db.withTransaction(write);
+ return true;
 }
 
 module.exports = {
@@ -290,6 +333,7 @@ module.exports = {
   persistTestCases,
   persistReviewedCase,
   persistRun,
+  persistRunReportSnapshots,
   persistAnalyses,
   latestRunId,
   loadSession,

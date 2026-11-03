@@ -106,29 +106,57 @@ function activateDirectoryActors(session, requestedRefs = []) {
 
 router.get('/api/sessions/:sessionId/context', requireAuth, (req, res) => {
   const session = getSession(req.params.sessionId);
-  res.json({ ok: true, projectId: session.projectId || null, repositoryId: session.repositoryId || null, createdBy: session.createdBy || null });
+  res.json({ ok: true, projectId: session.projectId || null, repositoryId: session.repositoryId || null, createdBy: session.createdBy || null, projectStoryId: session.projectStoryId || null, contextSource: session.contextSource || null });
 });
 
 router.post('/api/sessions/:sessionId/context', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
   try {
     const projectId = String(req.body?.projectId || '').trim();
     const repositoryId = String(req.body?.repositoryId || '').trim();
+    const storyId = String(req.body?.storyId || '').trim();
+    const taskId = String(req.body?.taskId || '').trim();
+    const sourceType = String(req.body?.sourceType || (storyId ? 'STORY' : taskId ? 'TASK' : 'MANUAL')).trim().toUpperCase();
+    if (!['PROJECT','STORY','TASK','MANUAL'].includes(sourceType)) return res.status(400).json({ reply:'Invalid testing context source.' });
+    if (sourceType==='STORY'&&!storyId || sourceType==='TASK'&&!taskId || storyId&&sourceType!=='STORY' || taskId&&sourceType!=='TASK') return res.status(400).json({ reply:'Story or task source must match its selected record.' });
     if (!projectId) return res.status(400).json({ reply: 'projectId is required.' });
 
     const project = await db.query('select id from projects where id=$1', [projectId]);
     if (!project.rowCount) return res.status(404).json({ reply: 'Project not found.' });
 
+    if(String(req.user.role).toUpperCase()!=='MANAGER'){
+      const membership=await db.query("select project_role from project_members where project_id=$1 and user_id=$2",[projectId,req.user.sub]);
+      if(!membership.rowCount||!['QA','PROJECT_MANAGER'].includes(membership.rows[0].project_role))return res.status(403).json({reply:'Project QA or manager access required.'});
+    }
     if (repositoryId) {
       const repository = await db.query('select id from source_repositories where id=$1 and project_id=$2 and source_enabled=true', [repositoryId, projectId]);
       if (!repository.rowCount) return res.status(400).json({ reply: 'Repository does not belong to this project or is disabled.' });
     }
 
+    if (storyId) { const story=await db.query('select id from project_stories where id=$1 and project_id=$2',[storyId,projectId]); if(!story.rowCount)return res.status(400).json({reply:'Story does not belong to selected project.'}); }
+    if(taskId){const task=await db.query('select id from work_items where id=$1 and project_id=$2 and deleted_at is null',[taskId,projectId]);if(!task.rowCount)return res.status(400).json({reply:'Task does not belong to this project or has been deleted.'});}
+    const existingSession=await db.query('select project_id,created_by from test_sessions where id=$1',[req.params.sessionId]);
+    if(existingSession.rowCount){
+      const row=existingSession.rows[0];
+      if(row.project_id&&String(row.project_id)!==projectId)return res.status(409).json({reply:'This session is already associated with another project.'});
+      if(row.created_by&&String(row.created_by)!==String(req.user.sub)&&String(req.user.role).toUpperCase()!=='MANAGER')return res.status(403).json({reply:'Only the session owner or platform manager may attach its project context.'});
+    }
     const session = getSession(req.params.sessionId);
+    const environmentCounts=await db.query('select count(*)::int total,count(*) filter (where is_active=true)::int active from project_environments where project_id=$1',[projectId]);
+    if(environmentCounts.rows[0]?.total>0&&!environmentCounts.rows[0]?.active)return res.status(409).json({reply:'All project environments are disabled. Enable one before creating new test transactions.'});
+    if(session.environment){const disabled=await db.query('select id from project_environments where project_id=$1 and lower(name)=lower($2) and is_active=false',[projectId,String(session.environment)]);if(disabled.rowCount)return res.status(409).json({reply:'The selected environment is disabled for new transactions. Start testing from an active environment.'});}
+    session.projectStoryId = storyId || null;
+    session.contextSource = { type: sourceType, storyId: storyId || null, taskId: taskId || null };
     session.projectId = projectId;
     session.repositoryId = repositoryId || null;
     session.createdBy = req.user.sub;
     await persistence.persistSession(req.params.sessionId, session, { projectId, repositoryId: repositoryId || null, userId: req.user.sub });
-    res.json({ ok: true, projectId, repositoryId: repositoryId || null });
+    await db.query('update test_sessions set project_story_id=$1 where id=$2 and project_id=$3',[storyId||null,req.params.sessionId,projectId]);
+    if(taskId){await db.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TASK_SESSION_CONTEXT_SELECTED',$4::jsonb)",[projectId,req.params.sessionId,req.user.sub,JSON.stringify({taskId})]);}
+    if(storyId){
+      const linked=await db.query('insert into story_test_sessions(story_id,session_id) values($1,$2) on conflict do nothing returning story_id',[storyId,req.params.sessionId]);
+      if(linked.rowCount)await db.query("insert into project_audit_events(project_id,story_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,$4,'STORY_SESSION_LINKED',$5::jsonb)",[projectId,storyId,req.params.sessionId,req.user.sub,JSON.stringify({repositoryId:repositoryId||null})]);
+    }
+    res.json({ ok: true, projectId, repositoryId: repositoryId || null, storyId: storyId||null, taskId: taskId||null, sourceType });
   } catch (err) {
     res.status(500).json({ reply: err.message });
   }

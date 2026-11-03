@@ -223,7 +223,7 @@
     const paths = $('additionalPaths').value.split(',').map((v) => v.trim()).filter(Boolean);
     const credentials = { username: $('username').value, password: $('password').value };
     const payload = {
-      sessionId, message: story, targetUrl, additionalPaths: paths,
+      sessionId, message: story, targetUrl, additionalPaths: paths, environment: $('environment')?.value || 'Test',
       credentials,
       aiModelTier: $('aiModelTier')?.value || 'fast',
       bypassDiscoveryCache: Boolean($('bypassDiscoveryCache')?.checked),
