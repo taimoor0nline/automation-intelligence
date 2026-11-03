@@ -14,13 +14,14 @@ async function api(url,init={}){
  return data;
 }
 function projectUrl(path){return path+'?projectId='+encodeURIComponent(projectId);}
+function projectWorkspaceUrl(section='details'){return '/workspace.html?projectId='+encodeURIComponent(projectId)+'#'+section;}
 function linkedNavigation(){
- $('navProject').href='/workspace.html#details';
- $('navTasks').href='/workspace.html#tasks';
- $('navEnvironment').href=projectUrl('/environment-config.html');
- if($('mgBack'))$('mgBack').href=page==='project-create'?'/workspace.html#projects':page==='environment-form'?projectUrl('/environment-config.html'):'/workspace.html#'+(page==='task-create'?'tasks':'details');
+ $('navProject').href=projectId?projectWorkspaceUrl('details'):'/workspace.html#projects';
+ $('navTasks').href=projectId?projectWorkspaceUrl('tasks'):'/workspace.html#projects';
+ $('navEnvironment').href=projectId?projectUrl('/environment-config.html'):'/workspace.html#projects';
+ if($('mgBack'))$('mgBack').href=page==='project-create'?'/workspace.html#projects':page==='environment-form'?projectUrl('/environment-config.html'):projectId?projectWorkspaceUrl(page==='task-create'?'tasks':'details'):'/workspace.html#projects';
  const cancel=$('mgEnvCancel');if(cancel)cancel.href=projectUrl('/environment-config.html');
- const taskCancel=$('mgTaskCancel');if(taskCancel)taskCancel.href='/workspace.html#tasks';
+ const taskCancel=$('mgTaskCancel');if(taskCancel)taskCancel.href=projectWorkspaceUrl('tasks');
 }
 function icon(name,description,urlOrFn,kind=''){
  const paths={eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
@@ -79,7 +80,7 @@ async function initProjectCreate(){
    localStorage.setItem('testnexus:currentProject',projectId);
    await api('/api/projects/'+encodeURIComponent(projectId)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:v.referenceNo||'',startDate:v.startDate||null,endDate:v.endDate||null})});
    const files=[...input.files];await upload(projectId,files);
-   location.assign('/workspace.html#details');
+   location.assign(projectWorkspaceUrl('details'));
   }catch(err){
    feedback(project?'Project was created, but setup was not fully completed: '+err.message+' Open Project Details to finish.':err.message);
    lock(null,false);
@@ -101,7 +102,7 @@ async function initTaskCreate(workspace){
    v.dueAt=v.dueAt?new Date(v.dueAt).toISOString():null;
    v.assignedTo=v.assignedTo||null;
    await api('/api/projects/'+encodeURIComponent(projectId)+'/work-items',{method:'POST',body:JSON.stringify(v)});
-   location.assign('/workspace.html#tasks');
+   location.assign(projectWorkspaceUrl('tasks'));
   }catch(err){feedback(err.message);lock(null,false);}
  };
 }
