@@ -71,7 +71,9 @@ function initTable(table){
   const idx=sorting.index;
   const rows=[...tbody.rows];
   rows.sort((a,b)=>{
-   const av=a.cells[idx]?.textContent.trim()||'',bv=b.cells[idx]?.textContent.trim()||'';
+   // A cell's data-sort (e.g. an ISO date or a number) sorts correctly when the shown text is formatted.
+   const key=cell=>(cell?.dataset.sort??cell?.textContent??'').trim();
+   const av=key(a.cells[idx]),bv=key(b.cells[idx]);
    const an=Number(av),bn=Number(bv);
    const result=av&&bv&&Number.isFinite(an)&&Number.isFinite(bn)?an-bn:av.localeCompare(bv,undefined,{numeric:true,sensitivity:'base'});
    return result*sorting.direction;
@@ -79,7 +81,9 @@ function initTable(table){
   observer.disconnect();for(const r of rows)tbody.append(r);observer.observe(tbody,{childList:true});
  }
  function render(){
-  const rows=[...tbody.rows],q=search.value.toLocaleLowerCase(),column=filter.value===''?-1:Number(filter.value);
+  // The "No items" message row is not data: always shown when the table is empty, never counted.
+  const emptyRows=[...tbody.rows].filter(r=>r.querySelector('td.tn-empty'));
+  const rows=[...tbody.rows].filter(r=>!emptyRows.includes(r)),q=search.value.toLocaleLowerCase(),column=filter.value===''?-1:Number(filter.value);
   const colq=value.value.toLocaleLowerCase();
   const filtered=rows.filter(row=>{
    const full=row.textContent.toLocaleLowerCase();
@@ -91,6 +95,7 @@ function initTable(table){
   page=Math.max(1,Math.min(page,totalPages));
   const set=new Set(filtered.slice((page-1)*per,page*per));
   for(const row of rows)row.hidden=!set.has(row);
+  for(const row of emptyRows)row.hidden=rows.length>0;
   info.textContent=filtered.length+' row(s) · '+(filtered.length?(page-1)*per+1:0)+'–'+Math.min(page*per,filtered.length)+' shown';
   pageNo.textContent='Page '+page+' of '+totalPages;
   prev.disabled=page<=1;next.disabled=page>=totalPages;
@@ -109,7 +114,7 @@ function initTable(table){
  prev.onclick=()=>{page--;render();};
  next.onclick=()=>{page++;render();};
  headers.forEach((header,index)=>{
-  if(!header.textContent.trim()||header.querySelector('input,button'))return;
+  if(!header.textContent.trim()||header.querySelector('input,button')||['Actions','Action'].includes(header.textContent.trim()))return;
   header.classList.add('tn-sort-column');
   header.tabIndex=0;header.setAttribute('role','button');header.setAttribute('aria-label','Sort by '+header.textContent.trim());
   const change=()=>{if(sorting.index===index)sorting.direction*=-1;else sorting={index,direction:1};sortRows();render();};

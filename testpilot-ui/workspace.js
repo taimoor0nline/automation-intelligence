@@ -27,6 +27,20 @@ function actionLink(name,href,label){
 function viewDetailsLink(project){
  return '<a class="btn btn-sm tn-view-details" href="'+esc(projectRoute(project.id))+'" aria-label="View project details: '+esc(project.name)+'"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+iconPaths.eye+'</svg>View details</a>';
 }
+// One row of the projects list. Clicking the row opens the project (same as View details).
+function projectRow(p){
+ const passed=Number(p.passed_total||0),failed=Number(p.failed_total||0),total=passed+failed;
+ const rate=total?Math.round(100*passed/total):null;
+ const rateHtml=rate===null?'<span class="tn-muted">No runs</span>':'<span class="tn-rate '+(rate>=90?'is-good':rate>=70?'is-warn':'is-bad')+'">'+rate+'%</span>';
+ const manager=p.manager_name?'<span class="tn-row-person"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(p.manager_name))+'</span>'+esc(p.manager_name)+'</span>':'<span class="tn-muted">—</span>';
+ const envs=Number(p.environment_count||0);
+ return '<tr class="tn-row-link" data-href="'+esc(projectRoute(p.id))+'"><td>'+display(p.reference_no)+'</td><td><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.description||'')+'</div></td>'
+  +'<td>'+manager+'</td><td data-sort="'+envs+'">'+(envs?envs+' active':'<span class="tn-muted">None</span>')+'</td>'
+  +'<td data-sort="'+esc(p.last_run_at||'')+'">'+(p.last_run_at?date(p.last_run_at):'<span class="tn-muted">Never</span>')+'</td>'
+  +'<td data-sort="'+(rate===null?-1:rate)+'">'+rateHtml+'</td>'
+  +'<td data-sort="'+esc(p.created_at||'')+'">'+date(p.created_at)+'</td>'
+  +'<td><span class="tn-icon-actions">'+viewDetailsLink(p)+actionIcon('edit','data-edit-project="'+esc(p.id)+'"','Edit project '+p.name)+actionIcon('play','data-start-project="'+esc(p.id)+'"','Start testing project '+p.name)+'</span></td></tr>';
+}
 function projectRoute(projectId,section='details'){
  return '/workspace.html?projectId='+encodeURIComponent(projectId)+'#'+section;
 }
@@ -43,8 +57,8 @@ async function api(url,options={}){
 }
 async function loadTaskLinks(id){const box=$('drawerTestLinks');box.textContent='Loading linked cases…';try{const d=await api('/api/work-items/'+encodeURIComponent(id)+'/test-links');if(state.taskId!==id)return;const canEdit=['PROJECT_MANAGER','QA'].includes(state.taskRole);box.innerHTML=d.links.length?d.links.map(x=>'<div class="tn-sub tn-row"><span><strong>'+esc(x.external_case_id)+'</strong><span class="tn-muted d-block">Session '+esc(x.session_id)+'</span></span><span class="tn-icon-actions">'+actionIcon('remove','data-unlink-test="'+esc(x.id)+'"','Unlink case '+x.external_case_id)+'</span></div>').join(''):'<p class="tn-muted">No reusable test cases linked. Use the form below to add one.</p>'; }catch(err){box.textContent='Unable to load linked cases: '+err.message;}}
 function formPayload(form){return Object.fromEntries(new FormData(form).entries());}
-function date(v){return v?new Date(v).toLocaleDateString():'—';}
-function dateTime(v){return v?new Date(v).toLocaleString():'—';}
+function date(v){return v?new Date(v).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'—';}
+function dateTime(v){return v?new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}):'—';}
 function display(v){return v?esc(v):'<span class="tn-muted">Not set</span>';}
 function statusTag(s){const x=String(s||'PENDING');const c=x==='COMPLETED'?'success':x==='ON_HOLD'?'warn':x==='PENDING'?'':'danger';return '<span class="tn-tag '+c+'">'+esc(x.replaceAll('_',' '))+'</span>';}
 const detailViews=new Set(['details','stories','inventory','executions','tasks','team','attachments']);
@@ -74,17 +88,20 @@ function show(view,historyMode='push'){
   // Manager shown as a profile circle + name, followed by the project's key facts.
   const managerHtml=manager?'<span class="tn-head-person"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(manager.display_name||manager.email))+'</span><span><strong>'+esc(manager.display_name||manager.email)+'</strong> · Project manager</span></span>':'';
   $('pageSubtitle').innerHTML=managerHtml+(facts.length?'<span class="tn-head-facts">'+esc(facts.join('  ·  '))+'</span>':'')||'Project workspace';
-  $('breadcrumb').textContent='PROJECTS / '+(project.reference_no||'PROJECT')+' / '+String(labels[view]||'').replace(/^Project /,'').toUpperCase();
+  const section=String(labels[view]||'').replace(/^Project /,'');
+  $('breadcrumb').innerHTML='<a href="/workspace.html#projects">Projects</a><span aria-hidden="true">›</span>'+esc(project.reference_no||project.name||'Project')+'<span aria-hidden="true">›</span><span aria-current="page">'+esc(section.charAt(0).toUpperCase()+section.slice(1))+'</span>';
  }else{
   $('pageTitle').textContent=labels[view]||'TestNexus';
-  $('pageSubtitle').textContent=view==='overview'?'Open a project and continue where your team left off':view==='projects'?'Open a project with View details to see everything about it and start testing':'Execution results and reports';
-  $('breadcrumb').textContent='PROJECT WORKSPACE';
+  $('pageSubtitle').textContent=view==='overview'?'Open a project and continue where your team left off':view==='projects'?'Open a project to see its details, environments and test results, or start testing directly':'Execution results and reports';
+  $('breadcrumb').textContent='Project workspace';
  }
  clearNotice();
  if((view==='reports'||view==='executions')&&state.projectId)loadSavedReports().catch(e=>notice(e.message));
  if(view==='inventory'&&state.projectId)loadInventory().catch(e=>notice(e.message));
  if(view==='team'&&state.projectId)loadTeams().catch(e=>notice(e.message));
- for(const el of document.querySelectorAll('.tn-page-actions [data-start-project],#backToProjects'))el.hidden=!inDetails;
+ const startCardShown=view==='details'&&$('projectStartCard')&&!$('projectStartCard').hidden;
+ for(const el of document.querySelectorAll('.tn-page-actions [data-start-project]'))el.hidden=!inDetails||startCardShown;
+ if($('backToProjects'))$('backToProjects').hidden=!inDetails;
  const configLink=$('navEnvironmentConfig');if(configLink)configLink.hidden=!inDetails;
  const path=inDetails?projectRoute(state.projectId,view):'/workspace.html#'+view;
  if(historyMode!=='none'&&window.location.pathname+window.location.search+window.location.hash!==path){
@@ -128,7 +145,7 @@ async function loadProjects(){
  picker.innerHTML='<option value="">Select project</option>'+state.projects.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
  picker.value=state.projectId;
  localStorage.setItem('testnexus:currentProject',state.projectId);
- $('projectsBody').innerHTML=state.projects.map(p=>'<tr><td>'+display(p.reference_no)+'</td><td><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.description||'')+'</div></td><td>'+date(p.created_at)+'</td><td><span class="tn-icon-actions">'+viewDetailsLink(p)+actionIcon('edit','data-edit-project="'+esc(p.id)+'"','Edit project '+p.name)+actionIcon('play','data-start-project="'+esc(p.id)+'"','Start testing project '+p.name)+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No projects yet. Create your first project.</td></tr>';
+ $('projectsBody').innerHTML=state.projects.map(projectRow).join('')||'<tr><td colspan="8" class="tn-empty">No projects yet. Create your first project.</td></tr>';
  $('homeProjectsCount').textContent=state.projects.length;
  $('homeProjects').innerHTML=state.projects.slice(0,6).map(p=>'<div class="tn-home-project"><div><strong>'+esc(p.name)+'</strong><div class="tn-muted">'+esc(p.reference_no||'Project')+' · '+date(p.created_at)+'</div></div><span class="tn-icon-actions">'+actionIcon('folder','data-open-project="'+esc(p.id)+'"','Open project '+p.name)+actionIcon('play','data-start-project="'+esc(p.id)+'"','Start testing project '+p.name)+'</span></div>').join('')||'<div class="tn-empty">No projects yet. Create your first project from Projects.</div>';
  let loaded=false,lastError=null;
@@ -159,6 +176,7 @@ function applyRoleUI(){
  const toggles=[['newProjectForm',globalManager],['memberForm',projectManager],['userForm',globalManager],['environmentForm',projectManager],['newTaskForm',canReview],['storyForm',canReview]];
  for(const [id,allowed] of toggles){const form=$(id);if(!form)continue;form.querySelectorAll('input,select,textarea,button').forEach(el=>{el.disabled=!allowed;});if(['newProjectForm','memberForm','userForm'].includes(id))form.hidden=!allowed;}
  $('editProfile').disabled=!projectManager;
+ if($('addScope'))$('addScope').hidden=!projectManager;
  $('attachmentsEditProfile').disabled=!projectManager;
  for(const [zoneId,inputId] of [['detailDrop','detailFiles'],['projectDrop','projectFiles']]){
   $(zoneId).setAttribute('aria-disabled',String(!canReview));
@@ -180,12 +198,14 @@ function renderOverview(){
  $('profileScope').innerHTML='<strong>Objectives</strong><div>'+display(p.objectives)+'</div><strong class="d-block mt-2">In scope</strong><div>'+display(p.scope_in)+'</div>';
  $('profileAcceptance').innerHTML='<strong>Excluded</strong><div>'+display(p.scope_out)+'</div><strong class="d-block mt-2">Acceptance</strong><div>'+display(p.acceptance_criteria)+'</div>';
  $('profileRules').innerHTML=display(p.business_rules);
- $('profileMeta').innerHTML='<div class="tn-kv"><span>Target URL</span><span>'+display(p.target_url)+'</span></div><div class="tn-kv"><span>Technology</span><span>'+display(p.technology_stack)+'</span></div><div class="tn-kv"><span>Dates</span><span>'+date(p.start_date)+' – '+date(p.end_date)+'</span></div><div class="tn-kv"><span>Reference</span><span>'+display(p.reference_no)+'</span></div>';
+ const noScope=![p.objectives,p.scope_in,p.scope_out,p.acceptance_criteria,p.business_rules].some(v=>String(v||'').trim());
+ $('profileScopeGrid').classList.toggle('d-none',noScope);$('profileScopeEmpty').classList.toggle('d-none',!noScope);
+ $('profileMeta').innerHTML='<div class="tn-kv"><span>Target URL</span><span>'+display(p.target_url)+'</span></div><div class="tn-kv"><span>Technology</span><span>'+display(p.technology_stack)+'</span></div>'+(p.start_date||p.end_date?'<div class="tn-kv"><span>Dates</span><span>'+date(p.start_date)+' – '+date(p.end_date)+'</span></div>':'')+'<div class="tn-kv"><span>Reference</span><span>'+display(p.reference_no)+'</span></div>';
  const latest=c.runs[0]||null;const pending=state.tasks.filter(t=>!t.deleted_at&&t.status==='READY_FOR_RETEST').length;const successes=c.runs.reduce((n,r)=>n+Number(r.passed||0),0),failures=c.runs.reduce((n,r)=>n+Number(r.failed||0),0);const rate=successes+failures?Math.round(100*successes/(successes+failures))+'%':'—';$('overviewHealth').innerHTML='<div class="tn-health-chip"><strong>'+rate+'</strong>Recorded pass rate</div><div class="tn-health-chip"><strong>'+pending+'</strong>Ready for retest</div><div class="tn-health-chip"><strong>'+(latest?'#'+esc(latest.run_number):'—')+'</strong>Latest run</div><div class="tn-health-chip"><strong>'+c.environments.length+'</strong>Environments</div>';
  if($('statRate'))$('statRate').textContent=rate;
  if($('statRetest'))$('statRetest').textContent=pending;
  $('environmentList').innerHTML=c.environments.map(e=>'<div class="tn-kv"><span>'+esc(e.name)+(e.is_default?' ★':'')+'</span><span>'+esc(e.base_url)+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
- renderDetailEnvironments(c);renderStartCard(c);
+ renderDetailEnvironments(c);renderStartCard(c);renderRecentRuns(c);
  $('profileDocumentList').innerHTML=c.documents.map(d=>'<div class="tn-kv"><span>'+esc(d.category)+'</span><span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button> <small class="tn-muted">'+Math.ceil(d.file_size/1024)+' KB</small></span></div>').join('')||'<div class="tn-muted">No documents attached yet.</div>';
  $('detailDocumentsList').innerHTML=c.documents.map(d=>'<tr><td><strong>'+esc(d.filename)+'</strong></td><td>'+esc(d.category||'OTHER')+'</td><td>'+Math.ceil(d.file_size/1024)+' KB</td><td>'+date(d.created_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('download','data-doc="'+esc(d.id)+'"','Download '+d.filename)+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No project attachments. Upload documents above.</td></tr>';
 }
@@ -299,7 +319,7 @@ async function loadTeams(){
  if($('newTaskAssignee'))$('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+(assignees.users||[]).map(u=>'<option value="'+esc(u.id)+'">'+esc(u.display_name)+'</option>').join('');
 }
 function renderTeam(){
- $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td>'+esc(m.display_name)+'</td><td>'+esc(m.email)+'</td><td>'+statusTag(m.project_role)+'</td><td><span class="tn-icon-actions">'+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-remove-project-member="'+esc(m.user_id)+'"','Remove project member '+m.display_name):'')+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No members.</td></tr>';
+ $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td>'+esc(m.display_name)+'</td><td>'+esc(m.email)+'</td><td><span class="tn-role-chip role-'+esc(m.project_role||'')+'">'+esc(ROLE_LABELS[m.project_role]||m.project_role||'Member')+'</span></td><td><span class="tn-icon-actions">'+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-remove-project-member="'+esc(m.user_id)+'"','Remove project member '+m.display_name):'')+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No members.</td></tr>';
  const list=state.users||state.context.members;
  $('memberUser').innerHTML='<option value="">Select user</option>'+list.map(x=>'<option value="'+esc(x.id||x.user_id)+'">'+esc(x.displayName||x.display_name||x.email)+'</option>').join('');
  if($('newTaskAssignee'))$('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+state.context.members.map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
@@ -310,14 +330,32 @@ function renderTeam(){
 function renderDetailEnvironments(c){
  const box=$('detailEnvironments');if(!box)return;
  if($('detailEnvManage'))$('detailEnvManage').href='/environment-config.html?projectId='+encodeURIComponent(state.projectId||'');
- box.innerHTML=c.environments.map(e=>'<div class="tn-env-row'+(e.is_active===false?' is-disabled':'')+'"><div><div class="tn-env-name">'+esc(e.name)+(e.is_default?'<span class="tn-chip tn-chip-blue">Default</span>':'')+(e.is_active===false?'<span class="tn-chip">Disabled</span>':'')+'</div><div class="tn-env-meta">'+esc(e.stage_type||'')+' · '+esc(e.base_url)+'</div></div><span class="tn-env-login'+(e.login_required?' is-on':'')+'">'+(e.login_required?'Login ✓':'No login')+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
+ box.innerHTML=c.environments.map(e=>'<div class="tn-env-row'+(e.is_active===false?' is-disabled':'')+'"><div><div class="tn-env-name">'+esc(e.name)+(e.is_default?'<span class="tn-chip tn-chip-blue">Default</span>':'')+(e.is_active===false?'<span class="tn-chip">Disabled</span>':'')+'</div><div class="tn-env-meta">'+esc(e.stage_type||'')+' · '+esc(e.base_url)+'</div></div><span class="tn-env-login'+(e.login_required?' is-on':'')+'">'+(e.login_required?'Login ✓'+(e.test_user_count>1?' · '+e.test_user_count+' users':''):'No login')+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
 }
 const ROLE_LABELS={PROJECT_MANAGER:'Project manager',QA:'QA',DEVELOPER:'Developer',VIEWER:'Viewer'};
 function initialsOf(name){return String(name||'?').split(/[\s@._-]+/).filter(Boolean).slice(0,2).map(x=>x[0].toUpperCase()).join('')||'?';}
 function renderDetailTeam(){
  const box=$('detailTeam');if(!box)return;
  const members=state.context?.members||[];
- box.innerHTML=members.map((m,i)=>'<div class="tn-person"><span class="tn-avatar tn-avatar-'+(i%4)+'" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><div><div class="tn-person-name">'+esc(m.display_name||m.email)+'</div><div class="tn-person-role">'+esc(ROLE_LABELS[m.project_role]||m.project_role||'Member')+'</div></div></div>').join('')||'<div class="tn-muted">No members.</div>';
+ const person=(m,i)=>'<div class="tn-person"><span class="tn-avatar tn-avatar-'+(i%4)+'" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><div><div class="tn-person-name">'+esc(m.display_name||m.email)+'</div><div class="tn-person-role">'+esc(ROLE_LABELS[m.project_role]||m.project_role||'Member')+'</div></div></div>';
+ const LIMIT=5,showAll=box.dataset.showAll==='true'||members.length<=LIMIT;
+ box.innerHTML=(showAll?members:members.slice(0,LIMIT)).map(person).join('')||'<div class="tn-muted">No members.</div>';
+ if(members.length>LIMIT){
+  const more=document.createElement('button');more.type='button';more.className='tn-show-more';
+  more.textContent=showAll?'Show less':'Show all '+members.length+' members';
+  more.onclick=()=>{box.dataset.showAll=String(!showAll);renderDetailTeam();};
+  box.append(more);
+ }
+}
+// Last 5 runs on the project details page (newest first).
+function renderRecentRuns(c){
+ const box=$('detailRecentRuns');if(!box)return;
+ const runs=(c.runs||[]).slice(0,5);
+ box.innerHTML=runs.map(r=>{
+  const passed=Number(r.passed||0),failed=Number(r.failed||0),total=passed+failed,rate=total?Math.round(100*passed/total):0;
+  return '<div class="tn-run-row"><div><div class="tn-run-title">Run #'+esc(r.run_number)+(r.environment?' · '+esc(r.environment):'')+'</div><div class="tn-muted">'+esc(dateTime(r.completed_at))+(r.executed_by_name?' · '+esc(r.executed_by_name):'')+'</div></div>'
+   +'<div class="tn-run-result"><span class="tn-run-bar" aria-hidden="true"><span style="width:'+rate+'%"></span></span><span class="tn-run-counts"><b class="tn-pass">'+passed+' passed</b>'+(failed?' · <b class="tn-fail">'+failed+' failed</b>':'')+'</span></div></div>';
+ }).join('')||'<div class="tn-empty-inline">No test runs yet. Use <strong>Start Testing</strong> above to run this project&#39;s first tests.</div>';
 }
 function renderStartCard(c){
  const env=$('startEnvironment'),story=$('startStory');if(!env||!story)return;
@@ -506,6 +544,9 @@ function bind(){
    tabs[next].focus();
   });
  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{show(el.dataset.go);if(el.dataset.go==='stories')clearStory();});
+ // Projects list: clicking anywhere on a row (except its buttons) opens the project.
+ $('projectsBody').addEventListener('click',e=>{if(e.target.closest('a,button,input,select'))return;const row=e.target.closest('tr[data-href]');if(row)window.location.href=row.dataset.href;});
+ if($('addScope'))$('addScope').onclick=()=>$('editProfile').click();
  $('projectPicker').onchange=async e=>{closeTask();state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();show(state.projectId?'details':'projects');}catch(err){notice(err.message);}};
  $('environmentForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments',{method:'POST',body:JSON.stringify({...vals,isDefault:!!e.target.elements.namedItem('isDefault').checked})});e.target.reset();await loadWorkspace();notice('Environment saved.','success');}catch(err){notice(err.message);}};
  $('storyForm').onsubmit=async e=>{e.preventDefault();try{await saveStory();}catch(err){notice(err.message);}};
@@ -601,7 +642,7 @@ function enableSearchableSelects(){
 async function initialize(){
  bind();enableSearchableSelects();try{
  if(!token()){location.replace('/login.html');return;}
- const me=await api('/api/auth/me');state.user=me.user;const userName=me.user?.name||me.user?.email||'';$('currentUser').innerHTML=userName?'<span class="tn-avatar tn-user-avatar" aria-hidden="true">'+esc(initialsOf(userName))+'</span><span>'+esc(userName)+'</span>':'';
+ const me=await api('/api/auth/me');state.user=me.user;window.TestNexusProfileMenu?.mount('currentUser',me.user||{});
  await loadProjects();await fetchDirectory();clearStory();
  await routeFromUrl();
  }catch(e){if(/auth|token|unauthoriz|sign.in/i.test(e.message))location.replace('/login.html');else notice(e.message);}

@@ -357,3 +357,66 @@ body,.tn-container{background:#eef2f7}
 /* Signed-in user in the navy top bar: profile circle + name */
 .tn-top #currentUser{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:500;color:#e0e7ff}
 .tn-user-avatar{width:30px;height:30px;flex:0 0 30px;background:#60a5fa;color:#0f1f5c;font-size:12px;font-weight:700;box-shadow:0 0 0 2px rgba(255,255,255,.35)}
+/* Profile menu sits at the right end of the navy bar */
+.tn-top .tnp{margin-left:auto}
+
+/* Projects list: clickable rows, lighter View details, manager and pass rate */
+.tn-row-link{cursor:pointer}
+.tn-row-link:hover td{background:#f5f8ff}
+.tn-row-person{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.tn-row-person .tn-avatar{width:26px;height:26px;flex-basis:26px;font-size:11px}
+.tn-rate{display:inline-block;min-width:48px;padding:3px 9px;border-radius:999px;font-size:12.5px;font-weight:600;text-align:center}
+.tn-rate.is-good{background:#dcfce7;color:#166534}.tn-rate.is-warn{background:#fef3c7;color:#92400e}.tn-rate.is-bad{background:#fee2e2;color:#991b1b}
+
+/* Breadcrumb: normal case, first part clickable */
+#breadcrumb{display:flex;align-items:center;gap:7px;text-transform:none;letter-spacing:0;font-size:13px;font-weight:500;color:#64748b}
+#breadcrumb a{color:#1d4ed8;text-decoration:none}#breadcrumb a:hover{text-decoration:underline}
+#breadcrumb [aria-current]{color:#0f172a}
+
+/* Environments link at the end of the project tabs (opens the environment settings page) */
+.tn-detail-tabs .tn-tab-link{display:inline-flex;align-items:center;gap:7px;padding:12px 14px;border-radius:8px 8px 0 0;color:#475569;font-size:14px;font-weight:500;text-decoration:none}
+.tn-detail-tabs .tn-tab-link svg{color:#64748b}
+
+.tn-detail-tabs .tn-tab-link:hover{background:#eef2f7;color:#0f172a}
+.tn-detail-tabs .tn-tab-link:focus-visible{outline:3px solid #94adff;outline-offset:2px}
+
+/* Details page: left column holds Scope + Recent runs */
+.tn-details-main{display:flex;flex-direction:column;gap:20px;min-width:0}
+.tn-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:34px 24px}
+.tn-empty-state strong{font-size:15px;color:#0f172a}
+.tn-empty-state .tn-muted{max-width:440px;font-size:13.5px;line-height:1.5}
+.tn-empty-state .btn{margin-top:6px}
+.tn-empty-inline{padding:14px 4px;color:#64748b;font-size:13.5px}
+.tn-run-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:11px 4px;border-bottom:1px solid #f1f5f9}
+.tn-run-row:last-child{border-bottom:0}
+.tn-run-title{font-weight:600;color:#0f172a;font-size:13.5px}
+.tn-run-row .tn-muted{font-size:12.5px}
+.tn-run-result{display:flex;align-items:center;gap:12px;flex:0 0 auto}
+.tn-run-bar{width:120px;height:8px;border-radius:999px;background:#fee2e2;overflow:hidden}
+.tn-run-bar span{display:block;height:100%;background:#22c55e;border-radius:999px}
+.tn-run-counts{font-size:12.5px;white-space:nowrap}
+.tn-pass{color:#166534;font-weight:600}.tn-fail{color:#b91c1c;font-weight:600}
+.tn-show-more{display:block;width:100%;margin-top:6px;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#1d4ed8;font-size:13px;font-weight:600;cursor:pointer}
+.tn-show-more:hover{background:#eef2ff;border-color:#93b4f5}
+@media(max-width:640px){.tn-run-row{flex-direction:column;align-items:flex-start}.tn-run-bar{width:90px}.tn-detail-tabs .tn-tab-link{margin-left:0}}
+/* Dates stay on one line in tables */
+.tn-table td[data-sort]{white-space:nowrap}
+/* Top bar text in pure white */
+.tn-top .nav-pills .nav-link,.tn-top .tn-brand small,.tn-top #currentUser{color:#fff}
+/* Team tab: search + dropdown side by side, buttons never squeezed */
+#teamAttachForm{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:center}
+#teamAttachForm .tn-select-search,#teamMemberForm .tn-select-search{margin:0 0 6px!important}
+#teamAttachForm .tn-select-search{margin:0!important}
+#teamAttachForm .tn-select-search,#teamAttachForm .form-select{height:38px;min-height:38px!important}
+#teamAttachForm .btn,#teamCreateForm .btn,#teamMemberForm .btn{white-space:nowrap;min-width:88px;height:38px;display:inline-flex;align-items:center;justify-content:center}
+#teamMemberForm{align-items:flex-end}
+#teamMemberForm .btn{width:100%}
+@media(max-width:600px){#teamAttachForm{grid-template-columns:1fr}}
+/* Empty table message centred */
+.tn-table td.tn-empty{text-align:center!important;color:#64748b;padding:22px 12px}
+/* Project roles as neutral role chips (not error red) */
+.tn-role-chip{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.3px;white-space:nowrap}
+.tn-role-chip.role-PROJECT_MANAGER{background:#e0e7ff;color:#3730a3}
+.tn-role-chip.role-QA{background:#dcfce7;color:#166534}
+.tn-role-chip.role-DEVELOPER{background:#fef3c7;color:#92400e}
+.tn-role-chip.role-VIEWER{background:#f1f5f9;color:#475569}

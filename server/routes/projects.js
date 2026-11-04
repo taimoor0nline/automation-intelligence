@@ -9,7 +9,18 @@ router.get('/api/projects', requireAuth, async (req, res) => {
     const result = ['QA','MANAGER'].includes(role)
       ? await db.query(`select p.*, u.display_name as created_by_name from projects p left join users u on u.id=p.created_by order by p.created_at desc`)
       : await db.query(`select distinct p.* from projects p left join project_members pm on pm.project_id=p.id left join test_runs tr on tr.project_id=p.id left join defect_analyses da on da.run_id=tr.id where pm.user_id=$1 or da.assigned_to=$1 order by p.created_at desc`, [req.user.sub]);
-    res.json({ ok: true, projects: result.rows });
+    // List summary per project: manager, active environments, last run and recorded pass/fail totals.
+    const ids = result.rows.map((p) => p.id);
+    const summary = ids.length ? await db.query(`select p.id,
+      (select u.display_name from project_members pm join users u on u.id=pm.user_id where pm.project_id=p.id and pm.project_role='PROJECT_MANAGER' order by u.display_name limit 1) as manager_name,
+      (select count(*)::int from project_environments e where e.project_id=p.id and e.is_active) as environment_count,
+      (select max(r.completed_at) from test_runs r where r.project_id=p.id) as last_run_at,
+      (select coalesce(sum(r.passed),0)::int from test_runs r where r.project_id=p.id) as passed_total,
+      (select coalesce(sum(r.failed),0)::int from test_runs r where r.project_id=p.id) as failed_total
+      from projects p where p.id = any($1::uuid[])`, [ids]) : { rows: [] };
+    const byId = new Map(summary.rows.map((row) => [row.id, row]));
+    const projects = result.rows.map((p) => { const { id: _id, ...extra } = byId.get(p.id) || {}; return { ...p, ...extra }; });
+    res.json({ ok: true, projects });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 

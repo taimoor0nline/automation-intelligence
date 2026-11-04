@@ -68,7 +68,8 @@ function emitAssertion(assertion) {
     case "ASSERT_EXISTS": return `    cy.get(${selector}).should('exist');`;
     case "ASSERT_NOT_EXISTS": return `    cy.get(${selector}).should('not.exist');`;
     case "ASSERT_VISIBLE": return `    cy.get(${selector}).should('be.visible');`;
-    case "ASSERT_HIDDEN": return `    cy.get(${selector}).should('not.be.visible');`;
+    // Hidden = not visible to the user. Also passes when the element is gone (e.g. login error after redirect to another page).
+    case "ASSERT_HIDDEN": return `    cy.get('body').should(($body) => { const visible = $body.find(${selector}).toArray().filter((el) => Cypress.dom.isVisible(el)); expect(visible.length, ${selector} + ' is hidden').to.eq(0); });`;
     case "ASSERT_HIDDEN_OR_ABSENT": return `    cy.get('body').then(($body) => { const $el = $body.find(${selector}); if ($el.length) cy.wrap($el).should('not.be.visible'); });`;
     case "ASSERT_ELEMENT_IN_VIEWPORT": return `    cy.get(${selector}).should(($el) => { const rect = $el[0].getBoundingClientRect(); const win = $el[0].ownerDocument.defaultView; expect(rect.bottom > 0 && rect.right > 0 && rect.top < win.innerHeight && rect.left < win.innerWidth).to.eq(true); });`;
     case "ASSERT_ELEMENT_NOT_IN_VIEWPORT": return `    cy.get(${selector}).should(($el) => { const rect = $el[0].getBoundingClientRect(); const win = $el[0].ownerDocument.defaultView; expect(rect.bottom <= 0 || rect.right <= 0 || rect.top >= win.innerHeight || rect.left >= win.innerWidth).to.eq(true); });`;

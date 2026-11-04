@@ -25,7 +25,7 @@
       header.tn-header .logo{background:#fff!important;color:#1e3a8a!important}
       #tnNav{display:flex;align-items:stretch;gap:2px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
       .tn-menu{position:relative;display:flex}
-      .tn-item{display:flex;align-items:center;gap:5px;height:60px;padding:0 12px;border:0;border-bottom:3px solid transparent;background:none;color:#dbe4ff;font:inherit;font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer}
+      .tn-item{display:flex;align-items:center;gap:5px;height:60px;padding:0 12px;border:0;border-bottom:3px solid transparent;background:none;color:#fff;font:inherit;font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer}
       .tn-item:hover:not(:disabled),.tn-menu.open>.tn-item{color:#fff;background:rgba(255,255,255,.08)}
       .tn-item.active{color:#fff;border-bottom-color:#60a5fa}
       .tn-item:disabled{color:rgba(219,228,255,.45);cursor:not-allowed}
@@ -38,6 +38,8 @@
       .tn-panel button.current{color:#1d4ed8}
       .tn-panel hr{border:0;border-top:1px solid #eef1f6;margin:6px 4px}
       #tnRight{display:flex;align-items:center;gap:12px;margin-left:auto;flex:0 0 auto}
+      header.tn-header .tn-home-link{display:inline-flex!important;align-items:center;gap:7px;height:34px;padding:0 12px!important;border-radius:8px!important;background:rgba(255,255,255,.08)!important;border:1px solid rgba(255,255,255,.28)!important;color:#fff!important;font-size:13px!important;font-weight:500!important;text-decoration:none!important;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+      header.tn-header .tn-home-link:hover,header.tn-header .tn-home-link:focus-visible{background:rgba(255,255,255,.16)!important;border-color:rgba(255,255,255,.6)!important;color:#fff!important}
       #tnProject{flex:0 0 auto;align-items:center;padding-right:14px;border-right:1px solid rgba(255,255,255,.2)}
       #tnProject>.tn-btn{display:flex;align-items:center;gap:8px;max-width:240px;padding:7px 11px;border:1px solid rgba(255,255,255,.35);border-radius:9px;background:rgba(255,255,255,.1);color:#fff;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
       #tnProject>.tn-btn:hover,#tnProject.open>.tn-btn{background:rgba(255,255,255,.2);border-color:#fff}
@@ -252,7 +254,8 @@
     const entries = [who];
     const status = header.querySelector('.status'); // "AI connected · PostgreSQL connected" (Start Testing page)
     if (status) entries.push(status);
-    entries.push('-', { label: 'Sign out', className: 'tn-signout', onClick: goLogin });
+    // Same sign-out page as the project and management pages (it clears the session).
+    entries.push('-', { label: 'Sign out', className: 'tn-signout', onClick: () => location.assign('/logout.html') });
     right.appendChild(dropdown('', entries, { id: 'tnProfile', trigger, right: true }));
 
     cleanOldHeaderLinks(header);

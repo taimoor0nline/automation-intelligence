@@ -68,7 +68,9 @@
       if(wanted&&select.value!==wanted.value){select.value=wanted.value;select.dispatchEvent(new Event('change',{bubbles:true}));}
     }
     if(login.loginRequired&&typeof window.setTestNexusTestActors==='function'){
-      window.setTestNexusTestActors([{role:'Default User',username:login.username,password:login.password}]);
+      // All saved test users with their roles (Admin, Customer…); older environments have one user.
+      const users=Array.isArray(login.users)&&login.users.length?login.users:[{role:'Default User',username:login.username,password:login.password}];
+      window.setTestNexusTestActors(users);
     }
   }
   function selectRecordOptions(){

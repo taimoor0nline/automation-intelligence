@@ -17,6 +17,10 @@ function projectUrl(path){return path+'?projectId='+encodeURIComponent(projectId
 function projectWorkspaceUrl(section='details'){return '/workspace.html?projectId='+encodeURIComponent(projectId)+'#'+section;}
 function linkedNavigation(){
  $('navEnvironment').href=projectId?projectUrl('/environment-config.html'):'/workspace.html#projects';
+ // Highlight the current section in the top bar.
+ const current=page.startsWith('environment')?$('navEnvironment'):$('navProjects');
+ current?.setAttribute('aria-current','page');
+ renderBreadcrumb();
  if($('mgBack'))$('mgBack').href=page==='project-create'?'/workspace.html#projects':page==='environment-form'?projectUrl('/environment-config.html'):projectId?projectWorkspaceUrl(page==='task-create'?'tasks':'details'):'/workspace.html#projects';
  const cancel=$('mgEnvCancel');if(cancel)cancel.href=projectUrl('/environment-config.html');
  const taskCancel=$('mgTaskCancel');if(taskCancel)taskCancel.href=projectWorkspaceUrl('tasks');
@@ -32,6 +36,17 @@ function icon(name,description,urlOrFn,kind=''){
 }
 function lock(form,value){const submit=$('mgSubmit');if(submit)submit.disabled=value;}
 function nameOfProject(d){return d.project?.name||'Selected project';}
+// Breadcrumb like the project pages: Projects › <project> › <this page>.
+const PAGE_LABELS={'environment-list':'Environments','environment-form':'Environment','project-create':'Create project','task-create':'Create task'};
+function renderBreadcrumb(projectName){
+ const nav=$('mgBreadcrumb');if(!nav)return;
+ const parts=['<a href="/workspace.html#projects">Projects</a>'];
+ if(projectId&&page!=='project-create')parts.push('<a href="'+projectWorkspaceUrl()+'">'+(projectName?escapeHtml(projectName):'Project')+'</a>');
+ if(page==='environment-form'&&projectId)parts.push('<a href="'+projectUrl('/environment-config.html')+'">Environments</a>');
+ parts.push('<span aria-current="page">'+(PAGE_LABELS[page]||'')+'</span>');
+ nav.innerHTML=parts.join('<span aria-hidden="true">›</span>');
+}
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function loadProject(){
  if(page==='project-create')return;
  if(!projectId)throw Error('Open a project from the Projects list first.');
@@ -40,6 +55,7 @@ async function loadProject(){
  localStorage.setItem('testnexus:currentProject',projectId);
  const workspace=await api('/api/projects/'+encodeURIComponent(projectId)+'/workspace');
  if($('mgSelectedProject'))$('mgSelectedProject').textContent=nameOfProject(workspace);
+ renderBreadcrumb(workspace.project?.name);
  if(page==='task-create'&&!['QA','PROJECT_MANAGER'].includes(workspace.projectRole))throw Error('Only QA and Project Managers can create tasks.');
  return workspace;
 }
@@ -173,11 +189,13 @@ async function initEnvironmentForm(){
   $('mgEnvDefault').checked=env.is_default;
   $('mgUsage').textContent=(env.usage?.total||0)+' historical reference(s)';
   $('mgEnvLoginRequired').checked=Boolean(env.login_required);
-  $('mgEnvTestUser').value=env.test_username||'';
-  $('mgEnvPasswordState').textContent=env.has_test_password?'Password saved ✓ — leave blank to keep it.':'No password saved yet.';
  }
+ const users=env?.test_users||[];
+ if(users.length)users.forEach(addEnvUserRow);else addEnvUserRow({role:'Default User'});
+ $('mgEnvAddUser').onclick=()=>{addEnvUserRow({});$('mgEnvUsers').lastElementChild?.querySelector('[data-role]')?.focus();};
  if(mode==='view'||mode==='delete'||!canManage){
   form.querySelectorAll('input,select').forEach(n=>n.disabled=true);
+  form.querySelectorAll('#mgEnvAddUser,[data-remove-user]').forEach(n=>n.hidden=true);
   $('mgSubmit').hidden=true;
   if(mode==='delete'&&env&&canManage){
    $('mgEnvDelete').hidden=false;
@@ -205,19 +223,51 @@ async function initEnvironmentForm(){
   try{
    const v=Object.fromEntries(new FormData(form).entries());
    const body={name:v.name,baseUrl:v.baseUrl,stageType:v.stageType,isDefault:$('mgEnvDefault').checked,
-    loginRequired:$('mgEnvLoginRequired').checked,testUsername:$('mgEnvTestUser').value.trim()};
-   // An empty password field keeps the saved password; only a typed value replaces it.
-   if($('mgEnvTestPassword').value)body.testPassword=$('mgEnvTestPassword').value;
+    loginRequired:$('mgEnvLoginRequired').checked,testUsers:collectEnvUsers()};
    await api('/api/projects/'+encodeURIComponent(projectId)+'/environments'+(env?'/'+encodeURIComponent(env.id):''),{method:env?'PATCH':'POST',body:JSON.stringify(body)});
    location.assign(projectUrl('/environment-config.html'));
   }catch(err){feedback(err.message);lock(null,false);}
  };
+}
+// Test users of the environment: one row per account (role, username, password).
+const MAX_ENV_USERS=12;
+function updateEnvUserCount(){
+ const n=$('mgEnvUsers').children.length;
+ $('mgEnvUsersCount').textContent=n+' test user'+(n===1?'':'s');
+ $('mgEnvAddUser').disabled=n>=MAX_ENV_USERS;
+}
+function addEnvUserRow(user={}){
+ const row=document.createElement('div');
+ row.className='mg-env-user';
+ row.dataset.userId=user.id||'';
+ row.innerHTML='<input data-role maxlength="60" placeholder="Role, e.g. Admin" aria-label="Role">'
+  +'<input data-username maxlength="200" autocomplete="off" placeholder="Username or email" aria-label="Username">'
+  +'<input data-password type="password" maxlength="500" autocomplete="new-password" aria-label="Password">'
+  +'<button type="button" class="mg-btn" data-remove-user title="Remove user" aria-label="Remove user">×</button>';
+ row.querySelector('[data-role]').value=user.role||'';
+ row.querySelector('[data-username]').value=user.username||'';
+ row.querySelector('[data-password]').placeholder=user.hasPassword?'••••••••':'Password';
+ row.querySelector('[data-remove-user]').onclick=()=>{row.remove();updateEnvUserCount();};
+ $('mgEnvUsers').append(row);
+ updateEnvUserCount();
+}
+// A new row left empty (only the "Default User" placeholder role) is ignored.
+function collectEnvUsers(){
+ return [...$('mgEnvUsers').children].map(row=>({
+  id:row.dataset.userId||undefined,
+  role:row.querySelector('[data-role]').value.trim(),
+  username:row.querySelector('[data-username]').value.trim(),
+  password:row.querySelector('[data-password]').value,
+ })).filter(user=>user.id||user.username||user.password||(user.role&&user.role!=='Default User'));
 }
 async function init(){
  $('mgSignOut').onclick=()=>{sessionStorage.removeItem(tokenKey);sessionStorage.removeItem('testnexus:runnerSelection');sessionStorage.removeItem('testnexus:runnerHandoff');location.replace('/login.html');};
  if(!token()){location.replace('/login.html');return;}
  try{
   const me=await api('/api/auth/me');user=me.user;
+  // Same profile menu (avatar ▾ → name, role, Sign out) as the other pages, at the right end of the top bar.
+  const signOut=$('mgSignOut');
+  if(signOut&&window.TestNexusProfileMenu){const slot=document.createElement('span');signOut.closest('header').append(slot);signOut.remove();window.TestNexusProfileMenu.mount(slot,user||{});}
   projectId=selectedProject();linkedNavigation();
   if(page==='project-create')await initProjectCreate();
   else if(page==='task-create')await initTaskCreate(await loadProject());

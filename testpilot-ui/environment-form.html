@@ -1,8 +1,17 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Environment | TestNexus</title><link rel="stylesheet" href="/management.css"><link rel="stylesheet" href="/forms-alignment.css"></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Environment | TestNexus</title><link rel="stylesheet" href="/management.css"><link rel="stylesheet" href="/forms-alignment.css">
+<style>
+.mg-env-users-head,.mg-env-user{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(160px,1.2fr) minmax(160px,1.2fr) 38px;gap:8px;align-items:center}
+.mg-env-users-head{font-size:12px;font-weight:600;color:#52627a;margin:4px 0 6px}
+.mg-env-users{display:flex;flex-direction:column;gap:8px}
+.mg-env-user input{width:100%;min-width:0}
+.mg-env-user .mg-btn{height:38px;width:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;line-height:1}
+.mg-env-users-actions{display:flex;align-items:center;gap:12px;margin:10px 0 4px}
+@media(max-width:700px){.mg-env-users-head{display:none}.mg-env-user{grid-template-columns:1fr 38px}.mg-env-user input{grid-column:1}.mg-env-user .mg-btn{grid-column:2;grid-row:1}}
+</style></head>
 <body data-management-page="environment-form">
-<header class="mg-top"><a class="mg-brand" href="/workspace.html#projects"><span class="mg-logo">TN</span> TestNexus</a><nav class="mg-nav" aria-label="Management navigation"><a href="/workspace.html#projects">Projects</a><a id="navEnvironment" href="/environment-config.html">Environments</a><button type="button" id="mgSignOut">Sign out</button></nav></header>
-<main class="mg-main"><div class="mg-heading"><div><h1>Environment</h1><p class="mg-subtitle">Create, view, edit, disable, or safely delete a project environment.</p></div><a id="mgBack" href="/workspace.html#projects" class="mg-btn">Back to list</a></div>
+<header class="mg-top"><a class="mg-brand" href="/workspace.html#projects"><span class="mg-logo">TN</span><span class="mg-brand-text">TestNexus<small>Project intelligence workspace</small></span></a><nav class="mg-nav" aria-label="Management navigation"><a id="navHome" href="/workspace.html#overview">Home</a><a id="navProjects" href="/workspace.html#projects">Projects</a><a id="navReports" href="/workspace.html#reports">Reports</a><a id="navEnvironment" href="/environment-config.html">Environments</a><button type="button" id="mgSignOut">Sign out</button></nav></header>
+<main class="mg-main"><div class="mg-heading"><div><nav id="mgBreadcrumb" class="mg-breadcrumb" aria-label="Breadcrumb"></nav><h1>Environment</h1><p class="mg-subtitle">Create, view, edit, disable, or safely delete a project environment.</p></div><a id="mgBack" href="/workspace.html#projects" class="mg-btn">Back to list</a></div>
 <div id="mgFeedback" class="mg-feedback" role="alert" hidden></div><section class="mg-card"><div class="mg-card-head"><h2 id="mgFormHeading">Environment details</h2><span id="mgUsage" class="mg-note"></span></div><div class="mg-card-body"><form id="mgEnvironmentForm"><div class="mg-grid">
 <div class="mg-field mg-full"><label>Project</label><div id="mgSelectedProject" class="mg-note">Loading project…</div></div>
 <div class="mg-field"><label for="mgEnvName">Environment name *</label><input id="mgEnvName" name="name" required maxlength="100" placeholder="QA / Staging"></div>
@@ -10,9 +19,13 @@
 <div class="mg-field mg-full"><label for="mgEnvUrl">Application base URL *</label><input id="mgEnvUrl" name="baseUrl" type="url" required placeholder="https://qa.example.com"></div>
 <div class="mg-field mg-full"><label class="mg-checkbox"><input id="mgEnvDefault" name="isDefault" type="checkbox"> Default active environment</label></div>
 <div class="mg-field mg-full"><label class="mg-checkbox"><input id="mgEnvLoginRequired" name="loginRequired" type="checkbox"> Application login required for testing</label><span class="mg-note">The test login of the application at this URL (not your TestNexus account). It is filled in automatically when testing starts.</span></div>
-<div class="mg-field"><label for="mgEnvTestUser">Test username</label><input id="mgEnvTestUser" name="testUsername" maxlength="200" autocomplete="off" placeholder="test.user@example.com"></div>
-<div class="mg-field"><label for="mgEnvTestPassword">Test password</label><input id="mgEnvTestPassword" name="testPassword" type="password" maxlength="500" autocomplete="new-password" placeholder="Enter to set or change"><span id="mgEnvPasswordState" class="mg-note"></span></div>
+<div class="mg-field mg-full"><label>Test users</label>
+<div class="mg-env-users-head" aria-hidden="true"><span>Role</span><span>Username</span><span>Password</span><span></span></div>
+<div id="mgEnvUsers" class="mg-env-users"></div>
+<div class="mg-env-users-actions"><button type="button" id="mgEnvAddUser" class="mg-btn">+ Add user</button><span id="mgEnvUsersCount" class="mg-note"></span></div>
+<span class="mg-note">One row per test account. The role says who the user is (for example Admin, Manager, Customer) so tests can check what each role can and cannot do. Passwords are stored encrypted; leave a saved password blank to keep it.</span></div>
 </div><p class="mg-note">Once stories or testing transactions use this environment, it cannot be deleted. Disable it to prevent new transactions and preserve history.</p>
 <div class="mg-actions"><a id="mgEnvCancel" class="mg-btn" href="/environment-config.html">Cancel</a><button type="button" id="mgEnvDisable" class="mg-btn" hidden>Disable for new transactions</button><button type="button" id="mgEnvDelete" class="mg-btn mg-btn-danger" hidden>Delete environment</button><button id="mgSubmit" class="mg-btn mg-btn-primary" type="submit">Save environment</button></div>
 </form></div></section></main>
+<script src="/profile-menu.js"></script>
 <script src="/management-pages.js"></script></body></html>
