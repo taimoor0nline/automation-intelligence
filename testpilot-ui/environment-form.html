@@ -10,8 +10,8 @@
 @media(max-width:700px){.mg-env-users-head{display:none}.mg-env-user{grid-template-columns:1fr 38px}.mg-env-user input{grid-column:1}.mg-env-user .mg-btn{grid-column:2;grid-row:1}}
 </style></head>
 <body data-management-page="environment-form">
-<header class="mg-top"><a class="mg-brand" href="/workspace.html#projects"><span class="mg-logo">TN</span><span class="mg-brand-text">TestNexus<small>Project intelligence workspace</small></span></a><nav class="mg-nav" aria-label="Management navigation"><a id="navHome" href="/workspace.html#overview">Home</a><a id="navProjects" href="/workspace.html#projects">Projects</a><a id="navReports" href="/workspace.html#reports">Reports</a><a id="navEnvironment" href="/environment-config.html">Environments</a><button type="button" id="mgSignOut">Sign out</button></nav></header>
-<main class="mg-main"><div class="mg-heading"><div><nav id="mgBreadcrumb" class="mg-breadcrumb" aria-label="Breadcrumb"></nav><h1>Environment</h1><p class="mg-subtitle">Create, view, edit, disable, or safely delete a project environment.</p></div><a id="mgBack" href="/workspace.html#projects" class="mg-btn">Back to list</a></div>
+<header class="mg-top"><a class="mg-brand" href="/workspace.html#projects"><span class="mg-logo">TN</span><span class="mg-brand-text">TestNexus<small>Project intelligence workspace</small></span></a><nav class="mg-nav" aria-label="Management navigation"><a id="navHome" href="/workspace.html#overview">Home</a><a id="navProjects" href="/workspace.html#projects">Projects</a><a id="navUsers" href="/workspace.html#users" hidden>Users</a><button type="button" id="mgSignOut">Sign out</button></nav></header>
+<main class="mg-main"><div class="mg-heading"><div><nav id="mgBreadcrumb" class="mg-breadcrumb" aria-label="Breadcrumb"></nav><h1>Environment</h1><p class="mg-subtitle">Create, view, edit, disable, or safely delete a project environment.</p></div></div>
 <div id="mgFeedback" class="mg-feedback" role="alert" hidden></div><section class="mg-card"><div class="mg-card-head"><h2 id="mgFormHeading">Environment details</h2><span id="mgUsage" class="mg-note"></span></div><div class="mg-card-body"><form id="mgEnvironmentForm"><div class="mg-grid">
 <div class="mg-field mg-full"><label>Project</label><div id="mgSelectedProject" class="mg-note">Loading project…</div></div>
 <div class="mg-field"><label for="mgEnvName">Environment name *</label><input id="mgEnvName" name="name" required maxlength="100" placeholder="QA / Staging"></div>
@@ -27,5 +27,5 @@
 </div><p class="mg-note">Once stories or testing transactions use this environment, it cannot be deleted. Disable it to prevent new transactions and preserve history.</p>
 <div class="mg-actions"><a id="mgEnvCancel" class="mg-btn" href="/environment-config.html">Cancel</a><button type="button" id="mgEnvDisable" class="mg-btn" hidden>Disable for new transactions</button><button type="button" id="mgEnvDelete" class="mg-btn mg-btn-danger" hidden>Delete environment</button><button id="mgSubmit" class="mg-btn mg-btn-primary" type="submit">Save environment</button></div>
 </form></div></section></main>
-<script src="/profile-menu.js"></script>
+<script src="/confirm-dialog.js"></script><script src="/profile-menu.js"></script>
 <script src="/management-pages.js"></script></body></html>

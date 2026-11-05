@@ -81,3 +81,60 @@ body[data-management-page="environment-form"] .mg-card,body[data-management-page
 @media(max-width:680px){.mg-top .mg-nav{margin-left:0}}
 /* Pure white top bar text */
 .mg-nav a,.mg-nav button,.mg-brand-text small{color:#fff}
+
+/* Shared top bar — same height, logo, fonts and menu on every page (also in workspace.css and top-bar.js). */
+.mg-top{min-height:64px;padding:0 24px;gap:0}
+.mg-brand{gap:10px}
+.mg-logo{width:36px;height:36px;border-radius:9px;font-size:14px;font-weight:700}
+.mg-brand-text{font-size:15px;font-weight:600;color:#fff}
+.mg-brand-text small{font-size:11px;font-weight:500;margin-top:2px}
+.mg-top .mg-nav{margin-left:24px;gap:4px}
+.mg-nav a,.mg-nav button{font-size:13px;font-weight:500;padding:8px 12px;border-radius:8px;color:#fff}
+
+/* Table action buttons — solid dark navy with a white icon (same as the project pages); delete actions solid red. */
+.mg-icon{width:34px;height:34px;border:0;border-radius:8px;background:#0f1f5c;color:#fff}
+.mg-icon:hover{background:#1e3a8a;color:#fff}
+.mg-icon.danger{background:#dc2626;color:#fff}
+.mg-icon.danger:hover{background:#b91c1c}
+.mg-icon:disabled{background:#94a3b8;opacity:1}
+
+/* Table headings — same as the project pages: normal case, soft grey, 12px. */
+.mg-table th{font-size:12px;font-weight:500;color:#64748b;text-transform:none;letter-spacing:0}
+
+/* Keep the sticky top bar visible all the way down: the body must contain the whole page (no margin spilling out). */
+body{display:flow-root;min-height:100vh}
+
+html,body{overscroll-behavior:none} /* no elastic "bounce" when scrolling fast past the top/bottom, so the top bar never jumps */
+
+/* Page heading spacing — same as the project pages. */
+.mg-breadcrumb{gap:8px;margin-bottom:12px}
+.mg-heading h1{margin:0;line-height:1.2}
+.mg-subtitle{margin:12px 0 0}
+.mg-heading{margin-bottom:28px}
+
+/* Environments list: search box + "+ Create" on the right, like the other tables. */
+.mg-search{position:relative;display:flex;align-items:center;flex:0 1 320px;margin:0}
+.mg-search svg{position:absolute;left:11px;color:#64748b;pointer-events:none}
+.mg-filters .mg-search input{width:100%;max-width:none;height:40px;padding:8px 12px 8px 36px;border:1px solid #94a3b8;border-radius:9px;font-size:13.5px}
+.mg-filters .mg-search input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.18);outline:0}
+.mg-filters .mg-create-filter{margin-left:auto}
+.mg-pager select{min-height:33px;border:1px solid #d4deed;border-radius:8px;padding:4px 8px;font-size:12px;margin-right:6px}
+/* Environment form popup. */
+.mg-dialog{width:min(820px,calc(100vw - 32px));height:min(760px,calc(100vh - 48px));padding:0;border:0;border-radius:14px;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden}
+.mg-dialog::backdrop{background:rgba(15,23,42,.45)}
+.mg-dialog iframe{display:block;width:100%;height:100%;border:0}
+/* The form page when shown inside the popup: no top bar or page heading, just the form. */
+.mg-embedded body{background:#fff}
+.mg-embedded .mg-top,.mg-embedded .mg-heading{display:none!important}
+.mg-embedded .mg-main{max-width:none;padding:0}
+.mg-embedded .mg-card{border:0;box-shadow:none;border-radius:0}
+.mg-embedded .mg-card-head{position:sticky;top:0;z-index:5;background:#fff}
+
+/* "Created" / "Last updated" cells: avatar + name, date underneath (same as the project pages). */
+.mg-person{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;font-size:13px;color:#1e293b}
+.mg-avatar{display:grid;place-items:center;width:22px;height:22px;flex:0 0 22px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:9.5px;font-weight:700;box-shadow:0 0 0 2px #fff,0 0 0 3.5px #a5b4fc}
+.mg-when{margin-top:2px;padding-left:30px;font-size:12px;color:#64748b;white-space:nowrap}
+.mg-muted{color:#64748b}
+.mg-embedded body{min-height:0}
+.mg-who{font-size:13px;font-weight:500;color:#1e293b;white-space:nowrap}
+.mg-when{padding-left:0}

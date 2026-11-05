@@ -1,20 +1,24 @@
 /* Workspace data tables: per-table filters, sorting and pagination. */
 (function(){
 'use strict';
-const PAGE_SIZES=[10,25,50];
+const PAGE_SIZES=[5,10,25,50],DEFAULT_PAGE_SIZE=10;
 const TABLE_CONFIG={
  projectsBody:{create:'/project-create.html',createLabel:'Create project',search:'Search projects'},
  tasksBody:{create:'/task-create.html',createLabel:'Create task',search:'Search tasks'},
  workItemsBody:{create:'/task-create.html',createLabel:'Create task',search:'Search work items'},
  legacyTeamBody:{search:'Search team members'},
- storyList:{search:'Search stories'},
- teamBody:{search:'Search team members'},
+ storyList:{createButton:'storyCreate',createLabel:'Create story',search:'Search stories'},
+ teamBody:{search:'Search members'},
+ projectTeams:{search:'Search teams'},
+ projectTeamMembers:{search:'Search team members'},
  runsBody:{search:'Search test runs'},
  evidenceBody:{search:'Search evidence'},
  savedReportsBody:{search:'Search saved reports'},
  inventoryCases:{search:'Search test cases'},
  inventoryStories:{search:'Search story statistics'},
- inventoryAudit:{search:'Search audit events'}
+ inventoryAudit:{search:'Search audit events'},
+ repairMemoryList:{search:'Search recommendations'},
+ usersBody:{search:'Search users'}
 };
 function initTable(table){
  if(table.dataset.paginationReady==='true')return;
@@ -39,9 +43,10 @@ function initTable(table){
   if(label&&label.length<100&&!['Actions','Action'].includes(label))filter.add(new Option(label,String(i)));
  }
  const size=document.createElement('select');size.className='form-select tn-page-size';size.setAttribute('aria-label','Rows per page');
- for(const option of PAGE_SIZES)size.add(new Option(option+' / page',String(option)));
- const create=cfg.create?document.createElement('a'):null;
- if(create){create.href=cfg.create;create.className='btn btn-primary tn-btn tn-table-create';create.textContent='+ Create';
+ for(const option of PAGE_SIZES)size.add(new Option(option+' / page',String(option),false,option===DEFAULT_PAGE_SIZE));
+ const create=cfg.create?document.createElement('a'):cfg.createButton?document.createElement('button'):null;
+ if(create&&cfg.createButton){create.type='button';create.id=cfg.createButton;}
+ if(create){if(cfg.create)create.href=cfg.create;create.className='btn btn-primary tn-btn tn-table-create';create.textContent='+ Create';
  create.title=cfg.createLabel||'Create';create.setAttribute('aria-label',cfg.createLabel||'Create');}
  const footer=document.createElement('div');footer.className='tn-table-footer';footer.dataset.tableKey=key;
  const info=document.createElement('span');info.setAttribute('aria-live','polite');
@@ -52,7 +57,11 @@ function initTable(table){
  }
  // Rows-per-page belongs with the pagination in the footer, not with the search filters.
  nav.append(size,prev,pageNo,next);footer.append(info,nav);
- const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(search,filter,value);
+ // Search box with a magnifier icon (same on every table).
+ const searchWrap=document.createElement('label');searchWrap.className='tn-search';
+ searchWrap.innerHTML='<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+ searchWrap.append(search);
+ const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(searchWrap,filter,value);
  if(key==='tasksBody'){
   const status=document.getElementById('taskStatusFilter'),hierarchy=document.getElementById('taskHierarchy')?.closest('label');
   if(status){status.classList.add('tn-table-status');textFilters.append(status);}
@@ -117,7 +126,9 @@ function initTable(table){
   if(!header.textContent.trim()||header.querySelector('input,button')||['Actions','Action'].includes(header.textContent.trim()))return;
   header.classList.add('tn-sort-column');
   header.tabIndex=0;header.setAttribute('role','button');header.setAttribute('aria-label','Sort by '+header.textContent.trim());
-  const change=()=>{if(sorting.index===index)sorting.direction*=-1;else sorting={index,direction:1};sortRows();render();};
+  const change=()=>{if(sorting.index===index)sorting.direction*=-1;else sorting={index,direction:1};sortRows();render();
+   // Mark the sorted column so only it shows an arrow (↑ / ↓).
+   headers.forEach(h=>h.removeAttribute('aria-sort'));header.setAttribute('aria-sort',sorting.direction===1?'ascending':'descending');};
   header.addEventListener('click',change);
   header.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();change();}});
  });

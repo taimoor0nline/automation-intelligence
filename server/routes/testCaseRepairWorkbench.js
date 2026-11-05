@@ -370,7 +370,7 @@ router.post('/api/test-cases/repair-workbench', async (req, res) => {
         configurationError.code = 'PERSISTENT_MODE_NOT_CONFIGURED';
         throw configurationError;
       }
-      persisted = await persistence.persistReviewedCase(sessionId, session, candidate);
+      persisted = await persistence.persistReviewedCase(sessionId, session, candidate, req.user?.sub || null);
     } catch (error) {
       if (db.isEnabled()) {
         Object.assign(session, prior);

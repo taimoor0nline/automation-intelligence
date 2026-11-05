@@ -23,6 +23,8 @@
       .tnp-who small{display:block;color:#64748b;font-size:11px;margin-top:2px}
       .tnp-role{display:inline-block;margin-top:6px;padding:2px 7px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:700}
       .tnp-panel hr{border:0;border-top:1px solid #eef1f6;margin:6px 4px}
+      .tnp-link{display:block;padding:9px 11px;border-radius:7px;color:#1e293b;font-size:12.5px;font-weight:600;text-decoration:none}
+      .tnp-link:hover{background:#eef2ff;color:#1d4ed8}
       .tnp-signout{display:block;width:100%;padding:9px 11px;border:0;border-radius:7px;background:none;color:#b91c1c;font:inherit;font-size:12.5px;font-weight:600;text-align:left;cursor:pointer}
       .tnp-signout:hover{background:#fee2e2;color:#991b1b}
       @media(max-width:600px){.tnp-name{display:none}}

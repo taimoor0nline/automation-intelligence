@@ -70,7 +70,7 @@ async function persistActorState(sessionId, session, userId = null) {
       repositoryId: session.repositoryId,
       userId: userId || session.createdBy || null,
     });
-    await persistence.persistTestCases(sessionId, session.testCases || []);
+    await persistence.persistTestCases(sessionId, session.testCases || [], null, userId || null);
     return true;
   } catch (err) {
     if (db.isRequired()) throw err;

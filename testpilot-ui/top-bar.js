@@ -1,6 +1,6 @@
-// Shared global top bar for every signed-in page:
-//   Logo | [Project ▾] | Dashboard  Projects  Start Testing  Test Cases  Test Runs  Tasks  Reports  Administration | Profile ▾
-// Dashboard -> Reports, Projects -> project setup (manager) / project switcher, Test Cases / Test Runs -> sections on the testing page.
+// Shared top bar for the Start Testing, REST API, Reports and Project Work pages.
+// Main bar (same on every page): TN TestNexus | Home  Projects  Users (managers) | Profile ▾
+// Page strip below it. Web testing: Projects › project › Start testing ... [Source code ▾] [Defects]. REST/other: [Project ▾] Start Testing ▾
 // Existing actions (Defects, Users, Platform setup) reuse the original buttons/popups on the Start Testing page.
 (function () {
   if (window.__testNexusTopBar) return;
@@ -11,56 +11,81 @@
   const page = path === '/rest.html' ? 'rest'
     : path === '/reports.html' ? 'reports'
     : path === '/work.html' ? 'work'
+    : path === '/test-case-guide.html' ? 'guide'
     : 'web';
 
   function injectStyles() {
     if (document.getElementById('testNexusTopBarStyles')) return;
+    // Same Inter font the project and management pages load, so text looks identical on every page.
+    if (!document.querySelector('link[href*="family=Inter"]')) {
+      const font = document.createElement('link');
+      font.rel = 'stylesheet';
+      font.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap';
+      document.head.appendChild(font);
+    }
     const s = document.createElement('style');
     s.id = 'testNexusTopBarStyles';
     s.textContent = `
-      header.tn-header{height:auto!important;min-height:60px;gap:18px;padding:0 20px!important;background:#0f1f5c!important;border-bottom:1px solid #0f1f5c!important;color:#fff;flex-wrap:nowrap}
-      header.tn-header .brand{flex:0 0 auto}
-      header.tn-header .brand strong,header.tn-header .brand b{color:#fff;white-space:nowrap}
-      header.tn-header .brand span{display:none!important}
-      header.tn-header .logo{background:#fff!important;color:#1e3a8a!important}
-      #tnNav{display:flex;align-items:stretch;gap:2px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
+      html,body{overscroll-behavior:none} /* no elastic bounce at the top/bottom, so the bar never jumps */
+      body{display:flow-root;min-height:100vh} /* body holds the whole page, so the sticky bar never scrolls away */
+      header.tn-header{position:sticky!important;top:0!important;z-index:100!important;height:auto!important;min-height:64px!important;gap:0!important;padding:0 24px!important;background:#0f1f5c!important;border-bottom:0!important;box-shadow:0 1px 0 rgba(15,23,42,.2);color:#fff;flex-wrap:nowrap;justify-content:flex-start!important;-webkit-font-smoothing:antialiased;font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+      header.tn-header>*:not(.tnb-brand):not(#tnMain):not(#tnRight){display:none!important}
+      .tnb-brand{display:flex;align-items:center;gap:10px;flex:0 0 auto;text-decoration:none!important;color:#fff!important}
+      .tnb-logo{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:#fff;color:#0f1f5c;font-size:14px;font-weight:700}
+      .tnb-text{display:flex;flex-direction:column;font-size:15px;font-weight:600;line-height:1.15;color:#fff;white-space:nowrap}
+      .tnb-text small{font-size:11px;font-weight:500;margin-top:2px;color:#fff}
+      #tnMain{display:flex;align-items:center;gap:4px;margin-left:24px;flex:1 1 auto;min-width:0}
+      #tnMain a{padding:8px 12px;border-radius:8px;color:#fff!important;font-size:13px;font-weight:500;text-decoration:none!important;white-space:nowrap}
+      #tnMain a:hover{background:rgba(255,255,255,.10)}
+      #tnMain a[aria-current="page"]{background:rgba(255,255,255,.14);font-weight:600}
+      #tnMain a:focus-visible,.tnb-brand:focus-visible,#tnProfile>.tn-item:focus-visible{outline:3px solid #93b0ff;outline-offset:2px}
+      #tnSubbar{display:flex;align-items:stretch;gap:2px;min-height:48px;padding:0 24px;background:#fff;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;position:relative;z-index:90}
       .tn-menu{position:relative;display:flex}
-      .tn-item{display:flex;align-items:center;gap:5px;height:60px;padding:0 12px;border:0;border-bottom:3px solid transparent;background:none;color:#fff;font:inherit;font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer}
-      .tn-item:hover:not(:disabled),.tn-menu.open>.tn-item{color:#fff;background:rgba(255,255,255,.08)}
-      .tn-item.active{color:#fff;border-bottom-color:#60a5fa}
-      .tn-item:disabled{color:rgba(219,228,255,.45);cursor:not-allowed}
+      .tn-item{display:flex;align-items:center;gap:5px;height:48px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:none;color:#334155;font:inherit;font-size:13px;font-weight:500;white-space:nowrap;cursor:pointer}
+      .tn-item:hover:not(:disabled),.tn-menu.open>.tn-item{color:#1d4ed8;background:#f5f8ff}
+      .tn-item.active{color:#1d4ed8;font-weight:600;border-bottom-color:#2563eb}
+      .tn-item:disabled{color:#94a3b8;cursor:not-allowed}
+      .tn-item:focus-visible{outline:3px solid #93b0ff;outline-offset:-3px}
       .tn-caret{font-size:9px;opacity:.8}
-      .tn-panel{display:none;position:absolute;top:100%;left:0;min-width:200px;padding:6px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 14px 34px rgba(15,23,42,.22);z-index:200}
+      .tn-panel{display:none;position:absolute;top:100%;left:0;min-width:200px;padding:6px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 14px 34px rgba(15,23,42,.22);z-index:300}
       .tn-panel.right{left:auto;right:0}
       .tn-menu.open>.tn-panel{display:block}
-      .tn-panel button{display:block;width:100%;padding:9px 11px;border:0;border-radius:7px;background:none;color:#1e293b;font:inherit;font-size:12.5px;font-weight:650;text-align:left;cursor:pointer}
+      .tn-panel button{display:block;width:100%;padding:9px 11px;border:0;border-radius:7px;background:none;color:#1e293b;font:inherit;font-size:12.5px;font-weight:600;text-align:left;cursor:pointer}
       .tn-panel button:hover{background:#eef2ff;color:#1d4ed8}
       .tn-panel button.current{color:#1d4ed8}
       .tn-panel hr{border:0;border-top:1px solid #eef1f6;margin:6px 4px}
-      #tnRight{display:flex;align-items:center;gap:12px;margin-left:auto;flex:0 0 auto}
-      header.tn-header .tn-home-link{display:inline-flex!important;align-items:center;gap:7px;height:34px;padding:0 12px!important;border-radius:8px!important;background:rgba(255,255,255,.08)!important;border:1px solid rgba(255,255,255,.28)!important;color:#fff!important;font-size:13px!important;font-weight:500!important;text-decoration:none!important;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
-      header.tn-header .tn-home-link:hover,header.tn-header .tn-home-link:focus-visible{background:rgba(255,255,255,.16)!important;border-color:rgba(255,255,255,.6)!important;color:#fff!important}
-      #tnProject{flex:0 0 auto;align-items:center;padding-right:14px;border-right:1px solid rgba(255,255,255,.2)}
-      #tnProject>.tn-btn{display:flex;align-items:center;gap:8px;max-width:240px;padding:7px 11px;border:1px solid rgba(255,255,255,.35);border-radius:9px;background:rgba(255,255,255,.1);color:#fff;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
-      #tnProject>.tn-btn:hover,#tnProject.open>.tn-btn{background:rgba(255,255,255,.2);border-color:#fff}
+      #tnRight{display:flex;align-items:center;margin-left:auto;flex:0 0 auto}
+      #tnProject{flex:0 0 auto;align-items:center;padding-right:14px;margin-right:8px;border-right:1px solid #e2e8f0}
+      #tnProject>.tn-btn{display:flex;align-items:center;gap:8px;max-width:260px;padding:6px 11px;border:1px solid #d0d5dd;border-radius:8px;background:#fff;color:#0f172a;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+      #tnProject>.tn-btn:hover,#tnProject.open>.tn-btn{border-color:#2563eb;background:#f5f8ff}
       #tnProject .tn-btn-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      #tnProject .tn-btn-kicker{color:#93c5fd;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px}
-      #tnProject .tn-panel{top:calc(100% + 8px);min-width:290px;padding:12px}
+      #tnProject .tn-btn-kicker{color:#64748b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+      #tnProject .tn-panel{top:calc(100% + 4px);min-width:290px;padding:12px}
       #tnProject .tn-field+.tn-field{margin-top:10px}
-      #tnProject .tn-field label{display:block;margin:0 0 5px;color:#475569;font-size:11px;font-weight:800}
+      #tnProject .tn-field label{display:block;margin:0 0 5px;color:#475569;font-size:11px;font-weight:700}
       #tnProject .tn-field select{width:100%;margin:0;padding:8px 9px;border:1px solid #d0d5dd;border-radius:8px;background:#fff;color:#10141c;font-size:12.5px}
       #tnProject .tn-hint{margin-top:9px;color:#64748b;font-size:11px;line-height:1.45}
-      .tn-avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#60a5fa;color:#0f1f5c;font-size:12px;font-weight:900}
-      #tnProfile>.tn-item{height:60px;gap:8px}
+      #tnProfile>.tn-item{height:40px;gap:8px;padding:0 8px;border:0;border-radius:8px;color:#fff;font-size:13.5px;font-weight:500}
+      #tnProfile>.tn-item:hover,#tnProfile.open>.tn-item{background:rgba(255,255,255,.12);color:#fff}
+      .tn-avatar{display:grid;place-items:center;width:30px;height:30px;flex:0 0 30px;border-radius:50%;background:#60a5fa;color:#0f1f5c;font-size:12px;font-weight:700;box-shadow:0 0 0 2px rgba(255,255,255,.35)}
+      #tnProfile .tn-panel{top:calc(100% + 8px);min-width:250px}
       .tn-who{padding:9px 11px 6px}
-      .tn-who b{display:block;color:#0f172a;font-size:13px}
+      .tn-who b{display:block;color:#0f172a;font-size:13px;font-weight:600}
       .tn-who small{display:block;color:#64748b;font-size:11px;margin-top:2px}
-      .tn-role{display:inline-block;margin-top:6px;padding:2px 7px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-size:9.5px;font-weight:800}
-      #tnProfile .tn-panel{min-width:250px}
+      .tn-role{display:inline-block;margin-top:6px;padding:2px 7px;border-radius:999px;background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:700}
       #tnProfile .tn-panel .status{display:flex;margin:4px 6px;padding:7px 9px;border-radius:8px;border:1px solid #e2e8f0!important;background:#f8fafc!important;color:#475569!important;font-size:11px}
       #tnProfile .tn-signout{color:#b91c1c}
       #tnProfile .tn-signout:hover{background:#fee2e2;color:#991b1b}
-      @media(max-width:1280px){header.tn-header{flex-wrap:wrap!important;padding:8px 16px!important;row-gap:4px}#tnNav{order:3;flex-basis:100%}.tn-item,#tnProfile>.tn-item{height:42px}}
+      #tnSubbar.tn-strip{align-items:center;justify-content:space-between;min-height:46px;gap:12px}
+      #tnSubbar.tn-strip .testing-crumb{margin:0!important;font-size:13px}
+      .tn-strip-tools{display:flex;align-items:center;gap:8px;margin-left:auto}
+      .tn-strip #tnProject{padding-right:0;margin-right:0;border-right:0}
+      .tn-strip #tnProject>.tn-btn{max-width:220px;padding:4px 10px;font-size:12px;border-radius:7px}
+      .tn-strip-btn{height:30px;padding:0 12px;border:1px solid #d0d5dd;border-radius:7px;background:#fff;color:#0f172a;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+      .tn-strip-btn:hover{border-color:#2563eb;background:#f5f8ff;color:#1d4ed8}
+      .tn-strip-btn:focus-visible{outline:3px solid #93b0ff;outline-offset:1px}
+      @media(max-width:600px){.tnb-text small,#tnProfile .tn-name{display:none}header.tn-header{padding:0 16px!important}#tnSubbar{padding:0 16px}}
+      @media(max-width:900px){header.tn-header{flex-wrap:wrap!important;padding-bottom:8px!important}#tnMain{order:3;flex-basis:100%;margin-left:0;overflow-x:auto}}
     `;
     document.head.appendChild(s);
   }
@@ -183,86 +208,122 @@
 
     (async () => {
       const project = await moveInto(PROJECT_SELECT[page], 'Project');
-      const repo = REPO_SELECT[page] ? await moveInto(REPO_SELECT[page], 'Source repository') : null;
+      const repo = REPO_SELECT[page] ? await moveInto(REPO_SELECT[page], 'Source code repository') : null;
+      // Web testing: the project is already chosen on the project page, so only the source code choice is shown.
+      const sourceOnly = page === 'web' && repo;
+      if (sourceOnly) { project.closest('.tn-field').hidden = true; btn.querySelector('.tn-btn-kicker').textContent = 'Source code'; }
       const hint = page === 'web' ? document.getElementById('platformContextHint') : null;
       if (hint) { hint.className = 'tn-hint'; panel.appendChild(hint); }
       if (page === 'web' && project && repo) document.querySelector('.platform-card')?.style.setProperty('display', 'none');
       if (!project) return;
-      const update = () => { const o = project.selectedOptions[0]; name.textContent = o && o.value ? o.textContent : 'Select project'; };
+      const update = () => { const sel = sourceOnly ? repo : project; const o = sel.selectedOptions[0]; name.textContent = o && o.value ? o.textContent : (sourceOnly ? 'None' : 'Select project'); };
       update();
       project.addEventListener('change', update);
       new MutationObserver(update).observe(project, { childList: true, subtree: true });
+      if (sourceOnly) { repo.addEventListener('change', update); new MutationObserver(update).observe(repo, { childList: true, subtree: true }); }
       setInterval(update, 1000); // also catches values set by page code
     })();
     return wrap;
   }
 
-  function openProjectSwitcher() {
-    const sw = document.getElementById('tnProject');
-    if (sw) { closeMenus(sw); sw.classList.add('open'); }
+  // Same main links, in the same order, as the project and management pages.
+  function mainLink(label, href, current) {
+    const a = el('a', '', label);
+    a.href = href;
+    if (current) a.setAttribute('aria-current', 'page');
+    return a;
   }
 
   function buildTopBar(user) {
     const header = document.querySelector('header');
-    const brand = header?.querySelector('.brand');
-    if (!header || !brand || document.getElementById('tnNav')) return;
+    if (!header || document.getElementById('tnMain')) return;
     header.classList.add('tn-header');
     const role = String(user?.role || '').toUpperCase();
     const canTest = role === 'QA' || role === 'MANAGER';
     const isManager = role === 'MANAGER';
     const testing = page === 'web' || page === 'rest';
 
-    const nav = el('nav');
-    nav.id = 'tnNav';
-    nav.setAttribute('aria-label', 'Main menu');
-    nav.appendChild(navItem('Dashboard', { onClick: () => go('/reports.html') }));
-    nav.appendChild(navItem('Projects', { onClick: (e) => {
-      if (isManager) openOnTestingPage('platformAdmin', '#platform-setup');
-      else { e.stopPropagation(); openProjectSwitcher(); }
-    } }));
-    if (canTest) {
-      nav.appendChild(dropdown('Start Testing', [
+    // Main bar: brand + Home · Projects.
+    const brand = el('a', 'tnb-brand');
+    brand.href = '/workspace.html#projects';
+    const brandText = el('span', 'tnb-text', 'TestNexus');
+    brandText.appendChild(el('small', '', 'Project intelligence workspace'));
+    brand.append(el('span', 'tnb-logo', 'TN'), brandText);
+
+    const main = el('nav');
+    main.id = 'tnMain';
+    main.setAttribute('aria-label', 'Main navigation');
+    main.append(
+      mainLink('Home', '/workspace.html#overview'),
+      mainLink('Projects', '/workspace.html#projects', page !== 'guide'),
+      ...(isManager ? [mainLink('Users', '/workspace.html#users')] : []),
+    );
+
+    // Page toolbar below the bar: this page's own tools.
+    const sub = el('nav');
+    sub.id = 'tnSubbar';
+    sub.setAttribute('aria-label', 'Page tools');
+    // On the web testing page the strip is: breadcrumb (project) ... Source code + Defects. Elsewhere: Start Testing switch.
+    if (canTest && page !== 'web') {
+      sub.appendChild(dropdown('Start Testing', [
         { label: 'Web UI testing', current: page === 'web', onClick: () => go(TESTING_PAGE) },
         { label: 'REST API testing', current: page === 'rest', onClick: () => go('/rest.html') },
       ], { active: testing }));
     }
-    nav.appendChild(navItem('Test Cases', { onClick: () => openSection('test-cases') }));
-    nav.appendChild(navItem('Test Runs', { onClick: () => openSection('test-runs') }));
-    nav.appendChild(dropdown('Tasks', [
-      { label: 'Task board', current: page === 'work', onClick: () => { const p = currentProjectId(); go('/work.html' + (p ? '?projectId=' + encodeURIComponent(p) : '')); } },
-      { label: 'Defects', onClick: () => openOnTestingPage('platformDefects', '#defects') },
-    ], { active: page === 'work' }));
-    nav.appendChild(navItem('Reports', { active: page === 'reports', onClick: () => go('/reports.html') }));
-    if (isManager) {
-      nav.appendChild(dropdown('Administration', [
-        { label: 'Users', onClick: () => openOnTestingPage('platformUsers', '#users') },
-        { label: 'Platform setup', onClick: () => openOnTestingPage('platformAdmin', '#platform-setup') },
-      ]));
+    // Defects from failed runs (opens the defect popup on the testing page).
+    if (page === 'web' && canTest) {
+      // Switch to REST API testing (the Web UI page is this one).
+      const rest = el('button', 'tn-strip-btn', 'REST API');
+      rest.type = 'button';
+      rest.title = 'Test REST APIs (Swagger/OpenAPI or manual endpoints)';
+      rest.onclick = () => go('/rest.html');
+      sub.appendChild(rest);
+    }
+    if (page === 'web') {
+      const defects = el('button', 'tn-strip-btn', 'Defects');
+      defects.type = 'button';
+      defects.onclick = () => openOnTestingPage('platformDefects', '#defects');
+      sub.appendChild(defects);
     }
 
+    // Profile: avatar + name ▾ (same as the other pages), with connection status on the testing page.
     const right = el('div');
     right.id = 'tnRight';
-
     const name = user?.name || user?.email || 'User';
     const initials = name.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('') || 'U';
     const trigger = el('button', 'tn-item');
     trigger.type = 'button';
     trigger.title = name;
-    trigger.append(el('span', 'tn-avatar', initials), el('span', 'tn-caret', '▾'));
+    trigger.append(el('span', 'tn-avatar', initials), el('span', 'tn-name', name), el('span', 'tn-caret', '▾'));
+    const ROLE_LABELS = { MANAGER: 'Manager', QA: 'QA', DEV: 'Developer' };
     const who = el('div', 'tn-who');
-    who.append(el('b', '', name), el('small', '', user?.email || ''), el('span', 'tn-role', role));
+    who.append(el('b', '', name), el('small', '', user?.email || ''));
+    if (role) who.append(el('span', 'tn-role', ROLE_LABELS[role] || role));
     const entries = [who];
     const status = header.querySelector('.status'); // "AI connected · PostgreSQL connected" (Start Testing page)
     if (status) entries.push(status);
-    // Same sign-out page as the project and management pages (it clears the session).
     entries.push('-', { label: 'Sign out', className: 'tn-signout', onClick: () => location.assign('/logout.html') });
     right.appendChild(dropdown('', entries, { id: 'tnProfile', trigger, right: true }));
 
     cleanOldHeaderLinks(header);
-    const switcher = PROJECT_SELECT[page] ? buildProjectSwitcher() : null;
-    brand.insertAdjacentElement('afterend', nav);
-    if (switcher) brand.insertAdjacentElement('afterend', switcher);
+    header.querySelector('.brand')?.remove();
+    header.prepend(brand);
+    brand.insertAdjacentElement('afterend', main);
     header.appendChild(right);
+    const switcher = PROJECT_SELECT[page] ? buildProjectSwitcher() : null;
+    if (switcher) sub.prepend(switcher);
+    if (page === 'web') {
+      // Breadcrumb (Projects › project › Start testing) sits at the left of the strip; tools on the right.
+      sub.classList.add('tn-strip');
+      let crumb = document.getElementById('testCrumb');
+      if (!crumb) { crumb = el('nav', 'testing-crumb'); crumb.id = 'testCrumb'; crumb.setAttribute('aria-label', 'Breadcrumb'); }
+      const tools = el('div', 'tn-strip-tools');
+      while (sub.firstChild) tools.appendChild(sub.firstChild);
+      sub.append(crumb, tools);
+    }
+    if (page !== 'guide') header.insertAdjacentElement('afterend', sub); // the guide is a reading page: no tools
+
+
     const hashKey = location.hash.slice(1);
     if (SECTION[hashKey]) { history.replaceState(null, '', location.pathname + location.search); setTimeout(() => scrollToSection(hashKey), 600); }
 
@@ -273,7 +334,7 @@
   async function start() {
     const h = await health();
     if (!h?.database?.configured) { document.querySelector('header')?.classList.remove('tn-header'); return; } // demo mode: keep each page's own header
-    if (!token()) return goLogin();
+    if (!token()) return page === 'guide' ? undefined : goLogin(); // the guide stays readable when signed out
     try {
       const r = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + token() } });
       if (r.status === 401) return goLogin();

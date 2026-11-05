@@ -16,7 +16,9 @@ router.get('/api/projects', requireAuth, async (req, res) => {
       (select count(*)::int from project_environments e where e.project_id=p.id and e.is_active) as environment_count,
       (select max(r.completed_at) from test_runs r where r.project_id=p.id) as last_run_at,
       (select coalesce(sum(r.passed),0)::int from test_runs r where r.project_id=p.id) as passed_total,
-      (select coalesce(sum(r.failed),0)::int from test_runs r where r.project_id=p.id) as failed_total
+      (select coalesce(sum(r.failed),0)::int from test_runs r where r.project_id=p.id) as failed_total,
+      (select u.display_name from users u where u.id=p.created_by) as created_by_name,
+      (select u.display_name from users u where u.id=p.updated_by) as updated_by_name
       from projects p where p.id = any($1::uuid[])`, [ids]) : { rows: [] };
     const byId = new Map(summary.rows.map((row) => [row.id, row]));
     const projects = result.rows.map((p) => { const { id: _id, ...extra } = byId.get(p.id) || {}; return { ...p, ...extra }; });
@@ -29,7 +31,7 @@ router.post('/api/projects', requireAuth, requireRole('MANAGER'), async (req, re
     const name = String(req.body?.name || '').trim();
     if (!name) return res.status(400).json({ reply: 'Project name is required.' });
     const result = await db.query(`insert into projects(name,description,created_by) values($1,$2,$3) returning *`, [name, String(req.body?.description || '').trim() || null, req.user.sub]);
-    await db.query(`insert into project_members(project_id,user_id,role,project_role) values($1,$2,'MANAGER','PROJECT_MANAGER') on conflict(project_id,user_id) do update set role='MANAGER',project_role='PROJECT_MANAGER'`, [result.rows[0].id, req.user.sub]);
+    await db.query(`insert into project_members(project_id,user_id,role,project_role,added_by) values($1,$2,'MANAGER','PROJECT_MANAGER',$2) on conflict(project_id,user_id) do update set role='MANAGER',project_role='PROJECT_MANAGER'`, [result.rows[0].id, req.user.sub]);
     res.status(201).json({ ok: true, project: result.rows[0] });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });

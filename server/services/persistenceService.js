@@ -121,7 +121,9 @@ async function persistSession(sessionId, session, context = {}) {
   return true;
 }
 
-async function persistTestCases(sessionId, testCases = [], client = null) {
+// actorId = the signed-in user saving the cases. Without it, the user who started the session is used.
+// "Last updated by/at" changes only when the case content actually changes, not on every re-save.
+async function persistTestCases(sessionId, testCases = [], client = null, actorId = null) {
   if (!enabled()) return;
   const work = async (connection) => {
     for (const tc of testCases) {
@@ -138,16 +140,21 @@ async function persistTestCases(sessionId, testCases = [], client = null) {
         severity: security.severity,
       };
       await connection.query(
-        `insert into test_cases(session_id,external_case_id,title,type,test_category,priority,security_subcategory,severity,source,case_json)
-         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+        `insert into test_cases(session_id,external_case_id,title,type,test_category,priority,security_subcategory,severity,source,case_json,created_by,updated_by,updated_at)
+         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,
+           coalesce($11::uuid,(select created_by from test_sessions where id=$1)),
+           coalesce($11::uuid,(select created_by from test_sessions where id=$1)),now())
          on conflict(session_id,external_case_id) do update set
            title=excluded.title,type=excluded.type,test_category=excluded.test_category,
            priority=excluded.priority,security_subcategory=excluded.security_subcategory,severity=excluded.severity,
-           source=excluded.source,case_json=excluded.case_json`,
-        [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, security.subcategory, security.severity, tc.source || null, JSON.stringify(normalizedCase)]
+           source=excluded.source,case_json=excluded.case_json,
+           created_by=coalesce(test_cases.created_by,excluded.created_by),
+           updated_by=case when test_cases.case_json is distinct from excluded.case_json then coalesce(excluded.updated_by,test_cases.updated_by) else test_cases.updated_by end,
+           updated_at=case when test_cases.case_json is distinct from excluded.case_json then now() else test_cases.updated_at end`,
+        [sessionId, tc.id, tc.title, scenarioType, testCategory, priority, security.subcategory, security.severity, tc.source || null, JSON.stringify(normalizedCase), actorId || null]
       );
     }
-    if(testCases.length){await connection.query("insert into project_audit_events(project_id,session_id,event_type,metadata) select project_id,$1,'TEST_CASES_SAVED',$2::jsonb from test_sessions where id=$1 and project_id is not null",[sessionId,JSON.stringify({caseCount:testCases.length})]);}
+    if(testCases.length){await connection.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) select project_id,$1,coalesce($3::uuid,created_by),'TEST_CASES_SAVED',$2::jsonb from test_sessions where id=$1 and project_id is not null",[sessionId,JSON.stringify({caseCount:testCases.length}),actorId||null]);}
   };
   if (client) await work(client);
   else await db.withTransaction(work);
@@ -271,7 +278,7 @@ async function loadSession(sessionId) {
   };
 }
 
-async function persistReviewedCase(sessionId, session, testCase) {
+async function persistReviewedCase(sessionId, session, testCase, actorId = null) {
   // DB disabled is a hard no-op. DB enabled saves session, case and canonical IR
   // in the same transaction before a successful Save/Confirm response.
   if (!enabled()) return false;
@@ -283,7 +290,7 @@ async function persistReviewedCase(sessionId, session, testCase) {
       userId: session.createdBy,
       client,
     });
-    await persistTestCases(sessionId, [testCase], client);
+    await persistTestCases(sessionId, [testCase], client, actorId || session.createdBy || null);
     await canonical.persistCaseIr(sessionId, testCase, client);
     if(session.projectId)await client.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TEST_CASE_REVIEWED',$4::jsonb)",[session.projectId,sessionId,session.createdBy||null,JSON.stringify({caseId:String(testCase.id),status:'SAVED'})]);
     // Persist the reviewed contract, not runtime credentials or raw session state.

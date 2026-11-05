@@ -16,6 +16,24 @@
     segment('Acceptance criteria',project.acceptance_criteria),
     segment('Business rules',project.business_rules)
   ].filter(Boolean);
+  // Breadcrumb above the page, same as the project pages: Projects › <project> [› Tasks] › Start testing.
+  function renderTestingBreadcrumb(project,mode){
+    let nav=document.getElementById('testCrumb');
+    if(!nav){
+      const wrap=document.querySelector('.wrap');if(!wrap)return;
+      nav=document.createElement('nav');nav.id='testCrumb';nav.className='testing-crumb';nav.setAttribute('aria-label','Breadcrumb');
+      wrap.prepend(nav);
+    }
+    const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const id=encodeURIComponent(document.getElementById('platformProject')?.value||'');
+    const parts=['<a href="/workspace.html#projects">Projects</a>'];
+    if(project&&id){
+      parts.push('<a href="/workspace.html?projectId='+id+'#details">'+e(project.name||'Project')+'</a>');
+      if(mode==='task')parts.push('<a href="/workspace.html?projectId='+id+'#tasks">Tasks</a>');
+    }
+    parts.push('<span aria-current="page">Start testing</span>');
+    nav.innerHTML=parts.join('<span aria-hidden="true">›</span>');
+  }
   function updateLink(sourceType,recordId=''){
     const projectId=$('platformProject')?.value||'';
     window.testnexusRunnerContext={
@@ -107,11 +125,7 @@
       details.hidden=mode==='task'||mode==='manual'||!project;
       details.textContent=details.hidden?'':base.join('\n\n')||'No project description, objectives, scope, or acceptance criteria recorded.';
     }
-    const back=$('testContextReturn');
-    if(back&&project){
-      back.href='/workspace.html?projectId='+encodeURIComponent($('platformProject').value)+'#'+(mode==='task'?'tasks':'details');
-      back.textContent=mode==='task'?'Back to project tasks':'Back to project details';
-    }
+    renderTestingBreadcrumb(project,mode);
     const url=useEnvironment(mode==='story'?item:null);
     let text='';
     if(mode==='manual'){
@@ -169,7 +183,7 @@
       '<option value="project">Project requirements</option><option value="story">Existing story</option>'+
       '<option value="task">Existing task</option><option value="manual">Write manually</option></select>'+
       '<div id="testContextRecordWrap" hidden><label for="testContextRecord">Project story (optional)</label><select id="testContextRecord"></select></div>'+
-      '<div class="testing-context-actions"><a id="testContextReturn" href="/workspace.html#projects">Back to project</a>'+
+      '<div class="testing-context-actions">'+
       '<button id="testContextManualToggle" type="button" class="testing-context-link">Write a custom story</button></div>'+
       '<p id="testContextStatus" class="testing-context-note" role="status" aria-live="polite">Loading project context…</p>';
     const projectField=projectSelect.parentElement;
@@ -222,6 +236,9 @@
       '#platformSignedIn .platform-row{grid-template-columns:1fr}'+
       '@media(max-width:560px){.testing-context-grid{grid-template-columns:1fr}}';
     css.textContent += '.testing-context-fixed{min-height:42px;display:flex;align-items:center;font-weight:650;font-size:12px;color:#273b59;padding:9px 11px;background:#fff;border:1px solid #d7e1f0;border-radius:8px;overflow-wrap:anywhere}'+
+      '.testing-crumb{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 12px;font:500 13px Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;color:#64748b}'+
+      '.testing-crumb a{color:#1d4ed8;text-decoration:none}.testing-crumb a:hover{text-decoration:underline}'+
+      '.testing-crumb [aria-current]{color:#0f172a}'+
       '.testing-context-actions{display:flex;gap:15px;flex-wrap:wrap;align-items:center;margin-top:11px;font-size:11px}'+
       '.testing-context-actions a,.testing-context-link{color:#305caa;text-decoration:underline;background:transparent;border:0;padding:3px 0;cursor:pointer;font:inherit}'+
       '.testing-context-actions a:focus-visible,.testing-context-link:focus-visible{outline:2px solid #728af5;outline-offset:3px}';

@@ -25,7 +25,7 @@ async function applyProjectWorkflow({sessionId,projectId,runNumber,executedBy}){
     return 'created';
    }
    if(r.passed&&policy.auto_close_verified_retests&&active.rowCount&&active.rows[0].status==='READY_FOR_RETEST'){
-    await client.query("update work_items set status='COMPLETED',completed_at=now(),closed_at=now(),closed_by=$1,updated_at=now() where id=$2",[executedBy||null,active.rows[0].id]);
+    await client.query("update work_items set status='COMPLETED',completed_at=now(),closed_at=now(),closed_by=$1,updated_by=$1,updated_at=now() where id=$2",[executedBy||null,active.rows[0].id]);
     await client.query("insert into work_item_history(work_item_id,event_type,old_status,new_status,performed_by,comment) values($1,'VERIFIED_RETEST_PASSED','READY_FOR_RETEST','COMPLETED',$2,$3)",[active.rows[0].id,executedBy||null,'Closed following a passing execution with project auto-close enabled.']);
     return 'closed';
    }

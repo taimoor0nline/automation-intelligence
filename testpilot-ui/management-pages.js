@@ -16,13 +16,12 @@ async function api(url,init={}){
 function projectUrl(path){return path+'?projectId='+encodeURIComponent(projectId);}
 function projectWorkspaceUrl(section='details'){return '/workspace.html?projectId='+encodeURIComponent(projectId)+'#'+section;}
 function linkedNavigation(){
- $('navEnvironment').href=projectId?projectUrl('/environment-config.html'):'/workspace.html#projects';
  // Highlight the current section in the top bar.
- const current=page.startsWith('environment')?$('navEnvironment'):$('navProjects');
+ const current=$('navProjects'); // every management page belongs to a project
  current?.setAttribute('aria-current','page');
  renderBreadcrumb();
- if($('mgBack'))$('mgBack').href=page==='project-create'?'/workspace.html#projects':page==='environment-form'?projectUrl('/environment-config.html'):projectId?projectWorkspaceUrl(page==='task-create'?'tasks':'details'):'/workspace.html#projects';
  const cancel=$('mgEnvCancel');if(cancel)cancel.href=projectUrl('/environment-config.html');
+ if(cancel&&embedded)cancel.onclick=e=>{e.preventDefault();doneEnvForm(false);};
  const taskCancel=$('mgTaskCancel');if(taskCancel)taskCancel.href=projectWorkspaceUrl('tasks');
 }
 function icon(name,description,urlOrFn,kind=''){
@@ -32,8 +31,12 @@ function icon(name,description,urlOrFn,kind=''){
  pause:'<circle cx="12" cy="12" r="9"/><path d="M9 8v8M15 8v8"/>',play:'<path d="m8 5 11 7-11 7z"/>'};
  const attrs='class="mg-icon '+kind+'" title="'+esc(description)+'" aria-label="'+esc(description)+'"';
  const svg='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+paths[name]+'</svg>';
- return typeof urlOrFn==='string'?'<a '+attrs+' href="'+esc(urlOrFn)+'">'+svg+'</a>':'<button type="button" '+attrs+' data-env-action="'+name+'" data-env-id="'+esc(urlOrFn)+'">'+svg+'</button>';
+ // Page addresses become links; anything else (an environment id) becomes an action button.
+ return typeof urlOrFn==='string'&&urlOrFn.startsWith('/')?'<a '+attrs+' href="'+esc(urlOrFn)+'">'+svg+'</a>':'<button type="button" '+attrs+' data-env-action="'+name+'" data-env-id="'+esc(urlOrFn)+'">'+svg+'</button>';
 }
+// "Created" / "Last updated" cell: person + date (same as the project pages).
+function mgDateTime(v){return v?new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}):'—';}
+function mgPersonCell(name,at){return '<td><span class="mg-who">'+(name?esc(name):'<span class="mg-muted">Not recorded</span>')+'</span><div class="mg-when">'+esc(mgDateTime(at))+'</div></td>';}
 function lock(form,value){const submit=$('mgSubmit');if(submit)submit.disabled=value;}
 function nameOfProject(d){return d.project?.name||'Selected project';}
 // Breadcrumb like the project pages: Projects › <project> › <this page>.
@@ -94,7 +97,7 @@ async function initProjectCreate(){
    localStorage.setItem('testnexus:currentProject',projectId);
    await api('/api/projects/'+encodeURIComponent(projectId)+'/profile',{method:'PATCH',body:JSON.stringify({referenceNo:v.referenceNo||'',startDate:v.startDate||null,endDate:v.endDate||null})});
    const files=[...input.files];await upload(projectId,files);
-   location.assign(projectWorkspaceUrl('details'));
+   if(!embedDone({changed:true,kind:'project',projectId}))location.assign(projectWorkspaceUrl('details'));
   }catch(err){
    feedback(project?'Project was created, but setup was not fully completed: '+err.message+' Open Project Details to finish.':err.message);
    lock(null,false);
@@ -116,7 +119,7 @@ async function initTaskCreate(workspace){
    v.dueAt=v.dueAt?new Date(v.dueAt).toISOString():null;
    v.assignedTo=v.assignedTo||null;
    await api('/api/projects/'+encodeURIComponent(projectId)+'/work-items',{method:'POST',body:JSON.stringify(v)});
-   location.assign(projectWorkspaceUrl('tasks'));
+   if(!embedDone({changed:true,kind:'task'}))location.assign(projectWorkspaceUrl('tasks'));
   }catch(err){feedback(err.message);lock(null,false);}
  };
 }
@@ -125,7 +128,7 @@ async function loadEnvironments(){
  environments=data.environments||[];canManage=!!data.canManage;
  return data;
 }
-function envFilter(){return environments.filter(e=>(!$('mgStageFilter').value||e.stage_type===$('mgStageFilter').value)&&(!$('mgStatusFilter').value||(e.is_active?'active':'disabled')===$('mgStatusFilter').value));}
+function envFilter(){const q=($('mgEnvSearch')?.value||'').trim().toLowerCase();return environments.filter(e=>(!q||(e.name+' '+e.base_url+' '+e.stage_type).toLowerCase().includes(q))&&(!$('mgStageFilter').value||e.stage_type===$('mgStageFilter').value)&&(!$('mgStatusFilter').value||(e.is_active?'active':'disabled')===$('mgStatusFilter').value));}
 function renderEnvironments(){
  const filtered=envFilter(),pageSize=Number($('mgPageSize').value)||10,pages=Math.max(1,Math.ceil(filtered.length/pageSize));
  envPage=Math.max(1,Math.min(envPage,pages));const current=filtered.slice((envPage-1)*pageSize,envPage*pageSize);
@@ -135,7 +138,7 @@ function renderEnvironments(){
  const edit=canManage?icon('edit','Edit environment '+e.name,base):'';
  const toggle=canManage?icon(e.is_active?'pause':'play',e.is_active?'Disable environment':'Enable environment',e.id):'';
  const remove=canManage?icon('trash',e.canDelete?'Review deletion of unused environment':'Review deletion restriction',base+'&mode=delete','danger'):'';
- return '<tr><td><strong>'+esc(e.name)+'</strong></td><td>'+esc(e.stage_type)+'</td><td>'+esc(e.base_url)+'</td><td><span class="mg-status '+(e.is_active?'':'inactive')+'">'+(e.is_active?'Active':'Disabled')+'</span></td><td>'+Number(e.usage?.total||0)+' reference(s)</td><td>'+(e.is_default?'Yes':'—')+'</td><td><div class="mg-icon-actions">'+view+edit+toggle+remove+'</div></td></tr>';
+ return '<tr><td><strong>'+esc(e.name)+'</strong></td><td>'+esc(e.stage_type)+'</td><td>'+esc(e.base_url)+'</td><td><span class="mg-status '+(e.is_active?'':'inactive')+'">'+(e.is_active?'Active':'Disabled')+'</span></td><td>'+Number(e.usage?.total||0)+' reference(s)</td><td>'+(e.is_default?'Yes':'—')+'</td>'+mgPersonCell(e.created_by_name,e.created_at)+mgPersonCell(e.updated_by_name||(Math.abs(new Date(e.updated_at)-new Date(e.created_at))<2000?e.created_by_name:''),e.updated_at||e.created_at)+'<td><div class="mg-icon-actions">'+view+edit+toggle+remove+'</div></td></tr>';
  }).join('')||'<tr><td colspan="7" class="mg-note">No environments match the filters.</td></tr>';
  $('mgEnvironmentCount').textContent=filtered.length+' environment(s)';
  $('mgPageLabel').textContent='Page '+envPage+' of '+pages;
@@ -145,13 +148,13 @@ function renderEnvironments(){
 }
 async function toggleEnvironment(env){
  const activate=!env.is_active,action=activate?'enable':'disable';
- if(!confirm('Do you want to '+action+' '+env.name+' for new testing activity?'))return;
+ if(!await window.TestNexusConfirm({title:(activate?'Enable':'Disable')+' environment?',message:'Do you want to '+action+' '+env.name+'?',note:activate?'It becomes available for new testing again.':'It will not be offered for new testing. Past runs are kept.',confirmLabel:activate?'Enable':'Disable',tone:'warning'}))return;
  await api('/api/projects/'+encodeURIComponent(projectId)+'/environments/'+encodeURIComponent(env.id),{method:'PATCH',body:JSON.stringify({isActive:activate,isDefault:false})});
  await loadEnvironments();renderEnvironments();feedback('Environment '+(activate?'enabled':'disabled')+'.','success');
 }
 async function deleteEnvironment(env){
  if(!env.canDelete){feedback('This environment has associated stories or test transactions. Delete is not allowed; disable it instead.');return;}
- if(!confirm('Permanently delete the unused environment '+env.name+'? This cannot be undone.'))return;
+ if(!await window.TestNexusConfirm({title:'Delete environment?',message:'Do you want to permanently delete '+env.name+'?',note:'This environment has never been used. This cannot be undone.',confirmLabel:'Delete environment'}))return;
  await api('/api/projects/'+encodeURIComponent(projectId)+'/environments/'+encodeURIComponent(env.id),{method:'DELETE'});
  await loadEnvironments();renderEnvironments();feedback('Unused environment deleted.','success');
 }
@@ -161,6 +164,11 @@ async function initEnvironmentList(){
  $('mgCreateEnvironment').href=projectUrl('/environment-form.html');
  await loadEnvironments();renderEnvironments();
  for(const id of ['mgStageFilter','mgStatusFilter','mgPageSize'])$(id).addEventListener('change',()=>{envPage=1;renderEnvironments();});
+ $('mgEnvSearch')?.addEventListener('input',()=>{envPage=1;renderEnvironments();});
+ // Create / view / edit / delete open the environment form in a popup instead of a new page.
+ document.addEventListener('click',e=>{const a=e.target.closest('a[href^="/environment-form.html"]');if(!a||e.ctrlKey||e.metaKey||e.shiftKey)return;e.preventDefault();openEnvDialog(a.getAttribute('href'));});
+ window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='tn-popup-size')$('mgEnvDialog').style.height=Math.min(e.data.height+4,innerHeight-48)+'px';});
+ window.addEventListener('message',async e=>{if(e.origin!==location.origin||e.data?.type!=='tn-env-form')return;$('mgEnvDialog').close();if(e.data.changed){await loadEnvironments();renderEnvironments();if(e.data.message)feedback(e.data.message,'success');}});
  $('mgPrev').onclick=()=>{envPage--;renderEnvironments();};
  $('mgNext').onclick=()=>{envPage++;renderEnvironments();};
  $('mgEnvironmentRows').addEventListener('click',async event=>{
@@ -170,6 +178,27 @@ async function initEnvironmentList(){
   try{await(b.dataset.envAction==='trash'?deleteEnvironment(env):toggleEnvironment(env));}
   catch(err){feedback(err.message);}finally{b.disabled=false;}
  });
+}
+// The environment form can run inside the popup on the Environments list (?embed=1).
+const embedded=qs.get('embed')==='1'&&window.parent!==window;
+if(embedded)document.documentElement.classList.add('mg-embedded');
+// Create pages in a popup: tell the opening page what happened instead of navigating away.
+function embedDone(data){if(embedded)window.parent.postMessage({type:'tn-popup-done',...data},location.origin);return embedded;}
+// In a popup: title the form after the page ("Create task") and let the popup fit the form's height.
+if(embedded){
+ const fit=()=>{const m=document.querySelector('.mg-main');window.parent.postMessage({type:'tn-popup-size',height:Math.ceil(m?m.getBoundingClientRect().height:document.body.scrollHeight)},location.origin);};
+ window.addEventListener('load',()=>{const h=document.querySelector('.mg-card-head h2');if(h&&PAGE_LABELS[page]&&page!=='environment-form')h.textContent=PAGE_LABELS[page];fit();});
+ new ResizeObserver(fit).observe(document.querySelector('.mg-main')||document.body);
+}
+if(embedded)document.addEventListener('click',e=>{const a=e.target.closest('a.mg-btn');if(a&&a.textContent.trim()==='Cancel'){e.preventDefault();embedDone({changed:false});}});
+function doneEnvForm(changed,message){
+ if(embedded)window.parent.postMessage({type:'tn-env-form',changed,message},location.origin);
+ else location.assign(projectUrl('/environment-config.html'));
+}
+function openEnvDialog(href){
+ const url=new URL(href,location.origin);url.searchParams.set('projectId',projectId);url.searchParams.set('embed','1');
+ const frame=$('mgEnvFrame');frame.src=url.pathname+url.search;
+ $('mgEnvDialog').showModal();
 }
 async function initEnvironmentForm(){
  const workspace=await loadProject();
@@ -211,11 +240,11 @@ async function initEnvironmentForm(){
   $('mgEnvDelete').textContent=env.canDelete?'Delete unused environment':'Delete blocked (has history)';
   $('mgEnvDelete').disabled=!env.canDelete;
  }
- $('mgEnvDisable').onclick=async()=>{try{lock(null,true);await api('/api/projects/'+encodeURIComponent(projectId)+'/environments/'+encodeURIComponent(env.id),{method:'PATCH',body:JSON.stringify({isActive:!env.is_active,isDefault:false})});location.assign(projectUrl('/environment-config.html'));}catch(err){feedback(err.message);lock(null,false);}};
+ $('mgEnvDisable').onclick=async()=>{if(!await window.TestNexusConfirm({title:(env.is_active?'Disable':'Enable')+' environment?',message:'Do you want to '+(env.is_active?'disable':'enable')+' '+env.name+'?',note:env.is_active?'It will not be offered for new testing. Past runs are kept.':'It becomes available for new testing again.',confirmLabel:env.is_active?'Disable':'Enable',tone:'warning'}))return;try{lock(null,true);await api('/api/projects/'+encodeURIComponent(projectId)+'/environments/'+encodeURIComponent(env.id),{method:'PATCH',body:JSON.stringify({isActive:!env.is_active,isDefault:false})});doneEnvForm(true,'Environment '+(env.is_active?'disabled':'enabled')+'.');}catch(err){feedback(err.message);lock(null,false);}};
  $('mgEnvDelete').onclick=async()=>{
   if(!env.canDelete)return feedback('Deletion is blocked by existing transactions. Disable the environment instead.');
-  if(!confirm('Permanently delete '+env.name+'?'))return;
-  try{await api('/api/projects/'+encodeURIComponent(projectId)+'/environments/'+encodeURIComponent(env.id),{method:'DELETE'});location.assign(projectUrl('/environment-config.html'));}
+  if(!await window.TestNexusConfirm({title:'Delete environment?',message:'Do you want to permanently delete '+env.name+'?',note:'This cannot be undone.',confirmLabel:'Delete environment'}))return;
+  try{await api('/api/projects/'+encodeURIComponent(projectId)+'/environments/'+encodeURIComponent(env.id),{method:'DELETE'});doneEnvForm(true,'Environment deleted.');}
   catch(err){feedback(err.message);}
  };
  form.onsubmit=async event=>{
@@ -225,7 +254,7 @@ async function initEnvironmentForm(){
    const body={name:v.name,baseUrl:v.baseUrl,stageType:v.stageType,isDefault:$('mgEnvDefault').checked,
     loginRequired:$('mgEnvLoginRequired').checked,testUsers:collectEnvUsers()};
    await api('/api/projects/'+encodeURIComponent(projectId)+'/environments'+(env?'/'+encodeURIComponent(env.id):''),{method:env?'PATCH':'POST',body:JSON.stringify(body)});
-   location.assign(projectUrl('/environment-config.html'));
+   doneEnvForm(true,env?'Environment saved.':'Environment created.');
   }catch(err){feedback(err.message);lock(null,false);}
  };
 }
@@ -265,6 +294,7 @@ async function init(){
  if(!token()){location.replace('/login.html');return;}
  try{
   const me=await api('/api/auth/me');user=me.user;
+  if($('navUsers'))$('navUsers').hidden=String(user?.role||'').toUpperCase()!=='MANAGER'; // Users: managers only
   // Same profile menu (avatar ▾ → name, role, Sign out) as the other pages, at the right end of the top bar.
   const signOut=$('mgSignOut');
   if(signOut&&window.TestNexusProfileMenu){const slot=document.createElement('span');signOut.closest('header').append(slot);signOut.remove();window.TestNexusProfileMenu.mount(slot,user||{});}

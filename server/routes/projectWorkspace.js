@@ -53,9 +53,9 @@ router.get('/api/projects/:projectId/workspace',requireAuth,async(req,res)=>{
  const ctx=await access(req,req.params.projectId);
  const [envs,stories,docs,team,runs]=await Promise.all([
  db.query('select id,name,base_url,stage_type,is_default,is_active,disabled_at,created_at,updated_at,login_required,jsonb_array_length(test_users) as test_user_count from project_environments where project_id=$1 order by is_default desc,name',[req.params.projectId]),
- db.query('select s.*,u.display_name created_by_name from project_stories s left join users u on u.id=s.created_by where s.project_id=$1 order by s.updated_at desc limit 200',[req.params.projectId]),
- db.query('select id,filename,mime_type,category,file_size,version,uploaded_by,created_at from project_documents where project_id=$1 order by created_at desc limit 200',[req.params.projectId]),
- db.query('select pm.user_id,pm.project_role,u.display_name,u.email from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and u.is_active=true order by u.display_name',[req.params.projectId]),
+ db.query('select s.*,u.display_name created_by_name,uu.display_name updated_by_name from project_stories s left join users u on u.id=s.created_by left join users uu on uu.id=s.updated_by where s.project_id=$1 order by s.updated_at desc limit 200',[req.params.projectId]),
+ db.query('select d.id,d.filename,d.mime_type,d.category,d.file_size,d.version,d.uploaded_by,d.created_at,u.display_name uploaded_by_name from project_documents d left join users u on u.id=d.uploaded_by where d.project_id=$1 order by d.created_at desc limit 200',[req.params.projectId]),
+ db.query('select pm.user_id,pm.project_role,pm.created_at,u.display_name,u.email,ab.display_name added_by_name from project_members pm join users u on u.id=pm.user_id left join users ab on ab.id=pm.added_by where pm.project_id=$1 and u.is_active=true order by u.display_name',[req.params.projectId]),
  db.query('select r.id,r.session_id,r.run_number,r.total,r.passed,r.failed,r.duration_ms,r.completed_at,t.environment,u.display_name executed_by_name from test_runs r left join test_sessions t on t.id=r.session_id left join users u on u.id=r.executed_by where r.project_id=$1 order by r.completed_at desc limit 50',[req.params.projectId])
  ]);
  res.json({ok:true,project:ctx.project,projectRole:ctx.role,environments:envs.rows,stories:stories.rows,documents:docs.rows,members:team.rows,runs:runs.rows});
@@ -73,6 +73,7 @@ router.patch('/api/projects/:projectId/profile',requireAuth,async(req,res)=>{
  values.push(val||null);updates.push((key==='startDate'?'start_date':'end_date')+'=$'+values.length);
  }
  if(!updates.length)throw fail(400,'No project fields supplied.');
+ values.push(req.user.sub);updates.push('updated_by=$'+values.length);
  values.push(req.params.projectId);
  const updated=await db.query('update projects set '+updates.join(',')+',updated_at=now() where id=$'+values.length+' returning *',values);
  res.json({ok:true,project:updated.rows[0]});
@@ -157,11 +158,11 @@ router.get('/api/projects/:projectId/environments/:environmentId/test-login',req
 router.get('/api/projects/:projectId/environments',requireAuth,async(req,res)=>{
  try{
   const ctx=await access(req,req.params.projectId);
-  const environments=await db.query('select * from project_environments where project_id=$1 order by is_active desc,is_default desc,name',[req.params.projectId]);
+  const environments=await db.query('select e.*,cu.display_name created_by_name,uu.display_name updated_by_name from project_environments e left join users cu on cu.id=e.created_by left join users uu on uu.id=e.updated_by where e.project_id=$1 order by e.is_active desc,e.is_default desc,e.name',[req.params.projectId]);
   const list=await Promise.all(environments.rows.map(async env=>{
    const usage=await usageForEnvironment(db,req.params.projectId,env);
-   const {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,login_required,test_username,test_password_encrypted,test_users}=env;
-   return {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,login_required:Boolean(login_required),test_username:test_username||'',has_test_password:Boolean(test_password_encrypted),test_users:publicTestUsers(test_users),usage,canDelete:usage.total===0};
+   const {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,login_required,test_username,test_password_encrypted,test_users,created_by_name,updated_by_name}=env;
+   return {id,name,base_url,stage_type,is_default,is_active,created_at,updated_at,disabled_at,created_by_name,updated_by_name,login_required:Boolean(login_required),test_username:test_username||'',has_test_password:Boolean(test_password_encrypted),test_users:publicTestUsers(test_users),usage,canDelete:usage.total===0};
   }));
   res.json({ok:true,environments:list,canManage:ctx.role==='PROJECT_MANAGER'});
  }catch(e){respond(res,e);}
@@ -202,7 +203,7 @@ router.patch('/api/projects/:projectId/environments/:environmentId',requireAuth,
    if(def)await client.query('update project_environments set is_default=false where project_id=$1 and id<>$2',[req.params.projectId,envId]);
    const saved=await client.query(`update project_environments set name=$1,base_url=$2,stage_type=$3,is_default=$4,is_active=$5,
      disabled_at=case when $5=false then coalesce(disabled_at,now()) else null end,
-     disabled_by=case when $5=false then coalesce(disabled_by,$6::uuid) else null end,updated_at=now(),
+     disabled_by=case when $5=false then coalesce(disabled_by,$6::uuid) else null end,updated_at=now(),updated_by=$6::uuid,
      login_required=$9,test_username=$10,test_password_encrypted=$11,test_users=$12::jsonb
      where id=$7 and project_id=$8 returning *`,[name,base,stage,def,isActive,req.user.sub,envId,req.params.projectId,login.loginRequired,login.username,login.passwordEncrypted,JSON.stringify(login.users)]);
    await auditEnv(client,req.params.projectId,envId,req.user.sub,previous.is_active===true&&isActive===false?'ENVIRONMENT_DISABLED':previous.is_active===false&&isActive===true?'ENVIRONMENT_ENABLED':'ENVIRONMENT_UPDATED',
@@ -245,6 +246,19 @@ router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  res.status(201).json({ok:true,story:result.rows[0]});
  }catch(e){respond(res,e);}
 });
+// Delete a story (project manager only). Its test sessions, cases and runs stay; they are just no longer linked to it.
+router.delete('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const story=await db.withTransaction(async client=>{
+ const d=await client.query('delete from project_stories where id=$1 and project_id=$2 returning id,reference_no,title',[req.params.storyId,req.params.projectId]);
+ if(!d.rowCount)throw fail(404,'Story not found.');
+ await client.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'STORY_DELETED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({storyId:d.rows[0].id,referenceNo:d.rows[0].reference_no,title:d.rows[0].title})]);
+ return d.rows[0];
+ });
+ res.json({ok:true,story});
+ }catch(e){respond(res,e);}
+});
 router.patch('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,res)=>{
  try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
@@ -260,13 +274,29 @@ router.patch('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,r
  res.json({ok:true,story:updated});
  }catch(e){respond(res,e);}
 });
+// Project document categories (stored in project_documents.category).
+const DOCUMENT_CATEGORIES=new Set(['REQUIREMENTS','USER_STORIES','UI_DESIGN','API_SPEC','TEST_PLAN','TEST_DATA','REPORT','OTHER']);
 router.post('/api/projects/:projectId/documents',requireAuth,async(req,res)=>{
  try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
  const f=parseFile(req.body);
  const r=await db.query('insert into project_documents(project_id,filename,mime_type,category,file_size,file_data,version,uploaded_by) values($1,$2,$3,$4,$5,$6,$7,$8) returning id,filename,mime_type,category,file_size,version,created_at',
- [req.params.projectId,f.filename,f.mime,s(req.body?.category,50)||'OTHER',f.buf.length,f.buf,s(req.body?.version,30)||'1.0',req.user.sub]);
+ [req.params.projectId,f.filename,f.mime,DOCUMENT_CATEGORIES.has(String(req.body?.category||'').toUpperCase())?String(req.body.category).toUpperCase():'OTHER',f.buf.length,f.buf,s(req.body?.version,30)||'1.0',req.user.sub]);
+ await db.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'DOCUMENT_UPLOADED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({documentId:r.rows[0].id,filename:r.rows[0].filename,category:r.rows[0].category})]);
  res.status(201).json({ok:true,document:r.rows[0]});
+ }catch(e){respond(res,e);}
+});
+// Delete a project document (project manager only); recorded in the audit log.
+router.delete('/api/projects/:projectId/documents/:documentId',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const doc=await db.withTransaction(async client=>{
+ const d=await client.query('delete from project_documents where id=$1 and project_id=$2 returning id,filename,category',[req.params.documentId,req.params.projectId]);
+ if(!d.rowCount)throw fail(404,'Document not found.');
+ await client.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'DOCUMENT_DELETED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({documentId:d.rows[0].id,filename:d.rows[0].filename,category:d.rows[0].category})]);
+ return d.rows[0];
+ });
+ res.json({ok:true,document:doc});
  }catch(e){respond(res,e);}
 });
 router.get('/api/projects/:projectId/documents/:documentId/download',requireAuth,async(req,res)=>{
@@ -351,6 +381,7 @@ router.patch('/api/work-items/:id/lifecycle',requireAuth,async(req,res)=>{
  else if(action==='DELETE'){if(!isManager)throw fail(403,'Project manager required to delete.');put('deleted_at',new Date());put('deleted_by',req.user.sub);}
  else if(action==='RESTORE'){if(!isManager)throw fail(403,'Project manager required to restore.');put('deleted_at',null);put('deleted_by',null);}
  else throw fail(400,'Unsupported lifecycle action.');
+ put('updated_by',req.user.sub);
  params.push(item.id);const changed=await db.withTransaction(async client=>{
  const row=await client.query('update work_items set '+sets.join(',')+',updated_at=now() where id=$'+params.length+' returning *',params);
  await client.query('insert into work_item_history(work_item_id,event_type,old_status,new_status,performed_by,comment) values($1,$2,$3,$4,$5,$6)',[item.id,'TASK_'+action,item.status,row.rows[0].status,req.user.sub,s(req.body?.reason||req.body?.comment,1000)||null]);
@@ -482,6 +513,12 @@ router.get('/api/teams',requireAuth,async(req,res)=>{try{
  const r=await db.query('select t.id,t.name,t.description,count(tm.user_id)::int as member_count from teams t left join team_members tm on tm.team_id=t.id group by t.id order by t.name');
  res.json({ok:true,teams:r.rows});
 }catch(e){respond(res,e);}});
+// Audit trail for team changes: actor = the signed-in user; team and member names are read from the database.
+async function teamAudit(projectId,actorId,eventType,teamId,userId=null){
+ await db.query(`insert into project_audit_events(project_id,actor_id,event_type,metadata)
+  select $1,$2,$3,jsonb_build_object('teamId',t.id,'teamName',t.name)||coalesce((select jsonb_build_object('userId',u.id,'memberName',u.display_name,'memberEmail',u.email) from users u where u.id=$5),'{}'::jsonb)
+  from teams t where t.id=$4`,[projectId,actorId,eventType,teamId,userId]);
+}
 router.post('/api/teams',requireAuth,requireRole('MANAGER'),async(req,res)=>{try{
  const name=s(req.body?.name,120);if(!name)throw fail(400,'Team name is required.');
  const r=await db.query('insert into teams(name,description,created_by) values($1,$2,$3) on conflict ((lower(name))) do update set description=excluded.description returning *',[name,s(req.body?.description,1000),req.user.sub]);
@@ -494,6 +531,7 @@ router.post('/api/teams/:teamId/members',requireAuth,async(req,res)=>{try{
  else if(req.user.role!=='MANAGER')throw fail(403,'Global manager access required without a project.');
  if(targetProject&&req.user.role!=='MANAGER'){const shared=await db.query('select count(*)::int as total from project_teams where team_id=$1',[req.params.teamId]);if(shared.rows[0].total>1)throw fail(409,'Team is shared across projects; global manager must change membership.');}
  const r=await db.query('insert into team_members(team_id,user_id) select $1,u.id from users u where u.id=$2 and u.is_active=true on conflict do nothing returning user_id',[req.params.teamId,req.body.userId]);
+ if(r.rowCount&&targetProject)await teamAudit(targetProject,req.user.sub,'TEAM_MEMBER_ADDED',req.params.teamId,req.body.userId);
  res.status(r.rowCount?201:200).json({ok:true});
 }catch(e){respond(res,e);}});
 router.delete('/api/projects/:projectId/teams/:teamId/members/:userId',requireAuth,async(req,res)=>{try{
@@ -501,6 +539,7 @@ router.delete('/api/projects/:projectId/teams/:teamId/members/:userId',requireAu
  const attached=await db.query('select 1 from project_teams where project_id=$1 and team_id=$2',[req.params.projectId,req.params.teamId]);
  if(!attached.rowCount)throw fail(404,'Team not associated with project.');
  const shared=await db.query('select count(*)::int as total from project_teams where team_id=$1',[req.params.teamId]);if(shared.rows[0].total>1)throw fail(409,'Team is shared across projects; manage its global membership as a platform manager.');
+ await teamAudit(req.params.projectId,req.user.sub,'TEAM_MEMBER_REMOVED',req.params.teamId,req.params.userId);
  await db.query('delete from team_members where team_id=$1 and user_id=$2',[req.params.teamId,req.params.userId]);
  res.json({ok:true});
 }catch(e){respond(res,e);}});
@@ -529,10 +568,12 @@ router.post('/api/projects/:projectId/teams',requireAuth,async(req,res)=>{try{
  if(!id(req.body?.teamId))throw fail(400,'Valid team ID required.');
  const r=await db.query('insert into project_teams(project_id,team_id) select $1,id from teams where id=$2 on conflict do nothing returning team_id',[req.params.projectId,req.body.teamId]);
  if(!r.rowCount)throw fail(404,'Team not found or already associated.');
+ await teamAudit(req.params.projectId,req.user.sub,'TEAM_ATTACHED',req.body.teamId);
  res.status(201).json({ok:true});
 }catch(e){respond(res,e);}});
 router.delete('/api/projects/:projectId/teams/:teamId',requireAuth,async(req,res)=>{try{
  const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ await teamAudit(req.params.projectId,req.user.sub,'TEAM_DETACHED',req.params.teamId);
  await db.query('delete from project_teams where project_id=$1 and team_id=$2',[req.params.projectId,req.params.teamId]);
  res.json({ok:true});
 }catch(e){respond(res,e);}});
@@ -544,7 +585,7 @@ router.get('/api/projects/:projectId/team-assignees',requireAuth,async(req,res)=
 router.get('/api/projects/:projectId/test-inventory',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);
  const [cases,runs,stories]=await Promise.all([
- db.query(`select tc.session_id,tc.external_case_id,tc.title,tc.priority,tc.created_at,sts.story_id,ps.reference_no as story_reference from test_cases tc join test_sessions ts on ts.id=tc.session_id left join story_test_sessions sts on sts.session_id=ts.id left join project_stories ps on ps.id=sts.story_id where ts.project_id=$1 order by tc.created_at desc limit 1000`,[req.params.projectId]),
+ db.query(`select tc.session_id,tc.external_case_id,tc.title,tc.priority,tc.created_at,tc.updated_at,cu.display_name as created_by_name,uu.display_name as updated_by_name,sts.story_id,ps.reference_no as story_reference from test_cases tc join test_sessions ts on ts.id=tc.session_id left join users cu on cu.id=tc.created_by left join users uu on uu.id=tc.updated_by left join story_test_sessions sts on sts.session_id=ts.id left join project_stories ps on ps.id=sts.story_id where ts.project_id=$1 order by tc.created_at desc limit 1000`,[req.params.projectId]),
  db.query('select id,session_id,run_number,total,passed,failed,executed_by,completed_at from test_runs where project_id=$1 order by completed_at desc limit 500',[req.params.projectId]),
  db.query(`select ps.id,ps.reference_no,ps.title,count(distinct sts.session_id)::int as generation_count,count(distinct tc.id)::int as case_count,count(distinct tr.id)::int as execution_count from project_stories ps left join story_test_sessions sts on sts.story_id=ps.id left join test_cases tc on tc.session_id=sts.session_id left join test_runs tr on tr.session_id=sts.session_id where ps.project_id=$1 group by ps.id order by ps.created_at desc`,[req.params.projectId])
  ]);
