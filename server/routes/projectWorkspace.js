@@ -345,7 +345,7 @@ router.get('/api/work-items/:id/details',requireAuth,async(req,res)=>{
  const [children,attachments,history,comments]=await Promise.all([
  db.query('select id,title,status,priority,assigned_to,eta_at,completed_at from work_items where parent_work_item_id=$1 and deleted_at is null order by created_at',[req.params.id]),
  db.query('select id,filename,mime_type,file_size,created_at from work_item_attachments where work_item_id=$1 order by created_at desc',[req.params.id]),
- db.query('select event_type,old_status,new_status,comment,created_at,u.display_name by_name from work_item_history h left join users u on u.id=h.performed_by where work_item_id=$1 order by created_at desc limit 100',[req.params.id]),
+ db.query('select h.event_type,h.old_status,h.new_status,h.comment,h.created_at,u.display_name by_name from work_item_history h left join users u on u.id=h.performed_by where h.work_item_id=$1 order by h.created_at desc limit 100',[req.params.id]),
  db.query('select c.id,c.comment,c.created_at,u.display_name user_name from work_item_comments c left join users u on u.id=c.user_id where work_item_id=$1 order by c.created_at',[req.params.id])
  ]);
  const parent=ctx.item.parent_work_item_id?(await db.query('select id,title,status from work_items where id=$1 and project_id=$2 and deleted_at is null',[ctx.item.parent_work_item_id,ctx.item.project_id])).rows[0]||null:null;
@@ -447,7 +447,9 @@ router.get('/api/projects/:projectId/test-cases',requireAuth,async(req,res)=>{
  }catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/project-test-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
- try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);const sessions=await db.query('select id as session_id from test_sessions where project_id=$1 order by updated_at desc limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=await projectSession(row.session_id,req.params.projectId);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved!==false).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}res.json({ok:true,groups,blocked});}catch(e){respond(res,e);}
+ try{const ctx=await access(req,req.params.projectId);reviewer(ctx.role);// Optional storyId: only the sessions generated for that story (story_test_sessions / project_story_id).
+const storyId=id(req.body?.storyId)?req.body.storyId:null;const sessions=storyId?await db.query('select distinct s.id as session_id,s.updated_at from test_sessions s left join story_test_sessions sts on sts.session_id=s.id where s.project_id=$1 and (sts.story_id=$2 or s.project_story_id=$2) order by s.updated_at desc limit 150',[req.params.projectId,storyId]):await db.query('select id as session_id from test_sessions where project_id=$1 order by updated_at desc limit 150',[req.params.projectId]);const groups=[],blocked=[];for(const row of sessions.rows){const session=await projectSession(row.session_id,req.params.projectId);if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state)){blocked.push({sessionId:row.session_id,reason:'Session unavailable or not reviewed'});continue;}const ids=(session.testCases||[]).filter(tc=>tc.automationReadiness?.status==='READY'&&tc.approved!==false).map(tc=>tc.id);if(ids.length)groups.push({sessionId:row.session_id,caseIds:ids});}// Last run of these sessions, for the "run existing or generate new" question.
+const last=groups.length?(await db.query('select run_number,completed_at,passed,failed from test_runs where project_id=$1 and session_id=any($2::text[]) order by completed_at desc limit 1',[req.params.projectId,groups.map(g=>g.sessionId)])).rows[0]||null:null;res.json({ok:true,groups,blocked,caseCount:groups.reduce((n,g)=>n+g.caseIds.length,0),lastRun:last});}catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
  try{
@@ -519,6 +521,58 @@ async function teamAudit(projectId,actorId,eventType,teamId,userId=null){
   select $1,$2,$3,jsonb_build_object('teamId',t.id,'teamName',t.name)||coalesce((select jsonb_build_object('userId',u.id,'memberName',u.display_name,'memberEmail',u.email) from users u where u.id=$5),'{}'::jsonb)
   from teams t where t.id=$4`,[projectId,actorId,eventType,teamId,userId]);
 }
+// ---- Project teams (owned by one project): list, create, rename, delete, and set a member's team ----
+router.get('/api/projects/:projectId/project-teams',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ const teams=await db.query('select t.id,t.name,(select count(*)::int from team_members tm join project_members pm on pm.user_id=tm.user_id and pm.project_id=t.project_id where tm.team_id=t.id) as member_count from teams t where t.project_id=$1 order by lower(t.name)',[req.params.projectId]);
+ const memberships=await db.query('select tm.team_id,tm.user_id from team_members tm join teams t on t.id=tm.team_id where t.project_id=$1',[req.params.projectId]);
+ res.json({ok:true,teams:teams.rows,memberships:memberships.rows});
+}catch(e){respond(res,e);}});
+router.post('/api/projects/:projectId/project-teams',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const name=s(req.body?.name,120);if(!name)throw fail(400,'Team name is required.');
+ const team=await db.withTransaction(async client=>{
+  const dup=await client.query('select 1 from teams where project_id=$1 and lower(name)=lower($2)',[req.params.projectId,name]);if(dup.rowCount)throw fail(409,'A team with this name already exists in this project.');
+  const t=await client.query('insert into teams(name,project_id,created_by) values($1,$2,$3) returning id,name',[name,req.params.projectId,req.user.sub]);
+  // Linked to the project so the existing task-assignment rule (members must be in a project team) keeps working.
+  await client.query('insert into project_teams(project_id,team_id) values($1,$2) on conflict do nothing',[req.params.projectId,t.rows[0].id]);
+  await client.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'TEAM_CREATED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({teamId:t.rows[0].id,teamName:name})]);
+  return t.rows[0];
+ });
+ res.status(201).json({ok:true,team});
+}catch(e){respond(res,e);}});
+router.patch('/api/projects/:projectId/project-teams/:teamId',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const name=s(req.body?.name,120);if(!name)throw fail(400,'Team name is required.');
+ const dup=await db.query('select 1 from teams where project_id=$1 and lower(name)=lower($2) and id<>$3',[req.params.projectId,name,req.params.teamId]);if(dup.rowCount)throw fail(409,'A team with this name already exists in this project.');
+ const r=await db.query('update teams t set name=$1 from teams old where t.id=old.id and t.id=$2 and t.project_id=$3 returning t.id,t.name,old.name as old_name',[name,req.params.teamId,req.params.projectId]);
+ if(!r.rowCount)throw fail(404,'Team not found in this project.');
+ await db.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'TEAM_RENAMED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({teamId:r.rows[0].id,oldName:r.rows[0].old_name,teamName:name})]);
+ res.json({ok:true,team:{id:r.rows[0].id,name}});
+}catch(e){respond(res,e);}});
+router.delete('/api/projects/:projectId/project-teams/:teamId',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ const r=await db.query('delete from teams where id=$1 and project_id=$2 returning id,name',[req.params.teamId,req.params.projectId]);
+ if(!r.rowCount)throw fail(404,'Team not found in this project.');
+ await db.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'TEAM_DELETED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({teamId:r.rows[0].id,teamName:r.rows[0].name})]);
+ res.json({ok:true});
+}catch(e){respond(res,e);}});
+// A member belongs to at most one team of the project; teamId null removes them from the project's teams.
+router.put('/api/projects/:projectId/members/:userId/team',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ if(!id(req.params.userId))throw fail(400,'Valid user ID required.');
+ const member=await db.query('select u.display_name from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and pm.user_id=$2',[req.params.projectId,req.params.userId]);
+ if(!member.rowCount)throw fail(404,'This person is not a member of the project.');
+ const teamId=req.body?.teamId||null;
+ let teamName=null;
+ if(teamId){const t=await db.query('select name from teams where id=$1 and project_id=$2',[teamId,req.params.projectId]);if(!t.rowCount)throw fail(400,'Team does not belong to this project.');teamName=t.rows[0].name;}
+ await db.withTransaction(async client=>{
+  await client.query('delete from team_members where user_id=$1 and team_id in (select id from teams where project_id=$2)',[req.params.userId,req.params.projectId]);
+  if(teamId)await client.query('insert into team_members(team_id,user_id) values($1,$2) on conflict do nothing',[teamId,req.params.userId]);
+  await client.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'MEMBER_TEAM_CHANGED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({userId:req.params.userId,memberName:member.rows[0].display_name,teamName})]);
+ });
+ res.json({ok:true,teamId,teamName});
+}catch(e){respond(res,e);}});
 router.post('/api/teams',requireAuth,requireRole('MANAGER'),async(req,res)=>{try{
  const name=s(req.body?.name,120);if(!name)throw fail(400,'Team name is required.');
  const r=await db.query('insert into teams(name,description,created_by) values($1,$2,$3) on conflict ((lower(name))) do update set description=excluded.description returning *',[name,s(req.body?.description,1000),req.user.sub]);
@@ -616,6 +670,13 @@ router.post('/api/projects/:projectId/repair-memory',requireAuth,async(req,res)=
  const repair=await require('../services/repairMemoryService').propose({projectId:req.params.projectId,entry:req.body,userId:req.user.sub});
  res.status(201).json({ok:true,repair});
 }catch(e){respond(res,e);}});
+// Change a learning between Project-specific and Global (QA / project manager of the owning project).
+router.patch('/api/projects/:projectId/repair-memory/:memoryId/scope',requireAuth,async(req,res)=>{try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ const result=await require('../services/repairMemoryService').setScope({projectId:req.params.projectId,memoryId:req.params.memoryId,scope:req.body?.scope,userId:req.user.sub});
+ await db.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'LEARNING_SCOPE_CHANGED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({memoryId:result.id,scope:result.scope})]);
+ res.json({ok:true,repair:result});
+}catch(e){respond(res,e);}});
 router.post('/api/projects/:projectId/repair-memory/:memoryId/verify',requireAuth,async(req,res)=>{try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
  const result=await require('../services/repairMemoryService').verifyApplied({projectId:req.params.projectId,memoryId:req.params.memoryId,runId:req.body?.runId,userId:req.user.sub});
@@ -625,7 +686,7 @@ router.post('/api/projects/:projectId/repair-memory/:memoryId/verify',requireAut
 router.get('/api/projects/:projectId/repair-memory',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);
  const memory=require('../services/repairMemoryService');
- const repairs=await memory.suggestions(req.params.projectId,{pagePath:req.query.pagePath,limit:req.query.limit});
+ const repairs=await memory.suggestions(req.params.projectId,{pagePath:req.query.pagePath,limit:req.query.limit,view:req.query.scope});
  res.json({ok:true,repairs:repairs.map(r=>({...r,recommendation:memory.recommendation(r)})),reusePolicy:'review_required'});
 }catch(e){respond(res,e);}});
 router.post('/api/projects/:projectId/repair-memory/:memoryId/events',requireAuth,async(req,res)=>{try{

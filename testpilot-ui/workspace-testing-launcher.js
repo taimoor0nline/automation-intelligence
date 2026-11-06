@@ -42,6 +42,70 @@
   sessionStorage.removeItem('testnexus:runnerSelection');
   window.location.assign('/runner');
  }
+ const post=async(path,body)=>{
+  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json',...(token()?{Authorization:'Bearer '+token()}:{})},body:JSON.stringify(body||{})});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw Error(data.reply||'Request failed ('+response.status+').');
+  return data;
+ };
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const when=v=>v?new Date(v).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}):'';
+ // "Run existing tests or generate new ones?" — shown when the project / story already has approved test cases.
+ function choiceDialog(){
+  let d=$('runChoiceDialog');if(d)return d;
+  d=document.createElement('dialog');d.id='runChoiceDialog';d.className='tn-dialog tn-choice-dialog';d.setAttribute('aria-labelledby','runChoiceTitle');
+  d.innerHTML='<div class="tn-dialog-head"><div><h2 id="runChoiceTitle">Tests already exist</h2><div class="tn-muted" id="runChoiceSub"></div></div><button type="button" class="tn-dialog-close" data-choice="cancel" aria-label="Close">×</button></div>'+
+   '<div class="tn-dialog-body"><p id="runChoiceText" class="tn-choice-text"></p><div id="runChoiceProgress" class="tn-choice-progress" aria-live="polite" hidden></div></div>'+
+   '<div class="tn-dialog-foot"><button type="button" class="btn btn-outline-secondary tn-btn" data-choice="cancel">Cancel</button><div class="d-flex gap-2"><button type="button" class="btn btn-outline-primary tn-btn" data-choice="generate">✨ Generate new tests</button><button type="button" class="btn btn-primary tn-btn" data-choice="run">▶ Run existing tests</button></div></div>';
+  document.body.appendChild(d);
+  return d;
+ }
+ async function runExisting(projectId,plan){
+  const d=$('runChoiceDialog'),box=$('runChoiceProgress');
+  d.querySelectorAll('[data-choice]').forEach(b=>{b.disabled=true;});
+  box.hidden=false;box.replaceChildren();
+  let passed=0,failed=0;
+  for(const group of plan.groups){
+   const line=document.createElement('div');line.className='tn-choice-line';line.textContent='Starting '+group.caseIds.length+' approved test(s)…';box.appendChild(line);
+   const run=await post('/api/test-runs/start',{sessionId:group.sessionId,approvedIds:group.caseIds});
+   let done=false;
+   for(let i=0;i<240&&!done;i++){
+    await new Promise(r=>setTimeout(r,2500));
+    const p=(await api('/api/test-runs/progress/'+encodeURIComponent(group.sessionId))).progress||{};
+    line.textContent='Run #'+run.runNumber+' · '+(p.completed||0)+' / '+(p.total||group.caseIds.length)+' complete';
+    if(p.complete){done=true;passed+=Number(p.passed||0);failed+=Number(p.failed||0);line.textContent+=' ✓';}
+   }
+   if(!done){line.textContent+=' · still running — results will appear in Runs & reports.';break;}
+  }
+  const end=document.createElement('div');end.className='tn-choice-done';
+  end.innerHTML='<strong>Finished.</strong> Results are saved in Runs &amp; reports.';
+  box.appendChild(end);
+  const foot=d.querySelector('.tn-dialog-foot');
+  foot.innerHTML='<span></span><div class="d-flex gap-2"><button type="button" class="btn btn-outline-secondary tn-btn" data-choice="close">Close</button><button type="button" class="btn btn-primary tn-btn" data-choice="results">View results</button></div>';
+  foot.querySelector('[data-choice="close"]').onclick=()=>{d.close();d.remove();location.reload();};
+  foot.querySelector('[data-choice="results"]').onclick=()=>{location.assign('/workspace.html?projectId='+encodeURIComponent(projectId)+'#executions');location.reload();};
+ }
+ // Ask first when approved tests exist; otherwise go straight to generation (as before).
+ async function chooseAndStart(projectId,sourceType,recordId,environmentId,label){
+  if(sourceType==='task')return start(projectId,sourceType,recordId,environmentId);
+  let plan=null;
+  try{plan=await post('/api/projects/'+encodeURIComponent(projectId)+'/project-test-plan',sourceType==='story'?{storyId:recordId}:{});}catch{plan=null;}
+  if(!plan||!plan.groups?.length)return start(projectId,sourceType,recordId,environmentId);
+  const d=choiceDialog();
+  $('runChoiceSub').textContent=label||(sourceType==='story'?'This story':'This project');
+  const last=plan.lastRun?' Last run '+when(plan.lastRun.completed_at)+': '+(plan.lastRun.passed||0)+' passed, '+(plan.lastRun.failed||0)+' failed.':'';
+  $('runChoiceText').innerHTML='<strong>'+plan.caseCount+' approved test case'+(plan.caseCount===1?'':'s')+'</strong> already exist'+(plan.caseCount===1?'s':'')+' for '+(sourceType==='story'?'this story':'this project')+'.'+esc(last)+'<br>Run them again as they are, or generate new test cases with AI?';
+  return new Promise(resolve=>{
+   d.onclick=async e=>{
+    const choice=e.target.closest('[data-choice]')?.dataset.choice||(e.target===d?'cancel':null);if(!choice)return;
+    if(choice==='cancel'){d.close();resolve();return;}
+    if(choice==='generate'){d.close();resolve(start(projectId,sourceType,recordId,environmentId));return;}
+    if(choice==='run'){try{await runExisting(projectId,plan);}catch(err){$('runChoiceProgress').hidden=false;$('runChoiceProgress').insertAdjacentHTML('beforeend','<div class="tn-choice-error">'+esc(err.message)+'</div>');d.querySelectorAll('[data-choice]').forEach(b=>{b.disabled=false;});}resolve();}
+   };
+   d.oncancel=e=>{if(d.querySelector('[data-choice="run"]')?.disabled)e.preventDefault();else resolve();};
+   d.showModal();
+  });
+ }
  document.addEventListener('click',event=>{
   const button=event.target.closest('[data-start-project],[data-start-story],[data-start-task]');
   if(!button)return;
@@ -50,6 +114,7 @@
   const projectId=sourceType==='project'?(button.dataset.startProject||$('projectPicker')?.value):$('projectPicker')?.value;
   const recordId=sourceType==='story'?button.dataset.startStory:sourceType==='task'?button.dataset.startTask:null;
   button.disabled=true;
-  start(projectId,sourceType,recordId,button.dataset.environmentId||null).catch(err=>{error(err.message);button.disabled=false;});
+  const label=button.closest('tr')?.querySelector('strong,.tn-task-title')?.textContent||button.closest('.tn-home-card')?.querySelector('h3')?.textContent||'';
+  chooseAndStart(projectId,sourceType,recordId,button.dataset.environmentId||null,label).then(()=>{button.disabled=false;}).catch(err=>{error(err.message);button.disabled=false;});
  },true);
 })();

@@ -70,6 +70,10 @@ function auditDetails(e){
   case 'MEMBER_ROLE_CHANGED':return (m.memberName||'User')+': '+(m.previousRole?role(m.previousRole)+' → ':'')+role(m.projectRole);
   case 'MEMBER_REMOVED':return (m.memberName||'User')+' removed'+(m.previousRole?' (was '+role(m.previousRole)+')':'');
   case 'TEAM_ATTACHED':return 'Team '+(m.teamName||'')+' attached';
+  case 'TEAM_CREATED':return 'Team '+(m.teamName||'')+' created';
+  case 'TEAM_RENAMED':return 'Team '+(m.oldName||'')+' renamed to '+(m.teamName||'');
+  case 'TEAM_DELETED':return 'Team '+(m.teamName||'')+' deleted';
+  case 'MEMBER_TEAM_CHANGED':return (m.memberName||'Member')+(m.teamName?' moved to team '+m.teamName:' removed from team');
   case 'TEAM_DETACHED':return 'Team '+(m.teamName||'')+' detached';
   case 'TEAM_MEMBER_ADDED':return (m.memberName||'User')+' added to team '+(m.teamName||'');
   case 'TEAM_MEMBER_REMOVED':return (m.memberName||'User')+' removed from team '+(m.teamName||'');
@@ -79,6 +83,7 @@ function auditDetails(e){
   case 'ENVIRONMENT_CREATED':return m.name||'';
   case 'ENVIRONMENT_UPDATED':case 'ENVIRONMENT_DISABLED':return m.oldName&&m.newName&&m.oldName!==m.newName?m.oldName+' → '+m.newName:(m.newName||m.oldName||'');
   case 'STORY_CREATED':return m.referenceNo||'';
+  case 'LEARNING_SCOPE_CHANGED':return m.scope==='GLOBAL'?'Learning made global':'Learning made local';
   case 'DOCUMENT_UPLOADED':case 'DOCUMENT_DELETED':return (m.filename||'File')+(m.category?' · '+(DOC_CATEGORIES[m.category]||m.category):'');
   case 'STORY_DELETED':return (m.referenceNo?m.referenceNo+' · ':'')+(m.title||'');
   default:return '';
@@ -196,6 +201,31 @@ async function loadRepos(){
 document.addEventListener('submit',async e=>{
  if(e.target.id!=='repoForm')return;e.preventDefault();
  try{const v=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/repositories',{method:'POST',body:JSON.stringify({repoFullName:v.repoFullName.trim(),defaultBranch:(v.defaultBranch||'main').trim()})});e.target.reset();await loadRepos();notice('Repository linked.','success');}
+ catch(err){notice(err.message);}
+});
+// AI learning tab: Local (this project's learnings) or Global (shared by all projects).
+function renderLearning(list){
+ // The Local / Global switch sits on its own row, directly under the search box.
+ const toggle=$('learningScopeToggle'),toolbar=document.querySelector('.tn-table-filters[data-table-key="repairMemoryList"]');
+ if(toggle&&toolbar){
+  let row=$('learningScopeRow');
+  if(!row){row=document.createElement('div');row.id='learningScopeRow';row.className='tn-learning-scope-row';}
+  if(row.previousElementSibling!==toolbar)toolbar.after(row);
+  if(toggle.parentElement!==row)row.append(toggle);
+ }
+ const global=state.learningView==='global',canEdit=['PROJECT_MANAGER','QA'].includes(state.context?.projectRole);
+ $('repairMemoryList').innerHTML=list.map(r=>{
+  const own=String(r.project_id)===String(state.projectId),isGlobal=r.scope==='GLOBAL';
+  const scope='<span class="tn-scope '+(isGlobal?'global':'project')+'">'+(isGlobal?'Global':'Local')+'</span>'+(global&&!own&&r.project_name?'<div class="tn-muted">from '+esc(r.project_name)+'</div>':'');
+  const action=own&&canEdit?'<button type="button" class="btn btn-outline-primary tn-btn tn-btn-sm" data-learning-scope="'+esc(r.id)+'" data-to="'+(isGlobal?'PROJECT':'GLOBAL')+'">'+(isGlobal?'Make local':'Make global')+'</button>':'<span class="tn-muted">—</span>';
+  return '<tr><td><strong>'+esc(r.recommendation?.title||'Recommended improvement')+'</strong><div class="tn-muted">'+esc(r.recommendation?.summary||'Review this improvement before use.')+'</div></td><td>'+esc(r.page_path||'—')+'</td><td>'+scope+'</td><td data-sort="'+esc(r.verified_at||'')+'">'+esc(dateTime(r.verified_at))+'</td><td>'+esc(r.success_count??0)+'</td>'+createdCell(r.created_by_name,r.created_at)+updatedCell(r.updated_by_name,r.updated_at,r.created_by_name,r.created_at)+'<td>'+action+'</td></tr>';
+ }).join('')||'<tr><td colspan="8" class="tn-empty">'+(global?'No global learnings yet. A learning becomes global when someone marks it "Make global".':'No local learnings for this project yet. They appear after a repaired test passes its re-run.')+'</td></tr>';
+}
+document.addEventListener('click',async e=>{
+ const v=e.target.closest('[data-learning-view]');
+ if(v){state.learningView=v.dataset.learningView;for(const b of document.querySelectorAll('[data-learning-view]'))b.setAttribute('aria-checked',String(b===v));loadInventory().catch(err=>notice(err.message));return;}
+ const b=e.target.closest('[data-learning-scope]');if(!b)return;
+ try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/repair-memory/'+encodeURIComponent(b.dataset.learningScope)+'/scope',{method:'PATCH',body:JSON.stringify({scope:b.dataset.to})});notice(b.dataset.to==='GLOBAL'?'Learning is now global: all projects can see it.':'Learning is now local: only this project can see it.','success');await loadInventory();}
  catch(err){notice(err.message);}
 });
 function priorityTag(p){
@@ -373,7 +403,7 @@ function renderOverview(){
 }
 function renderStoryList(){
  const c=state.context;
- $('storyList').innerHTML=c.stories.map(x=>'<tr><td><strong>'+esc(x.title)+'</strong><div class="tn-muted">'+esc(x.reference_no||'')+'</div></td><td>'+priorityTag(x.priority||'MEDIUM')+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('edit','data-story="'+esc(x.id)+'"','Edit story '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-story="'+esc(x.id)+'"','Delete story '+x.title):'')+actionIcon('play','data-start-story="'+esc(x.id)+'"','Start testing story '+x.title)+'</span></td></tr>').join('')||'<tr><td colspan="3" class="tn-empty">No stories. Write one using the story form.</td></tr>';
+ $('storyList').innerHTML=c.stories.map(x=>'<tr><td><strong>'+esc(x.title)+'</strong><div class="tn-muted">'+esc(x.reference_no||'')+'</div></td><td>'+priorityTag(x.priority||'MEDIUM')+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('edit','data-story="'+esc(x.id)+'"','Edit story '+x.title)+actionIcon('play','data-start-story="'+esc(x.id)+'"','Start testing story '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-story="'+esc(x.id)+'"','Delete story '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No stories yet. Use + Create to add one.</td></tr>';
  $('storyEnvironment').innerHTML='<option value="">Select environment</option>'+c.environments.filter(e=>e.is_active!==false).map(e=>'<option value="'+esc(e.id)+'">'+esc(e.name)+(e.is_default?' (default)':'')+'</option>').join('');
 }
 
@@ -440,7 +470,7 @@ function renderTasks(){
   for(const t of tasks)if(!t.parent_work_item_id||!tasks.some(x=>x.id===t.parent_work_item_id))walk(t);
   for(const t of tasks)walk(t);tasks=order;
  }
- $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(x.work_type)+'</div></div></div></td><td>'+display(x.external_case_id)+'</td><td>'+display(x.assigned_to_name)+'</td><td>'+dateTime(x.eta_at||x.due_at)+'</td><td>'+statusTag(x.status)+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-task="'+esc(x.id)+'"','View task '+x.title)+(state.context?.projectRole!=='VIEWER'?actionIcon('edit','data-edit-task="'+esc(x.id)+'"','Edit task '+x.title):'')+actionIcon('play','data-start-task="'+esc(x.id)+'"','Start testing task '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-task="'+esc(x.id)+'"','Delete task '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="9" class="tn-empty">No tasks match your filters. Clear the search or select another status.</td></tr>';
+ $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(x.work_type)+'</div></div></div></td><td>'+display(x.external_case_id)+'</td><td>'+display(x.assigned_to_name)+'</td><td>'+dateTime(x.eta_at||x.due_at)+'</td><td>'+statusTag(x.status)+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('edit','data-edit-task="'+esc(x.id)+'"','View / edit task '+x.title)+actionIcon('play','data-start-task="'+esc(x.id)+'"','Start testing task '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-task="'+esc(x.id)+'"','Delete task '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="9" class="tn-empty">No tasks match your filters. Clear the search or select another status.</td></tr>';
  $('taskVisibleCount').textContent=tasks.length;updateTaskSelection();
 }
 async function loadSavedReports(){const project=requireProject(),kind=$('savedReportKind').value;const data=await api('/api/projects/'+encodeURIComponent(project)+'/report-snapshots'+(kind?'?kind='+encodeURIComponent(kind):''));if($('runsCountSaved'))$('runsCountSaved').textContent=data.reports.length;$('savedReportsBody').innerHTML=data.reports.map(r=>'<tr><td><span class="tn-report-kind kind-'+esc(String(r.report_kind).toLowerCase())+'">'+esc({REVIEWED_CASE:'Reviewed case',EXECUTION:'Execution',AI_LEARNING:'AI learning'}[r.report_kind]||r.report_kind.replaceAll('_',' '))+'</span></td><td>'+(r.external_case_id?'<span class="tn-case-id">'+esc(r.external_case_id)+'</span>':'<span class="tn-session-id" title="'+esc(r.run_id||r.session_id)+'">'+esc(r.run_id||r.session_id)+'</span>')+'</td><td>'+esc(r.revision)+'</td><td data-sort="'+esc(r.created_at||'')+'">'+dateTime(r.created_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('eye','data-saved-report="'+esc(r.id)+'"','View saved report')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No saved reports for this selection.</td></tr>';}
@@ -463,9 +493,29 @@ function renderReports(){
   kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>'),failed?'orange':'slate','Tests failed',failed)+
   kpi(svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),'blue','Last run',last?esc(date(last.completed_at)):'—',last?'<div class="tn-kpi-sub">'+esc(last.executed_by_name||'Unknown')+'</div>':'');
  $('runsCountRuns').textContent=runs.length;$('runsCountEvidence').textContent=state.evidence.length;
- $('runsBody').innerHTML=runs.map(r=>{const p=Number(r.passed||0),f=Number(r.failed||0),t=p+f,pct=t?Math.round(p/t*100):0;return '<tr><td data-sort="'+esc(r.completed_at||'')+'"><strong>Run #'+esc(r.run_number)+'</strong><div><span class="tn-session-id" title="'+esc(r.session_id||'')+'">'+esc(r.session_id||'')+'</span></div></td><td data-sort="'+pct+'"><div class="tn-run-result"><span class="tn-result '+(f?'fail':'pass')+'">'+(f?'Failed':'Passed')+'</span><span class="tn-run-bar" role="img" aria-label="'+p+' passed, '+f+' failed"><span style="width:'+pct+'%"></span></span><span class="tn-run-counts">'+p+' / '+t+'</span></div></td><td>'+display(r.environment)+'</td><td>'+(r.executed_by_name?'<span class="tn-who">'+esc(r.executed_by_name)+'</span>':'<span class="tn-muted">Not recorded</span>')+'</td><td>'+dateTime(r.completed_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('eye','data-report="'+esc(r.session_id)+'"','View execution report')+'</span></td></tr>';}).join('')||'<tr><td colspan="6" class="tn-empty">No test runs yet. Start testing from Context &amp; scope.</td></tr>';
+ $('runsBody').innerHTML=runs.map(r=>{const p=Number(r.passed||0),f=Number(r.failed||0),t=p+f,pct=t?Math.round(p/t*100):0;return '<tr><td data-sort="'+esc(r.completed_at||'')+'"><strong>Run #'+esc(r.run_number)+'</strong><div><span class="tn-session-id" title="'+esc(r.session_id||'')+'">'+esc(r.session_id||'')+'</span></div></td><td data-sort="'+pct+'"><div class="tn-run-result"><span class="tn-result '+(f?'fail':'pass')+'">'+(f?'Failed':'Passed')+'</span><span class="tn-run-bar" role="img" aria-label="'+p+' passed, '+f+' failed"><span style="width:'+pct+'%"></span></span><span class="tn-run-counts">'+p+' / '+t+'</span></div></td><td>'+display(r.environment)+'</td><td>'+(r.executed_by_name?'<span class="tn-who">'+esc(r.executed_by_name)+'</span>':'<span class="tn-muted">Not recorded</span>')+'</td><td>'+dateTime(r.completed_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('eye','data-report="'+esc(r.session_id)+'" data-run-number="'+esc(r.run_number)+'"','View run '+r.run_number+' test cases')+'</span></td></tr>';}).join('')||'<tr><td colspan="6" class="tn-empty">No test runs yet. Start testing from Context &amp; scope.</td></tr>';
  $('evidenceBody').innerHTML=state.evidence.map(x=>'<tr><td><span class="tn-case-title">'+esc(String(x.title||x.external_case_id||'Test').replace(/^Test execution\s+\S+\s+-\s+/i,''))+'</span><div><span class="tn-case-id">'+esc(x.external_case_id||'')+'</span></div></td><td>Run #'+esc(x.run_number)+'</td><td><span class="tn-result '+(x.passed?'pass':'fail')+'">'+(x.passed?'Passed':'Failed')+'</span></td><td>'+evidenceButtons(x.evidence_json)+'</td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No stored execution evidence yet.</td></tr>';
 }
+// Run details (eye on Runs & reports): every test case of that run with its result and evidence.
+function openRunDialog(sessionId,runNumber){
+ const run=(state.context?.runs||[]).find(r=>String(r.session_id)===String(sessionId)&&String(r.run_number)===String(runNumber))||{};
+ const rows=(state.evidence||[]).filter(x=>String(x.session_id)===String(sessionId)&&(!runNumber||String(x.run_number)===String(runNumber)));
+ const passed=rows.filter(x=>x.passed).length,failed=rows.length-passed,pct=rows.length?Math.round(passed/rows.length*100):0;
+ $('runDialogTitle').textContent='Run #'+(run.run_number||runNumber||'');
+ $('runDialogMeta').textContent=[run.environment,dateTime(run.completed_at),run.executed_by_name?'by '+run.executed_by_name:''].filter(Boolean).join(' · ');
+ $('runDialogSummary').innerHTML=rows.length?'<span class="tn-result pass">'+passed+' passed</span><span class="tn-result fail">'+failed+' failed</span><span class="tn-run-bar" role="img" aria-label="'+pct+' percent passed"><span style="width:'+pct+'%"></span></span><strong>'+pct+'%</strong>':'';
+ $('runDialogBody').innerHTML=rows.map(x=>'<tr><td><span class="tn-case-id">'+esc(x.external_case_id||'—')+'</span></td><td>'+esc(String(x.title||'').replace(/^Test execution\s+\S+\s+-\s+/i,''))+'</td><td><span class="tn-result '+(x.passed?'pass':'fail')+'">'+(x.passed?'Passed':'Failed')+'</span></td><td>'+evidenceButtons(x.evidence_json)+'</td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No test case results are saved for this run.</td></tr>';
+ $('runDialogNote').textContent='';
+ $('runDialogReport').dataset.session=sessionId;
+ $('runDialog').showModal();
+}
+document.addEventListener('click',async e=>{
+ if(e.target.closest('[data-close-run]')||e.target===$('runDialog')){$('runDialog').close();return;}
+ const btn=e.target.closest('#runDialogReport');if(!btn)return;
+ // The full HTML report exists only when "Generate AI Analysis Report" was used on the testing page.
+ try{await download('/api/reports/'+encodeURIComponent(btn.dataset.session));}
+ catch{$('runDialogNote').textContent='No full report was generated for this run. Use "Generate AI Analysis Report" on the testing page after a run to create one.';}
+});
 function evidenceButtons(meta){
  if(!meta||typeof meta!=='object')return '<span class="tn-muted">No evidence stored</span>';
  const e=meta.evidence||meta;
@@ -480,24 +530,88 @@ async function loadWorkflow(){
  const locked=d.projectRole!=='PROJECT_MANAGER';
  f.querySelectorAll('input,select,button').forEach(x=>x.disabled=locked);
 }
-async function loadInventory(){const project=requireProject();const [inventory,audit,repairMemory]=await Promise.all([api('/api/projects/'+encodeURIComponent(project)+'/test-inventory'),api('/api/projects/'+encodeURIComponent(project)+'/audit'),api('/api/projects/'+encodeURIComponent(project)+'/repair-memory')]);$('inventoryCases').innerHTML=inventory.cases.map(x=>'<tr><td>'+(x.story_reference?'<span class="tn-chip-ref">'+esc(x.story_reference)+'</span>':'<span class="tn-chip-none">Unlinked</span>')+'</td><td><span class="tn-case-title">'+esc(x.title)+'</span><div><span class="tn-case-id">'+esc(x.external_case_id)+'</span></div></td><td data-sort="'+esc({CRITICAL:4,HIGH:3,MEDIUM:2,LOW:1}[String(x.priority||'').toUpperCase()]||0)+'">'+priorityTag(x.priority)+'</td><td data-sort="'+esc(x.created_at||'')+'">'+personCell(x.created_by_name,x.created_at)+'</td><td data-sort="'+esc(x.updated_at||x.created_at||'')+'">'+personCell(x.updated_by_name,x.updated_at||x.created_at)+'</td><td><span class="tn-session-id" title="'+esc(x.session_id)+'">'+esc(x.session_id)+'</span></td></tr>').join('')||'<tr><td colspan="6" class="tn-empty">No cases yet.</td></tr>';$('inventoryStories').innerHTML=inventory.stories.map(x=>'<tr><td>'+esc(x.reference_no||'')+' · '+esc(x.title)+'</td><td>'+x.generation_count+'</td><td>'+x.case_count+'</td><td>'+x.execution_count+'</td></tr>').join('')||'<tr><td colspan="4">No stories yet.</td></tr>';$('repairMemoryList').innerHTML=repairMemory.repairs.map(r=>'<tr><td><strong>'+esc(r.recommendation?.title||'Recommended improvement')+'</strong><div class="tn-muted">'+esc(r.recommendation?.summary||'Review this improvement before use.')+'</div></td><td>'+esc(r.page_path||'—')+'</td><td data-sort="'+esc(r.verified_at||'')+'">'+esc(dateTime(r.verified_at))+'</td><td>'+esc(r.success_count??0)+'</td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No verified repair suggestions yet.</td></tr>';$('inventoryAudit').innerHTML=audit.events.map(x=>'<tr><td><span class="tn-event">'+esc(auditLabel(x.event_type))+'</span></td><td>'+esc(auditDetails(x))+'</td><td>'+(x.actor_name?'<span class="tn-who">'+esc(x.actor_name)+'</span>':'<span class="tn-muted" title="No user was recorded for this event">System</span>')+'</td><td data-sort="'+esc(x.created_at||'')+'">'+dateTime(x.created_at)+'</td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No recorded audit events yet.</td></tr>';}
+async function loadInventory(){const project=requireProject();const [inventory,audit,repairMemory]=await Promise.all([api('/api/projects/'+encodeURIComponent(project)+'/test-inventory'),api('/api/projects/'+encodeURIComponent(project)+'/audit'),api('/api/projects/'+encodeURIComponent(project)+'/repair-memory?scope='+(state.learningView||'project'))]);$('inventoryCases').innerHTML=inventory.cases.map(x=>'<tr><td>'+(x.story_reference?'<span class="tn-chip-ref">'+esc(x.story_reference)+'</span>':'<span class="tn-chip-none">Unlinked</span>')+'</td><td><span class="tn-case-title">'+esc(x.title)+'</span><div><span class="tn-case-id">'+esc(x.external_case_id)+'</span></div></td><td data-sort="'+esc({CRITICAL:4,HIGH:3,MEDIUM:2,LOW:1}[String(x.priority||'').toUpperCase()]||0)+'">'+priorityTag(x.priority)+'</td><td data-sort="'+esc(x.created_at||'')+'">'+personCell(x.created_by_name,x.created_at)+'</td><td data-sort="'+esc(x.updated_at||x.created_at||'')+'">'+personCell(x.updated_by_name,x.updated_at||x.created_at)+'</td><td><span class="tn-session-id" title="'+esc(x.session_id)+'">'+esc(x.session_id)+'</span></td></tr>').join('')||'<tr><td colspan="6" class="tn-empty">No cases yet.</td></tr>';if($('inventoryStories'))$('inventoryStories').innerHTML=inventory.stories.map(x=>'<tr><td>'+esc(x.reference_no||'')+' · '+esc(x.title)+'</td><td>'+x.generation_count+'</td><td>'+x.case_count+'</td><td>'+x.execution_count+'</td></tr>').join('')||'<tr><td colspan="4">No stories yet.</td></tr>';renderLearning(repairMemory.repairs||[]);$('inventoryAudit').innerHTML=audit.events.map(x=>'<tr><td><span class="tn-event">'+esc(auditLabel(x.event_type))+'</span></td><td>'+esc(auditDetails(x))+'</td><td>'+(x.actor_name?'<span class="tn-who">'+esc(x.actor_name)+'</span>':'<span class="tn-muted" title="No user was recorded for this event">System</span>')+'</td><td data-sort="'+esc(x.created_at||'')+'">'+dateTime(x.created_at)+'</td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No recorded audit events yet.</td></tr>';}
+// Project teams (option B): teams belong to the project; each member has one team, chosen in the members table.
 async function loadTeams(){
  const project=requireProject();
- const [all,attached,assignees,teamMembers]=await Promise.all([
-  api('/api/teams'),api('/api/projects/'+encodeURIComponent(project)+'/teams'),
-  api('/api/projects/'+encodeURIComponent(project)+'/team-assignees'),
-  api('/api/projects/'+encodeURIComponent(project)+'/team-members')
- ]);
- const teams=attached.teams||[],members=teamMembers.members||[];
- $('teamDirectory').innerHTML='<option value="">Select team</option>'+(all.teams||[]).map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>').join('');
- $('teamMemberTeam').innerHTML='<option value="">Select team</option>'+teams.map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>').join('');
- $('teamMemberUser').innerHTML='<option value="">Select user</option>'+state.context.members.map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
- state.teamsByUser={};for(const m of members)(state.teamsByUser[m.user_id]=state.teamsByUser[m.user_id]||[]).push(teams.find(t=>t.id===m.team_id)?.name||'Team');
- state.hasTeams=teams.length>0;renderTeam();
- $('projectTeams').innerHTML=teams.map(t=>'<tr><td><strong>'+esc(t.name)+'</strong></td><td><span class="tn-icon-actions">'+actionIcon('remove','data-detach-team="'+esc(t.id)+'"','Detach team '+t.name)+'</span></td></tr>').join('')||'<tr><td colspan="2" class="tn-empty">No teams attached.</td></tr>';
- $('projectTeamMembers').innerHTML=members.map(m=>'<tr><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span>'+esc(m.display_name)+'</span></td><td>'+esc(teams.find(t=>t.id===m.team_id)?.name||'Team')+'</td><td><span class="tn-icon-actions">'+actionIcon('remove','data-remove-team-member="'+esc(m.team_id)+'" data-member-id="'+esc(m.user_id)+'"','Remove member '+m.display_name)+'</span></td></tr>').join('')||'<tr><td colspan="3" class="tn-empty">No members assigned.</td></tr>';
+ const [teams,assignees]=await Promise.all([api('/api/projects/'+encodeURIComponent(project)+'/project-teams'),api('/api/projects/'+encodeURIComponent(project)+'/team-assignees')]);
+ state.projectTeams=teams.teams||[];
+ state.teamOfUser={};for(const m of teams.memberships||[])state.teamOfUser[m.user_id]=m.team_id;
+ state.hasTeams=state.projectTeams.length>0;
+ renderTeam();renderTeamList();
  if($('newTaskAssignee'))$('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+(assignees.users||[]).map(u=>'<option value="'+esc(u.id)+'">'+esc(u.display_name)+'</option>').join('');
 }
+// Ready-made team names. Each one is saved in the DB only when its first member is added.
+const DEFAULT_TEAMS=['QA team','Development team','Project management','Observers'];
+function teamChoices(){
+ const saved=(state.projectTeams||[]).map(t=>({id:t.id,name:t.name}));
+ const names=new Set(saved.map(t=>t.name.toLowerCase()));
+ return saved.concat(DEFAULT_TEAMS.filter(n=>!names.has(n.toLowerCase())).map(n=>({id:'new:'+n,name:n,unsaved:true})));
+}
+// Returns a saved team id; creates the ready-made team first if needed.
+async function ensureTeamId(value){
+ if(!value||!String(value).startsWith('new:'))return value||null;
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/project-teams',{method:'POST',body:JSON.stringify({name:String(value).slice(4)})});
+ return d.team?.id||null;
+}
+// Teams popup: pick a team from the dropdown, then see / add / remove its members; or create a new team.
+function renderTeamList(){
+ const picker=$('teamPicker');if(!picker)return;
+ const teams=state.projectTeams||[],choices=teamChoices();
+ if(state.selectedTeamId&&!choices.some(t=>t.id===state.selectedTeamId))state.selectedTeamId='';
+ picker.innerHTML='<option value="">Select a team</option>'+choices.map(t=>'<option value="'+esc(t.id)+'"'+(t.id===state.selectedTeamId?' selected':'')+'>'+esc(t.name)+'</option>').join('');
+ const team=choices.find(t=>t.id===state.selectedTeamId),detail=$('teamDetail');
+ detail.hidden=!team;
+ if(!team)return;
+ const members=state.context?.members||[],inTeam=members.filter(m=>state.teamOfUser?.[m.user_id]===team.id);
+ $('teamMemberCount').textContent=inTeam.length;
+ $('teamMemberList').innerHTML=inTeam.map(m=>'<div class="tn-team-member"><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><strong>'+esc(m.display_name)+'</strong></span><span class="tn-role-chip role-'+esc(m.project_role||'')+'">'+esc(ROLE_LABELS[m.project_role]||m.project_role)+'</span>'+actionIcon('remove','data-team-remove-member="'+esc(m.user_id)+'"','Remove '+m.display_name+' from this team')+'</div>').join('')||'<div class="tn-empty">No members in this team yet. Add one below.</div>';
+ const others=members.filter(m=>state.teamOfUser?.[m.user_id]!==team.id);
+ $('teamAddMemberSelect').innerHTML='<option value="">Choose a project member…</option>'+others.map(m=>{const cur=teams.find(t=>t.id===state.teamOfUser?.[m.user_id]);return '<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+' · '+esc(ROLE_LABELS[m.project_role]||m.project_role)+(cur?' (now in '+esc(cur.name)+')':'')+'</option>';}).join('');
+ $('teamAddMemberForm').hidden=!others.length;
+}
+document.addEventListener('change',e=>{
+ if(e.target.id!=='teamPicker')return;
+ $('teamAddForm').hidden=true;
+ state.selectedTeamId=e.target.value;renderTeamList();
+});
+document.addEventListener('click',async e=>{
+ const project=state.projectId;
+ if(e.target.closest('#teamNewBtn')){$('teamAddForm').hidden=false;$('teamAddForm').elements.name.focus();return;}
+ if(e.target.closest('#teamAddCancel')){$('teamAddForm').hidden=true;$('teamAddForm').reset();renderTeamList();return;}
+ const rm=e.target.closest('[data-team-remove-member]');
+ try{
+  if(rm){await api('/api/projects/'+encodeURIComponent(project)+'/members/'+encodeURIComponent(rm.dataset.teamRemoveMember)+'/team',{method:'PUT',body:JSON.stringify({teamId:null})});notice('Removed from the team.','success');await loadTeams();}
+ }catch(err){notice(err.message);}
+});
+document.addEventListener('submit',async e=>{
+ if(e.target.id!=='teamAddMemberForm')return;e.preventDefault();
+ const userId=$('teamAddMemberSelect').value;if(!userId)return;
+ try{const teamId=await ensureTeamId(state.selectedTeamId);state.selectedTeamId=teamId;await api('/api/projects/'+encodeURIComponent(state.projectId)+'/members/'+encodeURIComponent(userId)+'/team',{method:'PUT',body:JSON.stringify({teamId})});notice('Added to the team.','success');await loadTeams();}
+ catch(err){notice(err.message);}
+});
+// Members table: role is a label; team is a dropdown for project managers.
+function teamCell(m){
+ const teams=state.projectTeams||[],current=state.teamOfUser?.[m.user_id]||'';
+ if(state.context?.projectRole==='PROJECT_MANAGER')return '<select class="form-select tn-inline-select" data-member-team="'+esc(m.user_id)+'" aria-label="Team of '+esc(m.display_name)+'"><option value="">No team</option>'+teamChoices().map(t=>'<option value="'+esc(t.id)+'"'+(t.id===current?' selected':'')+'>'+esc(t.name)+'</option>').join('')+'</select>';
+ const t=teams.find(x=>x.id===current);return t?'<span class="tn-team-chip">'+esc(t.name)+'</span>':'<span class="tn-muted">'+(state.hasTeams?'No team (cannot be assigned tasks)':'—')+'</span>';
+}
+function roleCell(m){
+ return '<span class="tn-role-chip role-'+esc(m.project_role||'')+'">'+esc(ROLE_LABELS[m.project_role]||m.project_role||'Member')+'</span>';
+}
+document.addEventListener('change',async e=>{
+ const team=e.target.closest('[data-member-team]'),role=e.target.closest('[data-member-role]');if(!team&&!role)return;
+ const project=requireProject();
+ try{
+  if(team){await api('/api/projects/'+encodeURIComponent(project)+'/members/'+encodeURIComponent(team.dataset.memberTeam)+'/team',{method:'PUT',body:JSON.stringify({teamId:await ensureTeamId(team.value)})});notice('Team updated.','success');await loadTeams();}
+  else{await api('/api/projects/'+encodeURIComponent(project)+'/members/'+encodeURIComponent(role.dataset.memberRole),{method:'PATCH',body:JSON.stringify({projectRole:role.value})});notice('Role updated.','success');await loadWorkspace();await loadTeams();}
+ }catch(err){notice(err.message);await loadTeams().catch(()=>{});}
+});
+document.addEventListener('submit',async e=>{
+ if(e.target.id!=='teamAddForm')return;e.preventDefault();
+ try{const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/project-teams',{method:'POST',body:JSON.stringify({name:e.target.elements.name.value.trim()})});e.target.reset();e.target.hidden=true;state.selectedTeamId=d.team?.id||'';notice('Team created. Now add members to it.','success');await loadTeams();}
+ catch(err){notice(err.message);}
+});
 // Team column: the project teams a member belongs to (from team_members).
 function teamChips(userId){
  const names=state.teamsByUser?.[userId]||[];
@@ -505,9 +619,12 @@ function teamChips(userId){
  return names.map(n=>'<span class="tn-team-chip">'+esc(String(n).replace(/^[A-Z0-9-]+ \/ /,''))+'</span>').join(' ');
 }
 function renderTeam(){
- $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><span><strong>'+esc(m.display_name)+'</strong><span class="tn-member-email">'+esc(m.email)+'</span></span></span></td><td><span class="tn-role-chip role-'+esc(m.project_role||'')+'">'+esc(ROLE_LABELS[m.project_role]||m.project_role||'Member')+'</span></td><td>'+teamChips(m.user_id)+'</td>'+createdCell(m.added_by_name,m.created_at)+'<td><span class="tn-icon-actions">'+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-remove-project-member="'+esc(m.user_id)+'"','Remove project member '+m.display_name):'')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No members.</td></tr>';
+ $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><span><strong>'+esc(m.display_name)+'</strong><span class="tn-member-email">'+esc(m.email)+'</span></span></span></td><td>'+roleCell(m)+'</td><td>'+teamCell(m)+'</td>'+createdCell(m.added_by_name,m.created_at)+'<td><span class="tn-icon-actions">'+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-remove-project-member="'+esc(m.user_id)+'"','Remove project member '+m.display_name):'')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No members.</td></tr>';
  const list=state.users||state.context.members;
+ state.accountRoles={};for(const x of list)state.accountRoles[x.id||x.user_id]=accountProjectRole(x);
  $('memberUser').innerHTML='<option value="">Select user</option>'+list.map(x=>'<option value="'+esc(x.id||x.user_id)+'">'+esc(x.displayName||x.display_name||x.email)+'</option>').join('');
+ if($('memberProject'))$('memberProject').innerHTML=(state.projects||[]).map(p=>'<option value="'+esc(p.id)+'"'+(p.id===state.projectId?' selected':'')+'>'+esc(p.name)+'</option>').join('');
+ showMemberRole();
  if($('newTaskAssignee'))$('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+state.context.members.map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
  $('workflowDeveloper').innerHTML='<option value="">Manual assignment</option>'+state.context.members.filter(m=>m.project_role==='DEVELOPER').map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
  renderDetailTeam();
@@ -625,7 +742,26 @@ async function fetchDirectory(){
  try{const r=await api('/api/projects/'+encodeURIComponent(requireProject())+'/user-directory');state.users=r.users||[];renderTeam();}catch{state.users=null;renderTeam();}
 }
 let taskOpenSerial=0;
+// Task popup layout: the essentials first (details, start/retest, linked test cases); the rest folded under "More".
+// Only moves the existing sections, so every task action keeps working as before.
+function arrangeTaskPopup(){
+ const drawer=$('taskDrawer'),body=drawer?.querySelector(':scope > .p-4');if(!body||body.dataset.arranged)return;
+ body.dataset.arranged='1';
+ const kids=[...body.children],linkedHead=kids.find(k=>k.tagName==='H3'&&/Linked test cases/i.test(k.textContent));
+ const linkForm=$('testLinkForm'),keep=new Set([$('drawerInfo'),$('taskStartTest')?.parentElement]);
+ if(linkedHead){let n=linkedHead.previousElementSibling?.classList.contains('tn-divider')?linkedHead.previousElementSibling:linkedHead;for(;n;n=n.nextElementSibling){keep.add(n);if(n===linkForm)break;}}
+ const more=document.createElement('details');more.className='tn-task-more';
+ more.innerHTML='<summary>More<span>Dates &amp; status actions · subtasks · attachments · comments · history</span></summary><div class="tn-task-more-body"></div>';
+ const moreBody=more.querySelector('.tn-task-more-body');
+ for(const k of kids)if(!keep.has(k))moreBody.appendChild(k);
+ body.appendChild(more);
+ // "Retest this task" next to "Start test"; "retest with child tasks" stays under More.
+ const retest=$('retestOne');if(retest)$('taskStartTest').parentElement.appendChild(retest);
+ const eyebrow=drawer.querySelector('.tn-card-head .tn-eyebrow');if(eyebrow)eyebrow.remove();
+ const close=$('closeTask');if(close){close.textContent='×';close.className='tn-dialog-close';close.setAttribute('aria-label','Close task');}
+}
 async function openTask(id){
+ arrangeTaskPopup();
  const serial=++taskOpenSerial;
  const d=await api('/api/work-items/'+encodeURIComponent(id)+'/details');if(serial!==taskOpenSerial)return;state.taskId=id;state.taskRole=d.projectRole;const t=d.task;
  const canReview=['PROJECT_MANAGER','QA'].includes(d.projectRole),isManager=d.projectRole==='PROJECT_MANAGER',isDeveloper=d.projectRole==='DEVELOPER';
@@ -637,7 +773,7 @@ async function openTask(id){
  $('taskFiles').disabled=d.projectRole==='VIEWER';
  for(const btn of document.querySelectorAll('[data-task-action]'))btn.disabled=!(canReview||(btn.dataset.taskAction==='ETA'&&isDeveloper))||(btn.dataset.taskAction==='DELETE'&&!isManager);
  $('drawerTitle').textContent=t.title;
- $('drawerInfo').innerHTML=(d.parent?'<div class="tn-kv"><span>Parent task</span><button class="tn-link" data-task="'+esc(d.parent.id)+'">'+esc(d.parent.title)+'</button></div>':'')+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+priorityTag(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div><div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+' · '+(t.closed_by_name?'By '+esc(t.closed_by_name):'')+'</span></div><p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
+ $('drawerInfo').innerHTML=(d.parent?'<div class="tn-kv"><span>Parent task</span><button class="tn-link" data-task="'+esc(d.parent.id)+'">'+esc(d.parent.title)+'</button></div>':'')+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+priorityTag(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div>'+(t.closed_at?'<div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+(t.closed_by_name?' · by '+esc(t.closed_by_name):'')+'</span></div>':'')+'<p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
  $('linkSession').value=t.session_id||'';$('linkCase').value=t.external_case_id||'';
  let availableCases=[];try{availableCases=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/test-cases')).cases||[];}catch(err){console.warn('Case catalog unavailable:',err.message);}
  const choices=[...new Set([t.session_id,...availableCases.map(x=>x.session_id)].filter(Boolean))];
@@ -715,15 +851,24 @@ function dropZone(zoneId,inputId,kind){
 let evidenceObjectUrl='';
 async function previewEvidence(url){
  const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});
- if(!r.ok)throw Error('Evidence is unavailable ('+r.status+').');
+ if(!r.ok){
+  // Old evidence lived only in server memory and is gone after a restart: say so clearly, where the user is looking.
+  const msg=document.createElement('div');msg.className='tn-evidence-missing';
+  msg.innerHTML='<strong>This screenshot is no longer available.</strong><span>It was taken before evidence was stored permanently, or the file was removed. Re-run the test to capture a new one.</span>';
+  if($('runDialog')?.open){$('evidenceDialogBody').replaceChildren(msg);$('evidenceDialog').showModal();return;}
+  $('evidencePreview').replaceChildren(msg);bootstrap.Modal.getOrCreateInstance($('evidenceModal')).show();return;
+ }
  const blob=await r.blob();const view=$('evidencePreview');view.replaceChildren();
  if(evidenceObjectUrl)URL.revokeObjectURL(evidenceObjectUrl);
  evidenceObjectUrl=URL.createObjectURL(blob);
  const node=document.createElement(blob.type.startsWith('video/')?'video':'img');
  node.src=evidenceObjectUrl;node.style.maxWidth='100%';node.style.maxHeight='75vh';
  if(node.tagName==='VIDEO'){node.controls=true;node.preload='metadata';}
+ // Opened from the run popup: show it in a popup stacked on top, so the run popup stays open underneath.
+ if($('runDialog')?.open){const d=$('evidenceDialog');$('evidenceDialogBody').replaceChildren(node);d.showModal();return;}
  view.appendChild(node);bootstrap.Modal.getOrCreateInstance($('evidenceModal')).show();
 }
+document.addEventListener('click',e=>{const d=$('evidenceDialog');if(d?.open&&(e.target.closest('[data-close-evidence]')||e.target===d))d.close();});
 async function download(url){
  const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('Evidence or attachment is no longer available ('+r.status+').');
  const blob=await r.blob(),href=URL.createObjectURL(blob),link=document.createElement('a');
@@ -771,13 +916,13 @@ async function retest(taskIds,includeChildren=false){
 }
 let lastTaskTrigger=null;
 function bind(){
- $('savedReportsRefresh').onclick=()=>loadSavedReports().catch(e=>notice(e.message));$('savedReportKind').onchange=()=>loadSavedReports().catch(e=>notice(e.message));$('savedReportsBody').onclick=e=>{const button=e.target.closest('[data-saved-report]');if(button)openSavedReport(button.dataset.savedReport).catch(err=>notice(err.message));};
- $('inventoryRefresh').onclick=()=>loadInventory().catch(e=>notice(e.message));
- $('teamCreateForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});e.target.reset();await loadTeams();notice('Team created.','success');}catch(err){notice(err.message);}};
- $('projectTeamMembers').onclick=async e=>{const button=e.target.closest('[data-remove-team-member]');if(!button)return;if(!await confirmDanger({title:'Remove team member?',message:'Do you want to remove '+(nameFrom(button,'Remove member ')||'this member')+' from this team?',note:'They stay on the project; only their team membership is removed.',confirmLabel:'Remove'}))return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams/'+encodeURIComponent(button.dataset.removeTeamMember)+'/members/'+encodeURIComponent(button.dataset.memberId),{method:'DELETE'});await loadTeams();notice('Team member removed.','success');}catch(err){notice(err.message);}};
- $('teamMemberForm').onsubmit=async e=>{e.preventDefault();try{const data=formPayload(e.target);await api('/api/teams/'+encodeURIComponent(data.teamId)+'/members',{method:'POST',body:JSON.stringify({userId:data.userId,projectId:requireProject()})});e.target.reset();await loadTeams();notice('Team member added.','success');}catch(err){notice(err.message);}};
- $('teamAttachForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTeams();notice('Team attached.','success');}catch(err){notice(err.message);}};
- $('projectTeams').onclick=async e=>{const btn=e.target.closest('[data-detach-team]');if(!btn)return;if(!await confirmDanger({title:'Detach team?',message:'Do you want to detach '+(nameFrom(btn,'Detach team ')||'this team')+' from this project?',note:'The team itself is not deleted and can be attached again.',confirmLabel:'Detach'}))return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams/'+encodeURIComponent(btn.dataset.detachTeam),{method:'DELETE'});await loadTeams();}catch(err){notice(err.message);}};
+ if($('savedReportsRefresh'))$('savedReportsRefresh').onclick=()=>loadSavedReports().catch(e=>notice(e.message));$('savedReportKind').onchange=()=>loadSavedReports().catch(e=>notice(e.message));$('savedReportsBody').onclick=e=>{const button=e.target.closest('[data-saved-report]');if(button)openSavedReport(button.dataset.savedReport).catch(err=>notice(err.message));};
+ if($('inventoryRefresh'))$('inventoryRefresh').onclick=()=>loadInventory().catch(e=>notice(e.message));
+ if($('teamCreateForm'))$('teamCreateForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});e.target.reset();await loadTeams();notice('Team created.','success');}catch(err){notice(err.message);}};
+ if($('projectTeamMembers'))$('projectTeamMembers').onclick=async e=>{const button=e.target.closest('[data-remove-team-member]');if(!button)return;if(!await confirmDanger({title:'Remove team member?',message:'Do you want to remove '+(nameFrom(button,'Remove member ')||'this member')+' from this team?',note:'They stay on the project; only their team membership is removed.',confirmLabel:'Remove'}))return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams/'+encodeURIComponent(button.dataset.removeTeamMember)+'/members/'+encodeURIComponent(button.dataset.memberId),{method:'DELETE'});await loadTeams();notice('Team member removed.','success');}catch(err){notice(err.message);}};
+ if($('teamMemberForm'))$('teamMemberForm').onsubmit=async e=>{e.preventDefault();try{const data=formPayload(e.target);await api('/api/teams/'+encodeURIComponent(data.teamId)+'/members',{method:'POST',body:JSON.stringify({userId:data.userId,projectId:requireProject()})});e.target.reset();await loadTeams();notice('Team member added.','success');}catch(err){notice(err.message);}};
+ if($('teamAttachForm'))$('teamAttachForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTeams();notice('Team attached.','success');}catch(err){notice(err.message);}};
+ if($('projectTeams'))$('projectTeams').onclick=async e=>{const btn=e.target.closest('[data-detach-team]');if(!btn)return;if(!await confirmDanger({title:'Detach team?',message:'Do you want to detach '+(nameFrom(btn,'Detach team ')||'this team')+' from this project?',note:'The team itself is not deleted and can be attached again.',confirmLabel:'Detach'}))return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams/'+encodeURIComponent(btn.dataset.detachTeam),{method:'DELETE'});await loadTeams();}catch(err){notice(err.message);}};
 
  $('testLinkForm').onsubmit=async e=>{e.preventDefault();try{const id=state.taskId;if(!id)throw Error('Open a task first.');await api('/api/work-items/'+encodeURIComponent(id)+'/test-links',{method:'POST',body:JSON.stringify(formPayload(e.target))});await loadTaskLinks(id);notice('Test case linked to task.','success');}catch(err){notice(err.message);}};
  $('drawerTestLinks').addEventListener('click',async e=>{const b=e.target.closest('[data-unlink-test]');if(!b)return;if(!await confirmDanger({title:'Unlink test case?',message:'Do you want to unlink '+(nameFrom(b,'Unlink case ')||'this test case')+' from this task?',note:'The test case is not deleted and can be linked again.',confirmLabel:'Unlink'}))return;try{const id=state.taskId;await api('/api/work-items/'+encodeURIComponent(id)+'/test-links/'+encodeURIComponent(b.dataset.unlinkTest),{method:'DELETE'});await loadTaskLinks(id);notice('Test case unlinked.','success');}catch(err){notice(err.message);}});
@@ -825,7 +970,7 @@ function bind(){
  $('commentForm').onsubmit=async e=>{e.preventDefault();try{const id=state.taskId;await api('/api/work-items/'+encodeURIComponent(id)+'/comments',{method:'POST',body:JSON.stringify({comment:$('commentText').value})});e.target.reset();await openTask(id);notice('Comment added.','success');}catch(err){notice(err.message);}};
  $('retestOne').onclick=async()=>{try{await retest([state.taskId]);closeTask();show('tasks');}catch(e){notice(e.message);}};
  $('retestWithChildren').onclick=async()=>{try{await retest([state.taskId],true);closeTask();show('tasks');}catch(e){notice(e.message);}};
- $('memberForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/members',{method:'POST',body:JSON.stringify(formPayload(e.target))});bootstrap.Modal.getOrCreateInstance($('assignMemberModal')).hide();await loadWorkspace();notice('User assigned to project.','success');}catch(err){notice(err.message);}};
+ $('memberForm').onsubmit=async e=>{e.preventDefault();try{const v=formPayload(e.target),project=v.projectId||requireProject(),role=state.accountRoles?.[v.userId]||'QA';await api('/api/projects/'+encodeURIComponent(project)+'/members',{method:'POST',body:JSON.stringify({userId:v.userId,projectRole:role})});bootstrap.Modal.getOrCreateInstance($('assignMemberModal')).hide();await loadWorkspace();notice(project===state.projectId?'Member added to the project.':'Member added to '+((state.projects||[]).find(p=>p.id===project)?.name||'the project')+'.','success');}catch(err){notice(err.message);}};
  if($('userForm'))$('userForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/users',{method:'POST',body:JSON.stringify(formPayload(e.target))});e.target.reset();bootstrap.Modal.getOrCreateInstance($('newUserModal')).hide();await fetchDirectory();if(state.view==='users')await loadUsers();notice('User created.','success');}catch(err){notice(err.message);}};
  $('editProfile').onclick=()=>{
  const p=state.context?.project;if(!p)return;const f=$('profileForm');
@@ -854,7 +999,7 @@ function bind(){
  const file=e.target.closest('[data-task-file]');if(file){try{await download('/api/work-items/'+encodeURIComponent(state.taskId)+'/attachments/'+encodeURIComponent(file.dataset.taskFile)+'/download');}catch(err){notice(err.message);}return;}
  const evidence=e.target.closest('[data-evidence]');if(evidence){try{await previewEvidence(evidence.dataset.evidence);}catch(err){notice(err.message);}return;}
  const restore=e.target.closest('[data-restore]');if(restore){try{await api('/api/work-items/'+encodeURIComponent(restore.dataset.restore)+'/lifecycle',{method:'PATCH',body:JSON.stringify({action:'RESTORE'})});state.deletedTasks=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/deleted-tasks')).tasks||[];renderTasks();notice('Task restored.','success');}catch(err){notice(err.message);}return;}
- const report=e.target.closest('[data-report]');if(report){try{await download('/api/reports/'+encodeURIComponent(report.dataset.report));}catch(err){notice(err.message);}}
+ const report=e.target.closest('[data-report]');if(report){openRunDialog(report.dataset.report,report.dataset.runNumber);}
  });
 }
 function enableSearchableSelects(){
@@ -899,5 +1044,16 @@ async function initialize(){
  }catch(e){if(/auth|token|unauthoriz|sign.in/i.test(e.message))location.replace('/login.html');else notice(e.message);}
 }
 window.addEventListener('popstate',()=>routeFromUrl().catch(e=>notice(e.message)));
+// Add member popup: the project role comes from the user's account (DEV -> Developer, QA -> QA, MANAGER -> Project manager).
+function accountProjectRole(u){
+ if(u.project_role)return u.project_role;
+ return {DEV:'DEVELOPER',QA:'QA',MANAGER:'PROJECT_MANAGER'}[String(u.role||'').toUpperCase()]||'QA';
+}
+function showMemberRole(){
+ const el=$('memberRoleNote');if(!el)return;
+ const r=state.accountRoles?.[$('memberUser')?.value];
+ el.textContent=r?'Role: '+(ROLE_LABELS[r]||r)+' (from the user account)':'';
+}
+document.addEventListener('change',e=>{if(e.target.id==='memberUser')showMemberRole();});
 initialize();
 })();

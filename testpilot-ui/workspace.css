@@ -667,3 +667,118 @@ h1.tn-title{margin:0 0 12px;line-height:1.2}
 .tn-repo a:hover{text-decoration:underline}
 .tn-repo-branch{flex:0 0 90px!important}
 .tn-repo-note{font-size:12px;margin-top:6px}
+
+/* One outline button style everywhere (same as "Refresh"): Create, View all, Refresh, Open project. */
+.btn-outline-primary,.tn-table-create,.tn-home-viewall{background:#fff!important;color:#3158ea!important;border:1px solid #3158ea!important;border-radius:8px!important;height:36px;min-height:36px!important;padding:0 14px!important;font-size:12.5px!important;font-weight:600!important;display:inline-flex!important;align-items:center;justify-content:center;gap:6px;text-decoration:none!important;box-shadow:none!important;white-space:nowrap}
+.btn-outline-primary:hover,.btn-outline-primary:focus-visible,.tn-table-create:hover,.tn-table-create:focus-visible,.tn-home-viewall:hover,.tn-home-viewall:focus-visible{background:#eef2ff!important;color:#2346d5!important;border-color:#2346d5!important}
+.tn-home-viewall:hover{text-decoration:none!important}
+/* Home: bigger, clearer project search. */
+.tn-home-search{flex:0 1 520px}
+.tn-home-search .form-control{height:46px!important;padding-left:44px!important;font-size:14.5px!important;border:1.5px solid #94a3b8!important;border-radius:10px!important;box-shadow:0 1px 3px rgba(15,23,42,.08)!important}
+.tn-home-search .form-control:focus{border-color:#2563eb!important;box-shadow:0 0 0 4px rgba(37,99,235,.15)!important}
+.tn-home-search svg{left:15px;width:19px;height:19px}
+
+/* Home: more space between the summary tiles and the "Your projects" search row. */
+.tn-home-head{margin-top:28px!important;margin-bottom:16px!important}
+
+/* Home: search on the left and "View all projects" on the right (same layout as the tables). */
+.tn-home-head{margin-bottom:10px!important}
+.tn-home-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+.tn-home-toolbar .tn-home-viewall{margin-left:auto}
+
+/* Story box on the Start testing card: search icon on the left, like every other search box. */
+.tn-pick-box{justify-content:flex-start;gap:9px}
+.tn-pick-box span{flex:1 1 auto}
+
+/* AI learning: Project-specific / Global switch and scope chips. */
+#view-learning .tn-card-head{align-items:center}
+#view-learning .tn-segment{display:inline-flex;padding:3px;background:#e9edf5;border-radius:9px;gap:2px;flex:0 0 auto}
+#view-learning .tn-segment button{height:32px;padding:0 14px;border:0;border-radius:7px;background:transparent;color:#334155;font-size:13px;font-weight:500;white-space:nowrap;cursor:pointer}
+#view-learning .tn-segment button[aria-checked="true"]{background:#fff;color:#0f1f5c;font-weight:600;box-shadow:0 1px 3px rgba(15,23,42,.15)}
+#view-learning .tn-segment button:focus-visible{outline:3px solid #93b0ff;outline-offset:1px}
+.tn-scope{display:inline-block;padding:2px 9px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.tn-scope.project{background:#eef2ff;color:#0f1f5c}
+.tn-scope.global{background:#ecfdf5;color:#047857}
+.tn-btn-sm{height:30px!important;min-height:30px!important;padding:0 10px!important;font-size:12px!important}
+
+/* AI learning switch: clear selected state (navy) and placed in the filter row. */
+.tn-learning-scope{display:inline-flex!important;padding:0!important;gap:0!important;background:#fff!important;border:1px solid #3158ea;border-radius:9px!important;overflow:hidden;height:40px}
+.tn-learning-scope button{height:100%!important;padding:0 16px!important;border:0!important;border-radius:0!important;background:#fff!important;color:#3158ea!important;font-size:13px!important;font-weight:600!important;box-shadow:none!important}
+.tn-learning-scope button+button{border-left:1px solid #3158ea!important}
+.tn-learning-scope button:hover{background:#eef2ff!important}
+.tn-learning-scope button[aria-checked="true"]{background:#0f1f5c!important;color:#fff!important}
+
+/* AI learning: Local / Global switch on its own row under the search box. */
+.tn-learning-scope-row{padding:0 16px 12px;background:#f9fbff;border-bottom:1px solid #e7edf5}
+.tn-table-filters[data-table-key="repairMemoryList"]{border-bottom:0}
+
+/* Run details popup (eye on Runs & reports). */
+.tn-run-dialog{width:min(860px,calc(100vw - 32px))}
+.tn-run-summary{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:13px}
+.tn-run-summary .tn-run-bar{flex:0 0 160px}
+.tn-run-note{margin-top:10px;font-size:12.5px}
+.tn-run-dialog .tn-dialog-list{height:auto;min-height:0;max-height:420px}
+
+/* Screenshot / video opened from the run popup: shown on top of it. */
+.tn-evidence-dialog{width:min(1000px,calc(100vw - 32px))}
+.tn-evidence-dialog .tn-dialog-body{display:flex;justify-content:center;background:#f8fafc}
+.tn-evidence-dialog .tn-dialog-body img,.tn-evidence-dialog .tn-dialog-body video{max-width:100%;max-height:72vh;border-radius:8px;box-shadow:0 2px 10px rgba(15,23,42,.12)}
+
+/* Evidence that no longer exists: clear message instead of an empty popup. */
+.tn-evidence-missing{display:flex;flex-direction:column;align-items:center;gap:6px;padding:40px 20px;text-align:center;color:#475569;font-size:13.5px}
+.tn-evidence-missing strong{color:#0f172a;font-size:15px}
+.tn-evidence-missing:before{content:"";width:44px;height:44px;margin-bottom:6px;border-radius:12px;background:#fef2f2 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23dc2626' stroke-width='2' stroke-linecap='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='m3 3 18 18'/%3E%3C/svg%3E") no-repeat center/22px}
+
+/* Task delete: red like every other delete action. */
+.tn-icon-action[data-delete-task]{background:#dc2626;color:#fff}
+.tn-icon-action[data-delete-task]:hover{background:#b91c1c;color:#fff}
+
+/* Home: "View all projects" sits on the left, right after the search box. */
+.tn-home-toolbar .tn-home-viewall{margin-left:0}
+
+/* Task details: a centred popup like the other popups (was a right-side panel). */
+.tn-side{top:50%!important;left:50%!important;right:auto!important;bottom:auto!important;width:min(760px,calc(100vw - 32px))!important;max-height:88vh;
+  border:1px solid #e2e8f0!important;border-radius:14px;box-shadow:0 24px 60px rgba(15,23,42,.3)!important;
+  transform:translate(-50%,-48%)!important;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .16s ease,transform .16s ease!important}
+.tn-side.open{transform:translate(-50%,-50%)!important;opacity:1;visibility:visible;pointer-events:auto}
+.tn-side>.tn-card-head{border-radius:14px 14px 0 0;padding:16px 22px!important;border-bottom:1px solid #eef1f6}
+.tn-side>.tn-card-head h2{margin:0;font-size:17px;font-weight:600}
+.tn-side>.p-4{padding:18px 22px!important}
+.tn-side .tn-divider{margin:16px 0}
+.tn-side h3{font-size:14px;font-weight:600;color:#0f172a;margin:0 0 4px}
+.tn-task-more{margin-top:18px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;overflow:hidden}
+.tn-task-more[open]{background:#fff;border-color:#c7d2fe}
+.tn-task-more>summary{cursor:pointer;list-style:none;position:relative;padding:12px 40px 12px 16px;font-size:13.5px;font-weight:600;color:#0f172a}
+.tn-task-more>summary::-webkit-details-marker{display:none}
+.tn-task-more>summary span{display:block;margin-top:2px;font-size:12px;font-weight:400;color:#64748b}
+.tn-task-more>summary:after{content:"\203A";position:absolute;right:16px;top:50%;margin-top:-11px;font-size:20px;color:#64748b;transition:transform .15s}
+.tn-task-more[open]>summary:after{transform:rotate(90deg)}
+.tn-task-more>summary:hover{background:#eef2ff}
+.tn-task-more-body{padding:4px 16px 16px;border-top:1px solid #eef1f6}
+@media (prefers-reduced-motion:reduce){.tn-side{transition:none!important}}
+
+/* "Tests already exist" choice: run existing approved tests or generate new ones. */
+.tn-choice-dialog{width:min(560px,calc(100vw - 32px))}
+.tn-choice-text{margin:0;font-size:14px;line-height:1.55;color:#334155}
+.tn-choice-progress{margin-top:14px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;font-size:13px;color:#334155}
+.tn-choice-line{padding:3px 0}
+.tn-choice-done{margin-top:8px;color:#15803d}
+.tn-choice-error{margin-top:8px;color:#b91c1c}
+
+/* Team tab (project teams): role / team dropdowns in the table and the Teams list. */
+.tn-inline-select{height:34px!important;min-height:34px!important;max-width:200px;padding:0 30px 0 10px!important;font-size:13px!important}
+.tn-team-list{display:flex;flex-direction:column;gap:8px}
+.tn-team-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;background:#fff}
+.tn-team-row input{flex:1 1 auto;height:36px!important;min-height:36px!important}
+.tn-team-row .tn-muted{white-space:nowrap;font-size:12.5px}
+.tn-team-note{margin:14px 0 0;font-size:12.5px}
+.tn-icon-action[data-team-delete]{background:#dc2626;color:#fff}
+.tn-icon-action[data-team-delete]:hover{background:#b91c1c;color:#fff}
+
+/* Teams popup: pick a team, then manage its members. */
+.tn-team-detail{margin-top:6px;padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
+.tn-team-members{display:flex;flex-direction:column;gap:6px}
+.tn-team-member{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;background:#fff}
+.tn-team-member .tn-row-person{flex:1 1 auto}
+.tn-icon-action[data-team-remove-member]{background:#dc2626;color:#fff}
+.tn-icon-action[data-team-remove-member]:hover{background:#b91c1c}

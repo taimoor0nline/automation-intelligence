@@ -51,16 +51,30 @@
     const heading = form?.querySelector(':scope > .section-head');
     if (!form || !heading) return false;
 
-    const nodes = [
+    // Layout: what to test (source + story text) first, then environment and AI profile, the Generate button,
+    // and "Advanced options" (built by runner-context.js) holding page scope, application login and test users.
+    const advanced = form.querySelector(':scope > .tn-advanced');
+    const advancedBody = advanced?.querySelector('.tn-advanced-body');
+    const optional = [fieldFor('pageScope'), applicationLoginField(), document.getElementById('testActorPanel')].filter(Boolean);
+    if (advancedBody) for (const node of [...optional].reverse()) advancedBody.prepend(node);
+    const nodes = (advanced ? [
+      form.querySelector(':scope > .testing-context-card') || document.querySelector('.testing-context-card'),
+      fieldFor('story'),
       environmentBlock(),
       modelField(),
       fieldFor('targetUrl'),
       fieldFor('additionalPaths'),
-      fieldFor('pageScope'),
-      applicationLoginField(),
-      document.getElementById('testActorPanel'),
+      document.getElementById('generateBtn'),
+      document.getElementById('errorBox'),
+      advanced,
+    ] : [
+      environmentBlock(),
+      modelField(),
+      fieldFor('targetUrl'),
+      fieldFor('additionalPaths'),
+      ...optional,
       fieldFor('story'),
-    ].filter(Boolean);
+    ]).filter(Boolean);
 
     // Remove duplicates in case a compatibility wrapper contains a matched field.
     const unique = nodes.filter((node, index) => nodes.indexOf(node) === index);

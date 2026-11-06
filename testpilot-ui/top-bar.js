@@ -81,8 +81,8 @@
       .tn-strip-tools{display:flex;align-items:center;gap:8px;margin-left:auto}
       .tn-strip #tnProject{padding-right:0;margin-right:0;border-right:0}
       .tn-strip #tnProject>.tn-btn{max-width:220px;padding:4px 10px;font-size:12px;border-radius:7px}
-      .tn-strip-btn{height:30px;padding:0 12px;border:1px solid #d0d5dd;border-radius:7px;background:#fff;color:#0f172a;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
-      .tn-strip-btn:hover{border-color:#2563eb;background:#f5f8ff;color:#1d4ed8}
+      .tn-strip-btn{height:32px;padding:0 14px;border:1px solid #3158ea;border-radius:8px;background:#fff;color:#3158ea;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+      .tn-strip-btn:hover{border-color:#2346d5;background:#eef2ff;color:#2346d5}
       .tn-strip-btn:focus-visible{outline:3px solid #93b0ff;outline-offset:1px}
       @media(max-width:600px){.tnb-text small,#tnProfile .tn-name{display:none}header.tn-header{padding:0 16px!important}#tnSubbar{padding:0 16px}}
       @media(max-width:900px){header.tn-header{flex-wrap:wrap!important;padding-bottom:8px!important}#tnMain{order:3;flex-basis:100%;margin-left:0;overflow-x:auto}}

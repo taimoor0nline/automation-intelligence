@@ -41,13 +41,24 @@ async function captureVerified({client,projectId,session,runId,userId}){
  }
  return count;
 }
+// Learning scope: PROJECT (this project only, default) or GLOBAL (shared with all projects).
+const SCOPES=new Set(['PROJECT','GLOBAL']);
+const scopeOf=value=>SCOPES.has(String(value||'').toUpperCase())?String(value).toUpperCase():'PROJECT';
 async function propose({projectId,entry,userId}){
  if(!db.isConfigured()||!uuid(projectId))throw Error('Database and project required');
  const item=normalize(entry);if(!item)throw Error('Failure signature and distinct selectors with a valid page path are required');
- const r=await db.query(`insert into ai_repair_memory(project_id,fingerprint,failure_signature,original_selector,replacement_selector,page_path,created_by)
- values($1,$2,$3,$4,$5,$6,$7) on conflict(project_id,fingerprint) do update set updated_at=now()
- returning id,status,failure_signature,original_selector,replacement_selector,page_path`,
- [projectId,item.fingerprint,item.failureSignature,item.originalSelector,item.replacementSelector,item.pagePath,uuid(userId)?userId:null]);
+ const r=await db.query(`insert into ai_repair_memory(project_id,fingerprint,failure_signature,original_selector,replacement_selector,page_path,created_by,scope)
+ values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(project_id,fingerprint) do update set updated_at=now(),updated_by=excluded.created_by
+ returning id,status,scope,failure_signature,original_selector,replacement_selector,page_path`,
+ [projectId,item.fingerprint,item.failureSignature,item.originalSelector,item.replacementSelector,item.pagePath,uuid(userId)?userId:null,scopeOf(entry?.scope)]);
+ return r.rows[0];
+}
+// Change a learning's scope. Only the project that owns the learning can change it.
+async function setScope({projectId,memoryId,scope,userId}){
+ if(!db.isConfigured()||!uuid(projectId)||!uuid(memoryId))throw Error('Valid project and learning IDs required');
+ if(!SCOPES.has(String(scope||'').toUpperCase()))throw Object.assign(Error('Scope must be PROJECT or GLOBAL'),{statusCode:400});
+ const r=await db.query('update ai_repair_memory set scope=$1,updated_at=now(),updated_by=$4 where id=$2 and project_id=$3 returning id,scope',[String(scope).toUpperCase(),memoryId,projectId,uuid(userId)?userId:null]);
+ if(!r.rowCount)throw Object.assign(Error('Learning not found in this project'),{statusCode:404});
  return r.rows[0];
 }
 async function verifyApplied({projectId,memoryId,runId,userId}){
@@ -79,12 +90,16 @@ function recommendation(row){
   automationPatch:{language:'javascript',engine:'cypress',snippet:'cy.get('+JSON.stringify(after)+')',reviewRequired:true},
  };
 }
-async function suggestions(projectId,{pagePath,limit=20}={}){
+// view: 'project' = this project's learnings (default); 'global' = learnings shared by any project.
+async function suggestions(projectId,{pagePath,limit=20,view='project'}={}){
  if(!db.isConfigured()||!uuid(projectId))return [];
  const values=[projectId];let condition='';
- if(pagePath){values.push(clean(pagePath,250));condition='and page_path=$2';}
- const r=await db.query(`select id,failure_signature,original_selector,replacement_selector,page_path,verified_at,success_count,failure_count from ai_repair_memory
- where project_id=$1 and status='VERIFIED' ${condition} order by success_count desc,verified_at desc limit ${Math.min(50,Math.max(1,Number(limit)||20))}`,values);
+ if(pagePath){values.push(clean(pagePath,250));condition='and m.page_path=$2';}
+ const where=String(view).toLowerCase()==='global'?"m.scope='GLOBAL' and $1::uuid is not null":'m.project_id=$1';
+ const r=await db.query(`select m.id,m.project_id,p.name as project_name,m.scope,m.failure_signature,m.original_selector,m.replacement_selector,m.page_path,m.verified_at,m.success_count,m.failure_count,
+ m.created_at,m.updated_at,cu.display_name as created_by_name,uu.display_name as updated_by_name
+ from ai_repair_memory m left join projects p on p.id=m.project_id left join users cu on cu.id=m.created_by left join users uu on uu.id=m.updated_by
+ where ${where} and m.status='VERIFIED' ${condition} order by m.success_count desc,m.verified_at desc limit ${Math.min(50,Math.max(1,Number(limit)||20))}`,values);
  return r.rows;
 }
 async function recordReuse({projectId,memoryId,sessionId,runId,eventType,userId}){
@@ -112,4 +127,4 @@ async function recordReuse({projectId,memoryId,sessionId,runId,eventType,userId}
   return {recorded:!!r.rowCount};
  });
 }
-module.exports={normalize,isVerified,captureVerified,propose,verifyApplied,suggestions,recommendation,recordReuse};
+module.exports={normalize,isVerified,captureVerified,propose,setScope,verifyApplied,suggestions,recommendation,recordReuse};
