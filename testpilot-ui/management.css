@@ -120,14 +120,14 @@ html,body{overscroll-behavior:none} /* no elastic "bounce" when scrolling fast p
 .mg-filters .mg-create-filter{margin-left:auto}
 .mg-pager select{min-height:33px;border:1px solid #d4deed;border-radius:8px;padding:4px 8px;font-size:12px;margin-right:6px}
 /* Environment form popup. */
-.mg-dialog{width:min(820px,calc(100vw - 32px));height:min(760px,calc(100vh - 48px));padding:0;border:0;border-radius:14px;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden}
+.mg-dialog{width:min(820px,calc(100vw - 32px));height:min(680px,calc(100vh - 48px));padding:0;border:0;border-radius:14px;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden}
 .mg-dialog::backdrop{background:rgba(15,23,42,.45)}
 .mg-dialog iframe{display:block;width:100%;height:100%;border:0}
 /* The form page when shown inside the popup: no top bar or page heading, just the form. */
 .mg-embedded body{background:#fff}
 .mg-embedded .mg-top,.mg-embedded .mg-heading{display:none!important}
 .mg-embedded .mg-main{max-width:none;padding:0}
-.mg-embedded .mg-card{border:0;box-shadow:none;border-radius:0}
+.mg-embedded .mg-card{border:0;box-shadow:none;border-radius:0;margin:0}
 .mg-embedded .mg-card-head{position:sticky;top:0;z-index:5;background:#fff}
 
 /* "Created" / "Last updated" cells: avatar + name, date underneath (same as the project pages). */

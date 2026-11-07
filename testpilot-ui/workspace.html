@@ -6,6 +6,63 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="/workspace.css" rel="stylesheet">
 <link href="/forms-alignment.css" rel="stylesheet">
+<style id="tnReportCss">
+/* Run details page */
+.tn-run-page-kpis{grid-template-columns:repeat(4,minmax(0,1fr));padding:0 18px 18px}
+#runPageTitle .tn-result{margin-left:8px;vertical-align:middle;font-size:12px}
+.tn-run-filter{width:170px!important;align-self:center;height:36px}
+.tn-run-results td:first-child{max-width:520px}
+.tn-run-error{margin-top:6px}
+.tn-run-error summary{cursor:pointer;font-size:12px;font-weight:600;color:#b91c1c}
+.tn-run-error pre{margin:6px 0 0;padding:10px;max-height:220px;overflow:auto;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:11.5px;white-space:pre-wrap;color:#7f1d1d}
+.tn-evidence-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;padding:18px}
+.tn-shot-card{display:flex;flex-direction:column;padding:0;border:1px solid #e2e8f0;border-radius:12px;background:#fff;overflow:hidden;text-align:left;cursor:pointer;transition:box-shadow .15s,transform .15s,border-color .15s}
+.tn-shot-card:hover,.tn-shot-card:focus-visible{border-color:#93b0ff;box-shadow:0 8px 20px rgba(15,23,42,.1);transform:translateY(-2px);outline:0}
+.tn-shot-thumb{display:grid;place-items:center;height:150px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;overflow:hidden}
+.tn-shot-thumb img{width:100%;height:100%;object-fit:cover;object-position:top}
+.tn-shot-info{display:flex;flex-direction:column;gap:6px;padding:10px 12px}
+.tn-shot-info>span:first-child{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tn-shot-title{font-size:12.5px;color:#334155;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tn-shot-viewer{width:min(1100px,calc(100vw - 32px))}
+.tn-shot-body{position:relative;display:flex;align-items:center;gap:10px;background:#0f172a!important;min-height:300px}
+.tn-shot-stage{flex:1;display:flex;justify-content:center;align-items:center;min-height:280px;color:#cbd5e1}
+.tn-shot-viewer{max-height:calc(100vh - 32px)!important}
+.tn-shot-viewer .tn-shot-body{overflow:hidden}
+.tn-shot-stage img,.tn-shot-stage video{max-width:100%!important;max-height:calc(100vh - 230px)!important;object-fit:contain;border-radius:6px;box-shadow:none!important}
+.tn-shot-nav{flex:0 0 40px;height:40px;border:0;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;font-size:26px;line-height:1;cursor:pointer}
+.tn-shot-nav:hover{background:rgba(255,255,255,.28)}
+.tn-shot-error{margin:0;padding:10px 20px 14px;background:#fef2f2;color:#7f1d1d;font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;max-height:120px;overflow:auto;border-top:1px solid #fecaca}
+.tn-report-actions{display:flex;gap:8px;flex-wrap:wrap;padding:16px 18px 6px}
+.tn-pdf-viewer{width:min(1000px,calc(100vw - 32px));max-height:calc(100vh - 32px)!important}
+.tn-pdf-body{padding:0!important;background:#525659!important;height:calc(100vh - 140px);display:flex;align-items:center;justify-content:center;color:#e2e8f0}
+.tn-pdf-body iframe{width:100%;height:100%;border:0}
+.tn-pdf-render{position:fixed;left:-10000px;top:0;width:794px;background:#fff}
+.tn-report-doc.tn-pdf{margin:0;padding:0 2px;border:0;background:#fff}
+.tn-report-doc.tn-pdf .tn-report-failure pre{font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.5;word-break:normal;overflow-wrap:break-word}
+#runReportNote{padding:0 18px}
+.tn-run-report .tn-report-doc{margin:12px 18px 18px;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+.tn-report-doc .tn-report-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding-bottom:12px;border-bottom:2px solid #0f1f5c}
+.tn-report-doc .tn-report-eyebrow{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#3158ea}
+.tn-report-doc h3{margin:4px 0 0;font-size:20px;font-weight:700}
+.tn-report-doc h4{margin:22px 0 8px;font-size:14px;font-weight:700;color:#0f1f5c}
+.tn-report-doc .tn-report-facts{margin-top:12px;border-collapse:collapse;font-size:13px}
+.tn-report-doc .tn-report-facts th{padding:3px 18px 3px 0;color:#64748b;font-weight:500;text-align:left;white-space:nowrap}
+.tn-report-doc .tn-report-facts td{padding:3px 0}
+.tn-report-doc .tn-report-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}
+.tn-report-doc .tn-report-stats div{padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;border-top:3px solid #3158ea}
+.tn-report-doc .tn-report-stats div.ok{border-top-color:#16a34a}.tn-report-doc .tn-report-stats div.bad{border-top-color:#dc2626}
+.tn-report-doc .tn-report-stats b{display:block;font-size:20px}.tn-report-doc .tn-report-stats span{font-size:12px;color:#64748b}
+.tn-report-doc .tn-report-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.tn-report-doc .tn-report-table th{padding:7px 8px;background:#f1f5f9;text-align:left;font-weight:600;color:#334155}
+.tn-report-doc .tn-report-table td{padding:7px 8px;border-bottom:1px solid #eef1f6;vertical-align:top}
+.tn-report-doc td.ok{color:#15803d;font-weight:600}.tn-report-doc td.bad{color:#b91c1c;font-weight:600}
+.tn-report-doc .tn-report-failure{display:grid;grid-template-columns:1fr 260px;gap:14px;padding:12px;margin-bottom:10px;border:1px solid #fecaca;border-left:4px solid #dc2626;border-radius:10px;page-break-inside:avoid}
+.tn-report-doc .tn-report-failure pre{margin:6px 0 0;font-size:11.5px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;color:#7f1d1d}
+.tn-report-doc .tn-report-failure img{width:100%;border:1px solid #e2e8f0;border-radius:6px}
+.tn-report-doc .tn-report-foot{margin-top:18px;font-size:11.5px;color:#64748b}
+.tn-report-doc .tn-result{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.tn-report-doc .tn-result.pass{background:#dcfce7;color:#15803d}.tn-report-doc .tn-result.fail{background:#fee2e2;color:#b91c1c}
+</style>
 </head>
 <body>
 <header class="tn-top">
@@ -14,7 +71,8 @@
   <nav class="nav nav-pills flex-grow-1" aria-label="Main navigation">
    <button class="nav-link active" data-view="overview">Home</button>
    <button class="nav-link" data-view="projects">Projects</button>
-   <button class="nav-link" data-view="users" id="navUsers" hidden>Users</button>
+   <button class="nav-link" data-view="users" id="navUsers" hidden>Administration</button>
+   <button class="nav-link" data-view="teams" id="navTeams" hidden>Teams</button>
   </nav>
   <select id="projectPicker" aria-label="Current project" hidden></select>
   <span id="currentUser"></span>
@@ -34,7 +92,7 @@
   <button type="button" role="tab" data-view="tasks" aria-controls="view-tasks">Tasks</button>
   <button type="button" role="tab" data-view="team" aria-controls="view-team">Team</button>
   <button type="button" role="tab" data-view="attachments" aria-controls="view-attachments">Attachments</button>
-  <a href="/environment-config.html" class="tn-tab-link" id="navEnvironmentConfig" title="Environment settings: URLs and test users"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Environments</a>
+  <button type="button" role="tab" data-view="environments" aria-controls="view-environments">Environments</button>
  </div>
  <section id="view-overview" class="tn-view active">
   <div class="tn-kpis tn-kpis-5" id="homeKpis" aria-live="polite"></div>
@@ -43,7 +101,7 @@
   <div id="homeProjects" class="tn-home-grid"></div>
  </section>
  <section id="view-users" class="tn-view">
-  <div class="tn-card"><div class="tn-card-head"><div><h2>Users</h2><div class="tn-muted">Sign-in accounts for TestNexus. Add people to a project from that project's Team tab.</div></div><div class="tn-head-actions"><button type="button" class="btn btn-primary tn-btn" data-bs-toggle="modal" data-bs-target="#newUserModal">+ New user</button></div></div>
+  <div class="tn-card"><div class="tn-card-head"><div><h2>Users</h2><div class="tn-muted">Sign-in accounts for TestNexus. Add people to a project from that project's Team tab.</div></div><div class="tn-head-actions"><button type="button" class="btn btn-outline-primary tn-btn" data-bs-toggle="modal" data-bs-target="#newUserModal">+ New user</button></div></div>
    <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>User</th><th>Platform role</th><th>Status</th><th>Created</th></tr></thead><tbody id="usersBody"></tbody></table></div></div>
  </section>
  <section id="view-details" class="tn-view" role="tabpanel">
@@ -65,7 +123,7 @@
      <div><div id="profileAcceptance" class="tn-info">—</div></div>
      <div class="tn-scope-full"><div class="tn-info-label">Business rules</div><div id="profileRules" class="tn-info">—</div></div>
     </div>
-    <div class="tn-card-body tn-empty-state d-none" id="profileScopeEmpty"><strong>No scope added yet</strong><span class="tn-muted">Add objectives, what is in and out of scope, and acceptance criteria. The AI uses them to write better test cases.</span><button type="button" id="addScope" class="btn btn-primary tn-btn">+ Add scope</button></div>
+    <div class="tn-card-body tn-empty-state d-none" id="profileScopeEmpty"><strong>No scope added yet</strong><span class="tn-muted">Add objectives, what is in and out of scope, and acceptance criteria. The AI uses them to write better test cases.</span><button type="button" id="addScope" class="btn btn-outline-primary tn-btn">+ Add scope</button></div>
    </div>
    <div class="tn-card"><div class="tn-card-head"><h2>Recent runs</h2><button type="button" class="tn-card-link" data-view="executions">View all</button></div><div class="tn-card-body" id="detailRecentRuns"><div class="tn-muted">—</div></div></div>
    </div>
@@ -89,10 +147,32 @@
   </div>
  </section>
  <section id="view-attachments" class="tn-view" role="tabpanel">
-  <div class="tn-card"><div class="tn-card-head"><div><h2>Project attachments</h2><div class="tn-muted mt-1">Documents for this project are managed here or while editing its details.</div></div><button type="button" id="attachmentsEditProfile" class="btn btn-outline-secondary tn-btn">Edit project details</button></div>
-   <div class="tn-card-body"><div class="tn-upload-row"><select id="detailCategory" class="form-select" aria-label="Category for uploaded documents" required><option value="" selected disabled>Select category</option><option value="REQUIREMENTS">Requirements</option><option value="USER_STORIES">User stories</option><option value="UI_DESIGN">UI design</option><option value="API_SPEC">API specification</option><option value="TEST_PLAN">Test plan</option><option value="TEST_DATA">Test data</option><option value="REPORT">Reports &amp; evidence</option><option value="OTHER">Other</option></select><span class="tn-muted">Choose a category first, then drop or browse files.</span></div><div id="detailDrop" class="tn-drop mb-3" role="button" tabindex="0" aria-label="Upload project attachments"><strong>Drop documents here or browse</strong><span class="tn-muted">PDF, Office, images, ZIP · up to 5 MB per file</span></div>
-   <input id="detailFiles" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.csv,.zip" aria-label="Choose project documents">
-   <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Document</th><th>Category</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody id="detailDocumentsList" aria-live="polite"></tbody></table></div></div>
+  <div class="tn-card"><div class="tn-card-head"><div><h2>Project attachments <span id="docCount" class="tn-badge-counter">0</span></h2><div class="tn-muted mt-1">Documents the AI and the team use for this project</div></div><div class="d-flex gap-2 flex-wrap"><button type="button" id="openUploadDocs" class="btn btn-outline-primary tn-btn" data-bs-toggle="modal" data-bs-target="#uploadDocsModal">+ Upload documents</button></div></div>
+   <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Document</th><th>Category</th><th>Size</th><th>Uploaded by</th><th>Actions</th></tr></thead><tbody id="detailDocumentsList" aria-live="polite"></tbody></table></div>
+  </div>
+ </section>
+ <section id="view-run" class="tn-view" role="tabpanel">
+  <div class="tn-card">
+   <div class="tn-card-head"><div><h2 id="runPageTitle">Run</h2><div class="tn-muted" id="runPageMeta"></div></div><div class="d-flex gap-2 flex-wrap"><button type="button" id="runPageBack" class="btn btn-outline-secondary tn-btn">Back to runs</button><button type="button" id="runPagePdf" class="btn btn-outline-primary tn-btn" data-run-pdf>View PDF</button></div></div>
+   <div class="tn-kpis tn-run-page-kpis" id="runPageKpis"></div>
+  </div>
+  <div class="tn-card mt-3">
+   <div class="tn-card-head tn-subtabs-head">
+    <div class="tn-subtabs" role="tablist" aria-label="Run details">
+     <button type="button" role="tab" data-run-tab="Results" aria-selected="true">Results <span class="tn-subtab-count" id="runCountResults">0</span></button>
+     <button type="button" role="tab" data-run-tab="Evidence" aria-selected="false" tabindex="-1">Evidence <span class="tn-subtab-count" id="runCountEvidence">0</span></button>
+     <button type="button" role="tab" data-run-tab="Report" aria-selected="false" tabindex="-1">Report</button>
+    </div>
+    <select id="runResultFilter" class="form-select tn-run-filter" aria-label="Show results"><option value="">All results</option><option value="failed">Failed only</option><option value="passed">Passed only</option></select>
+   </div>
+   <div id="runPanelResults" role="tabpanel"><div class="tn-scroll"><table class="table tn-table tn-run-results"><thead><tr><th>Test case</th><th>Type</th><th>Priority</th><th>Result</th><th>Duration</th><th>Evidence</th></tr></thead><tbody id="runResultsBody"></tbody></table></div></div>
+   <div id="runPanelEvidence" role="tabpanel" hidden><div class="tn-evidence-grid" id="runEvidenceGrid"></div></div>
+   <div id="runPanelReport" role="tabpanel" hidden><div class="tn-run-report" id="runReportBody"></div></div>
+  </div>
+ </section>
+ <section id="view-environments" class="tn-view" role="tabpanel">
+  <div class="tn-card"><div class="tn-card-head"><div><h2>Project environments <span id="envCount" class="tn-badge-counter">0</span></h2><div class="tn-muted mt-1">Application URLs and test users the tests run against</div></div><button type="button" id="envCreate" class="btn btn-outline-primary tn-btn">+ Create</button></div>
+   <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Environment</th><th>Stage</th><th>Application URL</th><th>Status</th><th>Usage</th><th>Default</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="envRows"></tbody></table></div>
   </div>
  </section>
  <section id="view-stories" class="tn-view" role="tabpanel">
@@ -114,7 +194,6 @@
      <button type="button" role="tab" id="runsTabEvidence" aria-controls="runsPanelEvidence" aria-selected="false" tabindex="-1" data-runs-tab="Evidence">Evidence <span class="tn-subtab-count" id="runsCountEvidence">0</span></button>
      <button type="button" role="tab" id="runsTabSaved" aria-controls="runsPanelSaved" aria-selected="false" tabindex="-1" data-runs-tab="Saved">Saved reports <span class="tn-subtab-count" id="runsCountSaved">0</span></button>
     </div>
-    <a class="tn-run-link" href="/reports.html">Advanced reports ↗</a>
    </div>
    <div id="runsPanelRuns" role="tabpanel" aria-labelledby="runsTabRuns"><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Run</th><th>Result</th><th>Environment</th><th>Executed by</th><th>Completed</th><th>Report</th></tr></thead><tbody id="runsBody"></tbody></table></div></div>
    <div id="runsPanelEvidence" role="tabpanel" aria-labelledby="runsTabEvidence" hidden><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Test case</th><th>Run</th><th>Result</th><th>Evidence</th></tr></thead><tbody id="evidenceBody"></tbody></table></div></div>
@@ -134,14 +213,32 @@
  <section id="view-audit" class="tn-view" role="tabpanel">
   <div class="tn-card"><div class="tn-card-head"><h2>Project audit</h2><span class="tn-muted">Every action on this project, who did it and when</span></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Event</th><th>Details</th><th>Actor</th><th>When</th></tr></thead><tbody id="inventoryAudit"></tbody></table></div></div>
  </section>
+ <section id="view-teams" class="tn-view">
+  <div class="tn-card"><div class="tn-card-head"><h2>Teams <span id="ctCount" class="tn-badge-counter">0</span></h2><span class="tn-muted">Create a team, add its members, then assign it to one or more projects</span></div>
+   <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Team</th><th>Members</th><th>Projects</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="ctRows"></tbody></table></div>
+  </div>
+ </section>
  <section id="view-team" class="tn-view" role="tabpanel">
-  <div class="tn-card"><div class="tn-card-head"><div><h2>Project members</h2><div class="tn-muted">Who can access this project, their role and team</div></div><div class="tn-head-actions"><button type="button" class="btn btn-outline-primary tn-btn" id="openManageTeams" data-bs-toggle="modal" data-bs-target="#manageTeamsModal">Teams</button><button type="button" class="btn btn-primary tn-btn" id="openAssignMember" data-bs-toggle="modal" data-bs-target="#assignMemberModal">+ Add member</button></div></div>
+  <div class="tn-card tn-readonly" id="teamCard"><div class="tn-card-head"><div><h2>Project members</h2><div class="tn-muted" id="teamCardSub">Who can access this project, their role and team</div></div><a class="tn-card-link" id="teamManageLink" href="/workspace.html#teams" hidden>Manage in Teams</a></div>
    <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Member</th><th>Role</th><th>Team</th><th>Added</th><th>Actions</th></tr></thead><tbody id="teamBody"></tbody></table></div></div>
  </section>
 </div>
 <dialog id="evidenceDialog" class="tn-dialog tn-evidence-dialog" aria-label="Execution evidence">
  <div class="tn-dialog-head"><div><h2>Execution evidence</h2></div><button type="button" class="tn-dialog-close" data-close-evidence aria-label="Close">×</button></div>
  <div class="tn-dialog-body" id="evidenceDialogBody"></div>
+</dialog>
+<dialog id="docPreviewDialog" class="tn-dialog tn-evidence-dialog tn-doc-preview" aria-labelledby="docPreviewTitle">
+ <div class="tn-dialog-head"><div><h2 id="docPreviewTitle">Document</h2><div class="tn-muted" id="docPreviewMeta"></div></div><div class="d-flex gap-2 align-items-center"><button type="button" class="btn btn-outline-primary tn-btn" id="docPreviewDownload">Download</button><button type="button" class="tn-dialog-close" data-close-doc aria-label="Close">×</button></div></div>
+ <div class="tn-dialog-body" id="docPreviewBody"></div>
+</dialog>
+<dialog id="pdfViewer" class="tn-dialog tn-evidence-dialog tn-pdf-viewer" aria-labelledby="pdfViewerTitle">
+ <div class="tn-dialog-head"><div><h2 id="pdfViewerTitle">Report</h2><div class="tn-muted" id="pdfViewerMeta"></div></div><div class="d-flex gap-2 align-items-center"><button type="button" class="btn btn-outline-primary tn-btn" id="pdfViewerDownload" disabled>Download PDF</button><button type="button" class="tn-dialog-close" data-close-pdf aria-label="Close">×</button></div></div>
+ <div class="tn-dialog-body tn-pdf-body" id="pdfViewerBody"></div>
+</dialog>
+<dialog id="shotViewer" class="tn-dialog tn-evidence-dialog tn-shot-viewer" aria-labelledby="shotViewerTitle">
+ <div class="tn-dialog-head"><div><h2 id="shotViewerTitle">Evidence</h2><div class="tn-muted" id="shotViewerMeta"></div></div><div class="d-flex gap-2 align-items-center"><span class="tn-muted" id="shotViewerCount"></span><button type="button" class="btn btn-outline-primary tn-btn" id="shotViewerVideo" hidden>Watch video</button><button type="button" class="btn btn-outline-primary tn-btn" id="shotViewerDownload">Download</button><button type="button" class="tn-dialog-close" data-close-shot aria-label="Close">×</button></div></div>
+ <div class="tn-dialog-body tn-shot-body"><button type="button" class="tn-shot-nav prev" id="shotPrev" aria-label="Previous evidence">‹</button><div id="shotViewerBody" class="tn-shot-stage"></div><button type="button" class="tn-shot-nav next" id="shotNext" aria-label="Next evidence">›</button></div>
+ <div class="tn-shot-error" id="shotViewerError" hidden></div>
 </dialog>
 <dialog id="runDialog" class="tn-dialog tn-run-dialog" aria-labelledby="runDialogTitle">
  <div class="tn-dialog-head"><div><h2 id="runDialogTitle">Run</h2><div class="tn-muted" id="runDialogMeta"></div></div><button type="button" class="tn-dialog-close" data-close-run aria-label="Close">×</button></div>
@@ -171,14 +268,13 @@
  </div>
 </aside>
 <div class="modal fade" id="profileModal" tabindex="-1" aria-hidden="true">
- <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><form id="profileForm"><div class="modal-header"><h2>Project profile & scope</h2><button class="btn-close" data-bs-dismiss="modal" type="button"></button></div><div class="modal-body"><div class="row g-3">
-  <div class="col-md-7"><label class="form-label">Project name</label><input class="form-control" name="name" required aria-label="Name"></div><div class="col-md-5"><label class="form-label">Reference No.</label><input class="form-control" name="referenceNo" aria-label="Reference number"></div>
-  <div class="col-md-6"><label class="form-label">Start date</label><input type="date" class="form-control" name="startDate" aria-label="Start date"></div><div class="col-md-6"><label class="form-label">End date</label><input type="date" class="form-control" name="endDate" aria-label="End date"></div>
-  <div class="col-12"><label class="form-label">Description</label><textarea name="description" class="form-control" aria-label="Description"></textarea></div><div class="col-12"><label class="form-label">Business objectives</label><textarea name="objectives" class="form-control" aria-label="Business objectives"></textarea></div>
+ <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><form id="profileForm"><div class="modal-header"><h2>Project profile & scope</h2><button class="btn-close" data-bs-dismiss="modal" type="button"></button></div><div class="modal-body"><div class="row g-2">
+  <div class="col-md-5"><label class="form-label">Project name</label><input class="form-control" name="name" required aria-label="Name"></div><div class="col-md-3"><label class="form-label">Reference No.</label><input class="form-control" name="referenceNo" aria-label="Reference number"></div>
+  <div class="col-md-2"><label class="form-label">Start date</label><input type="date" class="form-control" name="startDate" aria-label="Start date"></div><div class="col-md-2"><label class="form-label">End date</label><input type="date" class="form-control" name="endDate" aria-label="End date"></div>
+  <div class="col-md-6"><label class="form-label">Description</label><textarea name="description" class="form-control" aria-label="Description"></textarea></div><div class="col-md-6"><label class="form-label">Business objectives</label><textarea name="objectives" class="form-control" aria-label="Business objectives"></textarea></div>
   <div class="col-md-6"><label class="form-label">In scope</label><textarea name="scopeIn" class="form-control" aria-label="In scope"></textarea></div><div class="col-md-6"><label class="form-label">Out of scope</label><textarea name="scopeOut" class="form-control" aria-label="Out of scope"></textarea></div>
   <div class="col-md-6"><label class="form-label">Business rules</label><textarea name="businessRules" class="form-control" aria-label="Business rules"></textarea></div><div class="col-md-6"><label class="form-label">Acceptance criteria</label><textarea name="acceptanceCriteria" class="form-control" aria-label="Acceptance criteria"></textarea></div>
   <div class="col-md-6"><label class="form-label">Default application URL</label><input class="form-control" name="targetUrl" type="url" aria-label="Application URL"></div><div class="col-md-6"><label class="form-label">Technology stack</label><input class="form-control" name="technologyStack" aria-label="Technology stack"></div>
- <div class="col-12"><label class="form-label">Project documents</label><div class="tn-upload-row"><select id="projectCategory" class="form-select" aria-label="Category for uploaded documents" required><option value="" selected disabled>Select category</option><option value="REQUIREMENTS">Requirements</option><option value="USER_STORIES">User stories</option><option value="UI_DESIGN">UI design</option><option value="API_SPEC">API specification</option><option value="TEST_PLAN">Test plan</option><option value="TEST_DATA">Test data</option><option value="REPORT">Reports &amp; evidence</option><option value="OTHER">Other</option></select></div><div id="projectDrop" class="tn-drop" role="button" tabindex="0"><strong>Drop documents here or browse</strong><span class="tn-muted">PDF, Office, images, ZIP · 5 MB each</span></div><input id="projectFiles" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.csv,.zip"><div id="profileDocumentList" class="mt-2"></div></div>
  </div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary tn-btn">Save project profile</button></div></form></div></div>
 </div>
 <div class="modal fade" id="storyModal" tabindex="-1" aria-labelledby="storyFormTitle" aria-hidden="true">
@@ -202,16 +298,41 @@
   <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button class="btn btn-outline-primary tn-btn" type="submit">Save story</button><button class="btn btn-primary tn-btn" id="storyLaunch" type="button">Use story in existing Test Studio ↗</button></div>
  </form></div></div>
 </div>
-<div class="modal fade" id="assignMemberModal" tabindex="-1" aria-labelledby="assignMemberModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form id="memberForm"><div class="modal-header"><div><h2 id="assignMemberModalTitle">Add member</h2><div class="tn-muted">Select a project and a user.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div><div class="modal-body"><div class="tn-field"><label class="form-label" for="memberProject">Project</label><select id="memberProject" name="projectId" class="form-select" required aria-label="Project"></select></div><div class="tn-field"><label class="form-label" for="memberUser">User</label><select id="memberUser" name="userId" class="form-select" required aria-label="User to add"></select><div class="tn-muted small mt-1" id="memberRoleNote"></div></div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary tn-btn" type="submit">Add member</button></div></form></div></div></div>
+<div class="modal fade" id="assignMemberModal" tabindex="-1" aria-labelledby="assignMemberModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form id="memberForm"><div class="modal-header"><div><h2 id="assignMemberModalTitle">Add member</h2><div class="tn-muted">Select a project and a user. Role and team are filled in from their account; you can change them.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div><div class="modal-body"><div class="tn-field"><label class="form-label" for="memberProject">Project</label><select id="memberProject" name="projectId" class="form-select" required aria-label="Project"></select></div><div class="tn-field"><label class="form-label" for="memberUser">User</label><select id="memberUser" name="userId" class="form-select" required aria-label="User to add"></select></div><div class="tn-field"><label class="form-label" for="memberRole">Project role</label><select id="memberRole" name="projectRole" class="form-select" required aria-label="Project role"><option value="QA">QA</option><option value="DEVELOPER">Developer</option><option value="PROJECT_MANAGER">Project manager</option><option value="VIEWER">Viewer</option></select><div class="tn-muted small mt-1" id="memberRoleNote"></div></div><div class="tn-field"><label class="form-label" for="memberTeam">Team</label><select id="memberTeam" name="teamId" class="form-select" required aria-label="Team"></select></div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary tn-btn" type="submit">Add member</button></div></form></div></div></div>
+<div class="modal fade" id="uploadDocsModal" tabindex="-1" aria-labelledby="uploadDocsTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+ <div class="modal-header"><div><h2 id="uploadDocsTitle">Upload documents</h2><div class="tn-muted">Choose a category, then drop or browse files.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
+ <div class="modal-body"><div class="tn-field"><label class="form-label" for="detailCategory">Category</label><select id="detailCategory" class="form-select" aria-label="Category for uploaded documents" required><option value="" selected disabled>Select category</option><option value="REQUIREMENTS">Requirements</option><option value="USER_STORIES">User stories</option><option value="UI_DESIGN">UI design</option><option value="API_SPEC">API specification</option><option value="TEST_PLAN">Test plan</option><option value="TEST_DATA">Test data</option><option value="REPORT">Reports &amp; evidence</option><option value="OTHER">Other</option></select></div><div id="detailDrop" class="tn-drop mb-3" role="button" tabindex="0" aria-label="Upload project attachments"><strong>Drop documents here or browse</strong><span class="tn-muted">PDF, Office, images, ZIP · up to 5 MB per file</span></div><input id="detailFiles" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.csv,.zip" aria-label="Choose project documents"></div>
+ <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Close</button></div>
+</div></div></div>
+<div class="modal fade" id="ctModal" tabindex="-1" aria-labelledby="ctModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form id="ctForm">
+ <div class="modal-header"><div><h2 id="ctModalTitle">Create team</h2><div class="tn-muted" id="ctModalSub">Give the team a name. Next you add its members and assign it to projects.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
+ <div class="modal-body"><div class="tn-field"><label class="form-label" for="ctName">Team name</label><input id="ctName" class="form-control" maxlength="120" required placeholder="e.g. QA team"></div><div class="tn-field"><label class="form-label" for="ctDesc">Description</label><textarea id="ctDesc" class="form-control" maxlength="300" rows="3" placeholder="What this team does (optional)"></textarea></div></div>
+ <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary tn-btn" id="ctSave">Create team</button></div>
+</form></div></div></div>
+<div class="modal fade" id="ctMembersModal" tabindex="-1" aria-labelledby="ctMembersTitle" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content">
+ <div class="modal-header"><div><h2 id="ctMembersTitle">Add members</h2><div class="tn-muted" id="ctMembersSub">People from Users</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
+ <div class="modal-body">
+  <form id="ctAddMemberForm" class="tn-ct-add"><select id="ctAddMemberSelect" class="form-select" required aria-label="User to add to this team"></select><button class="btn btn-outline-primary tn-btn" type="submit">+ Add</button></form>
+  <div class="tn-card tn-popup-table"><div class="tn-card-head"><h2>Members <span class="tn-badge-counter" id="ctMembersCount">0</span></h2></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Name</th><th>Email</th><th>Added by</th><th>Action</th></tr></thead><tbody id="ctMembersBody"></tbody></table></div></div>
+ </div>
+ <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Done</button></div>
+</div></div></div>
+<div class="modal fade" id="ctProjectsModal" tabindex="-1" aria-labelledby="ctProjectsTitle" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content">
+ <div class="modal-header"><div><h2 id="ctProjectsTitle">Assign project</h2><div class="tn-muted" id="ctProjectsSub">One team can be assigned to several projects. Its members join each one with the role from their account.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
+ <div class="modal-body">
+  <form id="ctAssignForm" class="tn-ct-add"><select id="ctAssignSelect" class="form-select" required aria-label="Project to assign this team to"></select><button class="btn btn-outline-primary tn-btn" type="submit">+ Add</button></form>
+  <div class="tn-card tn-popup-table"><div class="tn-card-head"><h2>Assigned projects <span class="tn-badge-counter" id="ctProjectsCount">0</span></h2></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Project</th><th>Reference</th><th>Assigned by</th><th>Action</th></tr></thead><tbody id="ctProjectsBody"></tbody></table></div></div>
+ </div>
+ <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Done</button></div>
+</div></div></div>
 <div class="modal fade" id="manageTeamsModal" tabindex="-1" aria-labelledby="manageTeamsTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-scrollable"><div class="modal-content">
- <div class="modal-header"><div><h2 id="manageTeamsTitle">Teams</h2><div class="tn-muted">Select a team, then add members to it.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
+ <div class="modal-header"><div><h2 id="manageTeamsTitle">Teams</h2><div class="tn-muted">Create teams and move members between them.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
  <div class="modal-body">
   <div class="tn-field"><label class="form-label" for="teamPicker">Team</label><div class="tn-inline-row"><select id="teamPicker" class="form-select" aria-label="Choose a team"></select><button type="button" class="btn btn-outline-primary tn-btn" id="teamNewBtn">+ New team</button></div></div>
   <form id="teamAddForm" class="tn-inline-row mb-3" hidden><input class="form-control" name="name" required maxlength="120" placeholder="New team name, e.g. Frontend" aria-label="New team name"><button class="btn btn-primary tn-btn" type="submit">Create team</button><button class="btn btn-outline-secondary tn-btn" type="button" id="teamAddCancel">Cancel</button></form>
   <div id="teamDetail" class="tn-team-detail" hidden>
    <h3 class="tn-modal-sub">Members of this team <span class="tn-badge-counter" id="teamMemberCount">0</span></h3>
    <div id="teamMemberList" class="tn-team-members" aria-live="polite"></div>
-   <form id="teamAddMemberForm" class="tn-inline-row mt-2"><select id="teamAddMemberSelect" class="form-select" aria-label="Project member to add to this team" required></select><button class="btn btn-primary tn-btn" type="submit">Add to team</button></form>
   </div>
   <p class="tn-muted tn-team-note">When a project has teams, only members who are in a team can be assigned tasks.</p>
  </div>

@@ -76,6 +76,11 @@ router.patch('/api/projects/:projectId/members/:userId', requireAuth, async (req
     const projectRole = clean(req.body?.projectRole,50).toUpperCase();
     if (!PROJECT_ROLES.has(projectRole)) return res.status(400).json({ reply:'Invalid projectRole.' });
     const previous = await membership(req.params.projectId, req.params.userId);
+    // Same rule as removing a member: the project keeps at least one Project Manager.
+    if (previous?.project_role === 'PROJECT_MANAGER' && projectRole !== 'PROJECT_MANAGER') {
+      const managers = await db.query("select count(*)::int n from project_members where project_id=$1 and project_role='PROJECT_MANAGER'", [req.params.projectId]);
+      if (managers.rows[0].n <= 1) return res.status(409).json({ reply:'A project must retain at least one Project Manager.' });
+    }
     const result = await db.query('update project_members set role=$1,project_role=$2 where project_id=$3 and user_id=$4 returning *',[mapLegacyRole(projectRole),projectRole,req.params.projectId,req.params.userId]);
     if (!result.rowCount) return res.status(404).json({ reply:'Project member not found.' });
     await memberAudit(req, 'MEMBER_ROLE_CHANGED', req.params.userId, { projectRole, previousRole: previous?.project_role || null });
@@ -92,6 +97,8 @@ router.delete('/api/projects/:projectId/members/:userId', requireAuth, async (re
     if (target.project_role === 'PROJECT_MANAGER' && managerCount.rows[0].n <= 1) return res.status(409).json({ reply:'A project must retain at least one Project Manager.' });
     await memberAudit(req, 'MEMBER_REMOVED', req.params.userId, { previousRole: target.project_role || null });
     await db.query('delete from project_members where project_id=$1 and user_id=$2',[req.params.projectId,req.params.userId]);
+    // Leaving the project also removes them from this project's teams.
+    await db.query('delete from team_members where user_id=$2 and team_id in (select id from teams where project_id=$1)',[req.params.projectId,req.params.userId]);
     res.json({ ok:true });
   } catch(err) { res.status(err.statusCode||500).json({ reply:err.message }); }
 });
@@ -140,7 +147,7 @@ router.post('/api/projects/:projectId/work-items', requireAuth, async (req,res) 
     const title=clean(req.body?.title,500); if(!title) return res.status(400).json({ reply:'Title is required.' });
     const assignedTo=uuid(req.body?.assignedTo);
     if (assignedTo && !(await membership(req.params.projectId,assignedTo))) return res.status(400).json({ reply:'Assigned user must be an active member of this project.' });
-    if(assignedTo){const eligible=await db.query("select 1 from project_members pm where pm.project_id=$1 and pm.user_id=$2 and (not exists(select 1 from project_teams where project_id=$1) or exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=$2))",[req.params.projectId,assignedTo]);if(!eligible.rowCount)return res.status(400).json({reply:'Assignee must belong to an attached project team.'});}
+    if(assignedTo){const eligible=await db.query("select 1 from project_members pm where pm.project_id=$1 and pm.user_id=$2 and (not exists(select 1 from project_teams pt0 join team_members tm0 on tm0.team_id=pt0.team_id join project_members pm0 on pm0.project_id=pt0.project_id and pm0.user_id=tm0.user_id where pt0.project_id=$1) or exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=$2))",[req.params.projectId,assignedTo]);if(!eligible.rowCount)return res.status(400).json({reply:'Assignee must belong to an attached project team.'});}
     const item=await db.withTransaction(async client=>{
       const inserted=await client.query(`insert into work_items(project_id,session_id,run_id,test_case_id,test_result_id,defect_analysis_id,external_case_id,work_type,title,description,status,priority,assigned_to,assigned_by,created_by,due_at,metadata)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING',$11,$12,$13,$13,$14,$15::jsonb) returning *`,[req.params.projectId,req.body?.sessionId||null,uuid(req.body?.runId),uuid(req.body?.testCaseId),uuid(req.body?.testResultId),uuid(req.body?.defectAnalysisId),clean(req.body?.externalCaseId,100)||null,workType,title,clean(req.body?.description,10000)||null,priority,assignedTo,req.user.sub,req.body?.dueAt||null,JSON.stringify(req.body?.metadata||{})]);
@@ -159,7 +166,7 @@ router.patch('/api/work-items/:id/assign', requireAuth, async (req,res) => {
     const existing=await db.query('select * from work_items where id=$1',[req.params.id]); if(!existing.rowCount)return res.status(404).json({reply:'Work item not found.'});
     await assertProjectManager(req,existing.rows[0].project_id);
     const assignedTo=uuid(req.body?.assignedTo); if(assignedTo && !(await membership(existing.rows[0].project_id,assignedTo))) return res.status(400).json({reply:'Assigned user must be an active project member.'});
-    if(assignedTo){const eligible=await db.query("select 1 from project_members pm where pm.project_id=$1 and pm.user_id=$2 and (not exists(select 1 from project_teams where project_id=$1) or exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=$2))",[existing.rows[0].project_id,assignedTo]);if(!eligible.rowCount)return res.status(400).json({reply:'Assignee must belong to an attached project team.'});}
+    if(assignedTo){const eligible=await db.query("select 1 from project_members pm where pm.project_id=$1 and pm.user_id=$2 and (not exists(select 1 from project_teams pt0 join team_members tm0 on tm0.team_id=pt0.team_id join project_members pm0 on pm0.project_id=pt0.project_id and pm0.user_id=tm0.user_id where pt0.project_id=$1) or exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=$2))",[existing.rows[0].project_id,assignedTo]);if(!eligible.rowCount)return res.status(400).json({reply:'Assignee must belong to an attached project team.'});}
     const item=await db.withTransaction(async client=>{const r=await client.query('update work_items set assigned_to=$1,assigned_by=$2,updated_by=$2,updated_at=now() where id=$3 returning *',[assignedTo,req.user.sub,req.params.id]);await addHistory(client,req.params.id,assignedTo?'WORK_ITEM_ASSIGNED':'WORK_ITEM_UNASSIGNED',existing.rows[0].status,existing.rows[0].status,req.user.sub,req.body?.comment||'',{assignedTo});await client.query("insert into project_audit_events(project_id,work_item_id,actor_id,event_type,metadata) values($1,$2,$3,'TASK_ASSIGNEE_CHANGED',$4::jsonb)",[existing.rows[0].project_id,req.params.id,req.user.sub,JSON.stringify({previousAssignee:existing.rows[0].assigned_to,assignedTo})]);if(assignedTo)await enqueueNotification(client,{projectId:existing.rows[0].project_id,userId:assignedTo,eventType:'WORK_ITEM_ASSIGNED',subject:`Assigned: ${existing.rows[0].title}`,payload:{workItemId:req.params.id,status:existing.rows[0].status}});return r.rows[0]});
     res.json({ok:true,workItem:item});
   } catch(err){res.status(err.statusCode||500).json({reply:err.message});}

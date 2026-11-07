@@ -1,13 +1,14 @@
 /* Workspace data tables: per-table filters, sorting and pagination. */
 (function(){
 'use strict';
-const PAGE_SIZES=[5,10,25,50],DEFAULT_PAGE_SIZE=10;
+const PAGE_SIZES=[5,10,25,50],DEFAULT_PAGE_SIZE=5;
 const TABLE_CONFIG={
  projectsBody:{create:'/project-create.html',createLabel:'Create project',search:'Search projects'},
  tasksBody:{create:'/task-create.html',createLabel:'Create task',search:'Search tasks'},
  workItemsBody:{create:'/task-create.html',createLabel:'Create task',search:'Search work items'},
  legacyTeamBody:{search:'Search team members'},
  storyList:{createButton:'storyCreate',createLabel:'Create story',search:'Search stories'},
+ ctRows:{createButton:'ctCreate',createLabel:'Create team',search:'Search teams'},
  teamBody:{search:'Search members'},
  projectTeams:{search:'Search teams'},
  projectTeamMembers:{search:'Search team members'},
@@ -18,7 +19,9 @@ const TABLE_CONFIG={
  inventoryStories:{search:'Search story statistics'},
  inventoryAudit:{search:'Search audit events'},
  repairMemoryList:{search:'Search recommendations'},
- usersBody:{search:'Search users'}
+ usersBody:{search:'Search users'},
+ ctMembersBody:{search:'Search members'},
+ ctProjectsBody:{search:'Search projects'}
 };
 function initTable(table){
  if(table.dataset.paginationReady==='true')return;
@@ -35,15 +38,14 @@ function initTable(table){
  search.type='search';search.className='form-control tn-table-query';search.placeholder=cfg.search||'Filter rows…';
  search.setAttribute('aria-label',cfg.search||'Filter table rows');
  const filter=document.createElement('select');filter.className='form-select tn-column-filter';filter.setAttribute('aria-label','Filter column');
- const value=document.createElement('input');value.type='search';value.className='form-control tn-table-value';value.placeholder='Column value';
- value.setAttribute('aria-label','Filter selected column value');value.hidden=true;
- filter.add(new Option('All columns',''));
  for(let i=0;i<headers.length;i++){
   const label=headers[i].textContent.trim();
   if(label&&label.length<100&&!['Actions','Action'].includes(label))filter.add(new Option(label,String(i)));
  }
+ // No "All columns": the first column is selected by default. A table with no named columns searches the whole row.
+ filter.selectedIndex=0;filter.hidden=!filter.options.length;
  const size=document.createElement('select');size.className='form-select tn-page-size';size.setAttribute('aria-label','Rows per page');
- for(const option of PAGE_SIZES)size.add(new Option(option+' / page',String(option),false,option===DEFAULT_PAGE_SIZE));
+ for(const option of PAGE_SIZES)size.add(new Option(option+' / page',String(option),false,option===(cfg.pageSize||DEFAULT_PAGE_SIZE)));
  const create=cfg.create?document.createElement('a'):cfg.createButton?document.createElement('button'):null;
  if(create&&cfg.createButton){create.type='button';create.id=cfg.createButton;}
  if(create){if(cfg.create)create.href=cfg.create;create.className='btn btn-primary tn-btn tn-table-create';create.textContent='+ Create';
@@ -61,7 +63,7 @@ function initTable(table){
  const searchWrap=document.createElement('label');searchWrap.className='tn-search';
  searchWrap.innerHTML='<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
  searchWrap.append(search);
- const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(searchWrap,filter,value);
+ const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(searchWrap,filter);
  if(key==='tasksBody'){
   const status=document.getElementById('taskStatusFilter'),hierarchy=document.getElementById('taskHierarchy')?.closest('label');
   if(status){status.classList.add('tn-table-status');textFilters.append(status);}
@@ -93,11 +95,10 @@ function initTable(table){
   // The "No items" message row is not data: always shown when the table is empty, never counted.
   const emptyRows=[...tbody.rows].filter(r=>r.querySelector('td.tn-empty'));
   const rows=[...tbody.rows].filter(r=>!emptyRows.includes(r)),q=search.value.toLocaleLowerCase(),column=filter.value===''?-1:Number(filter.value);
-  const colq=value.value.toLocaleLowerCase();
   const filtered=rows.filter(row=>{
-   const full=row.textContent.toLocaleLowerCase();
-   if(q&&!full.includes(q))return false;
-   if(column>=0&&colq&&!String(row.cells[column]?.textContent||'').toLocaleLowerCase().includes(colq))return false;
+   // Search looks only in the column chosen in the dropdown.
+   const text=column>=0?String(row.cells[column]?.textContent||''):row.textContent;
+   if(q&&!text.toLocaleLowerCase().includes(q))return false;
    return true;
   });
   const per=Number(size.value)||10,totalPages=Math.max(1,Math.ceil(filtered.length/per));
@@ -116,8 +117,7 @@ function initTable(table){
  }
  const observer=new MutationObserver(()=>{page=1;render();});
  observer.observe(tbody,{childList:true});
- for(const el of [search,filter,value,size])el.addEventListener(el===filter||el===size?'change':'input',()=>{
-  if(el===filter)value.hidden=!filter.value;
+ for(const el of [search,filter,size])el.addEventListener(el===filter||el===size?'change':'input',()=>{
   page=1;render();
  });
  prev.onclick=()=>{page--;render();};
@@ -135,7 +135,7 @@ function initTable(table){
  render();
  table.tnRefresh=render;
 }
-function init(){document.querySelectorAll('.tn-view table,#team table,#work table').forEach(initTable);}
+function init(){document.querySelectorAll('.tn-view table,#team table,#work table,.tn-popup-table table').forEach(initTable);}
 window.TNTableControls={init,refresh:()=>document.querySelectorAll('.tn-view table').forEach(x=>x.tnRefresh?.())};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 for(const id of ['team','work']){const el=document.getElementById(id);if(el)new MutationObserver(init).observe(el,{childList:true});}

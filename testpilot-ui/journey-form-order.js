@@ -51,8 +51,8 @@
     const heading = form?.querySelector(':scope > .section-head');
     if (!form || !heading) return false;
 
-    // Layout: what to test (source + story text) first, then environment and AI profile, the Generate button,
-    // and "Advanced options" (built by runner-context.js) holding page scope, application login and test users.
+    // Layout: what to test (source + story text) first, then environment and AI profile, "Advanced options",
+    // then the Generate button. "Advanced options" (built by runner-context.js) holding page scope, application login and test users.
     const advanced = form.querySelector(':scope > .tn-advanced');
     const advancedBody = advanced?.querySelector('.tn-advanced-body');
     const optional = [fieldFor('pageScope'), applicationLoginField(), document.getElementById('testActorPanel')].filter(Boolean);
@@ -64,9 +64,9 @@
       modelField(),
       fieldFor('targetUrl'),
       fieldFor('additionalPaths'),
+      advanced,
       document.getElementById('generateBtn'),
       document.getElementById('errorBox'),
-      advanced,
     ] : [
       environmentBlock(),
       modelField(),

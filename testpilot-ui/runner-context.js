@@ -33,6 +33,11 @@
     }
     parts.push('<span aria-current="page">Start testing</span>');
     nav.innerHTML=parts.join('<span aria-hidden="true">›</span>');
+    // Project name in the centre of the strip.
+    const strip=document.getElementById('tnSubbar')||nav.parentElement;
+    let title=document.getElementById('tnProjectTitle');
+    if(!title&&strip){title=document.createElement('div');title.id='tnProjectTitle';strip.appendChild(title);}
+    if(title){title.textContent=project?.name||'';title.title=project?.name||'';title.hidden=!project?.name;}
   }
   function updateLink(sourceType,recordId=''){
     const projectId=$('platformProject')?.value||'';
@@ -299,7 +304,7 @@
         '.tn-advanced-body{padding:4px 14px 14px;border-top:1px solid #eef1f6}'+
         '.tn-tip{display:inline-grid;place-items:center;width:15px;height:15px;margin-left:6px;border-radius:50%;background:#eef2ff;color:#3656c9;font-size:10px;font-weight:700;cursor:help;vertical-align:middle}'+
         '.tn-tip-text{display:none!important}'+
-        '#generateBtn{margin-top:12px}';
+        '#generateBtn{margin-top:16px}';
       document.head.appendChild(st);
     }
     const head=aside.querySelector('.section-head'),title=head?.querySelector('h2,h3,strong,b');
@@ -308,17 +313,17 @@
     const top=n=>{while(n&&n.parentElement&&n.parentElement!==aside)n=n.parentElement;return n;};
     const env=aside.querySelector(':scope > .two'),ai=fieldBy('AI quality profile'),scope=$('pageScopeField'),login=fieldBy('Application login'),actors=$('testActorPanel'),freshWrap=top(fresh),err=$('errorBox');
     const recordLabel=card.querySelector('label[for="testContextRecord"]');if(recordLabel)recordLabel.textContent='Story';
-    // Order: heading, source + story, text for the AI, environment + AI profile, Generate, advanced options.
+    // Order: heading, source + story, text for the AI, environment + AI profile, advanced options, Generate.
     head.after(card);card.after(storyField);
     let last=storyField;
     for(const n of [env,ai])if(n){last.after(n);last=n;}
-    last.after(gen);last=gen;
-    if(err){last.after(err);last=err;}
     const adv=document.createElement('details');adv.className='tn-advanced';
     adv.innerHTML='<summary>Advanced options<span>Page scope, application login, fresh discovery, scenario types, test categories, security</span></summary><div class="tn-advanced-body"></div>';
     const body=adv.querySelector('.tn-advanced-body');
     for(const n of [scope,login,actors,freshWrap,types,cats])if(n)body.appendChild(n);
-    last.after(adv);
+    last.after(adv);last=adv;
+    last.after(gen);last=gen;
+    if(err)last.after(err);
     window.syncTestNexusJourneyFormOrder?.(); // the form-order script now uses this layout too
     // Long help texts become an ⓘ tip next to the field label.
     aside.querySelectorAll('.field > small, .web-auth-note, .generation-type-note, .generation-category-note').forEach(note=>{
@@ -467,7 +472,23 @@
       '.wrap .results .empty:before{background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%233158ea%27 stroke-width=%271.8%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27M3 3v18h18%27/%3E%3Cpath d=%27m7 14 4-4 3 3 5-6%27/%3E%3C/svg%3E")}',
       // run bar
       '.wrap .runbar{padding:14px 18px;background:#f9fbff;border-top:1px solid #eef1f6;border-radius:0 0 14px 14px}',
-      '.wrap .runbar .run-state{font-size:12.5px;color:#64748b}'
+      '.wrap .runbar .run-state{font-size:12.5px;color:#64748b}',
+      // compact left column: Generate is visible without scrolling on a laptop screen
+      '.wrap{padding-top:12px!important}',
+      '.wrap .testing-context-card{margin:0 0 10px!important;padding:10px 12px 10px 14px!important}',
+      '.wrap aside.panel>.field{margin-top:10px!important}',
+      '.wrap aside.panel #story{min-height:80px!important;height:92px!important}',
+      '.wrap aside.panel .field input:not([type=checkbox]):not([type=radio]),.wrap aside.panel .field select{min-height:38px!important;height:38px!important}',
+      '.wrap .panel .tn-advanced{margin-top:12px!important}',
+      '.wrap .panel .tn-advanced>summary{padding-top:9px!important;padding-bottom:9px!important}',
+      '.wrap .panel .tn-advanced>summary span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.wrap aside.panel>.two{margin-top:2px!important}',
+      '.wrap aside.panel .field>label{margin-bottom:5px!important}',
+      '#generateBtn{margin-top:18px!important}',
+      // smaller live stats tiles
+      '.wrap .metric-grid{gap:8px!important}',
+      '.wrap .metric{padding:8px 12px!important}',
+      '.wrap .metric .n{font-size:20px!important}'
     ].join('');
     document.head.appendChild(st);
   }

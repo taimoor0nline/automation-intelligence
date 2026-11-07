@@ -130,7 +130,7 @@ async function loadEnvironments(){
 }
 function envFilter(){const q=($('mgEnvSearch')?.value||'').trim().toLowerCase();return environments.filter(e=>(!q||(e.name+' '+e.base_url+' '+e.stage_type).toLowerCase().includes(q))&&(!$('mgStageFilter').value||e.stage_type===$('mgStageFilter').value)&&(!$('mgStatusFilter').value||(e.is_active?'active':'disabled')===$('mgStatusFilter').value));}
 function renderEnvironments(){
- const filtered=envFilter(),pageSize=Number($('mgPageSize').value)||10,pages=Math.max(1,Math.ceil(filtered.length/pageSize));
+ const filtered=envFilter(),pageSize=Number($('mgPageSize').value)||5,pages=Math.max(1,Math.ceil(filtered.length/pageSize));
  envPage=Math.max(1,Math.min(envPage,pages));const current=filtered.slice((envPage-1)*pageSize,envPage*pageSize);
  $('mgEnvironmentRows').innerHTML=current.map(e=>{
  const base=projectUrl('/environment-form.html')+'&id='+encodeURIComponent(e.id);
@@ -167,7 +167,7 @@ async function initEnvironmentList(){
  $('mgEnvSearch')?.addEventListener('input',()=>{envPage=1;renderEnvironments();});
  // Create / view / edit / delete open the environment form in a popup instead of a new page.
  document.addEventListener('click',e=>{const a=e.target.closest('a[href^="/environment-form.html"]');if(!a||e.ctrlKey||e.metaKey||e.shiftKey)return;e.preventDefault();openEnvDialog(a.getAttribute('href'));});
- window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='tn-popup-size')$('mgEnvDialog').style.height=Math.min(e.data.height+4,innerHeight-48)+'px';});
+ window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='tn-popup-size'){const d=$('mgEnvDialog');if(Date.now()-Number(d.dataset.openedAt||0)<1500)d.style.height=Math.min(e.data.height+4,innerHeight-48,680)+'px';}});
  window.addEventListener('message',async e=>{if(e.origin!==location.origin||e.data?.type!=='tn-env-form')return;$('mgEnvDialog').close();if(e.data.changed){await loadEnvironments();renderEnvironments();if(e.data.message)feedback(e.data.message,'success');}});
  $('mgPrev').onclick=()=>{envPage--;renderEnvironments();};
  $('mgNext').onclick=()=>{envPage++;renderEnvironments();};
@@ -186,11 +186,11 @@ if(embedded)document.documentElement.classList.add('mg-embedded');
 function embedDone(data){if(embedded)window.parent.postMessage({type:'tn-popup-done',...data},location.origin);return embedded;}
 // In a popup: title the form after the page ("Create task") and let the popup fit the form's height.
 if(embedded){
- const fit=()=>{const m=document.querySelector('.mg-main');window.parent.postMessage({type:'tn-popup-size',height:Math.ceil(m?m.getBoundingClientRect().height:document.body.scrollHeight)},location.origin);};
+ const fit=()=>{const m=document.querySelector('.mg-main'),b=getComputedStyle(document.body);const h=m?m.getBoundingClientRect().bottom+scrollY+parseFloat(getComputedStyle(m).marginBottom||0)+parseFloat(b.paddingBottom||0)+parseFloat(b.marginBottom||0):document.body.scrollHeight;window.parent.postMessage({type:'tn-popup-size',height:Math.ceil(h)},location.origin);}; // whole form incl. the space around it, so no scrollbar when it fits
  window.addEventListener('load',()=>{const h=document.querySelector('.mg-card-head h2');if(h&&PAGE_LABELS[page]&&page!=='environment-form')h.textContent=PAGE_LABELS[page];fit();});
  new ResizeObserver(fit).observe(document.querySelector('.mg-main')||document.body);
 }
-if(embedded)document.addEventListener('click',e=>{const a=e.target.closest('a.mg-btn');if(a&&a.textContent.trim()==='Cancel'){e.preventDefault();embedDone({changed:false});}});
+if(embedded)document.addEventListener('click',e=>{const a=e.target.closest('a.mg-btn');if(a&&['Cancel','Back'].includes(a.textContent.trim())){e.preventDefault();embedDone({changed:false});}});
 function doneEnvForm(changed,message){
  if(embedded)window.parent.postMessage({type:'tn-env-form',changed,message},location.origin);
  else location.assign(projectUrl('/environment-config.html'));
@@ -198,7 +198,7 @@ function doneEnvForm(changed,message){
 function openEnvDialog(href){
  const url=new URL(href,location.origin);url.searchParams.set('projectId',projectId);url.searchParams.set('embed','1');
  const frame=$('mgEnvFrame');frame.src=url.pathname+url.search;
- $('mgEnvDialog').showModal();
+ $('mgEnvDialog').dataset.openedAt=Date.now();$('mgEnvDialog').style.height='';$('mgEnvDialog').showModal();
 }
 async function initEnvironmentForm(){
  const workspace=await loadProject();
@@ -295,6 +295,7 @@ async function init(){
  try{
   const me=await api('/api/auth/me');user=me.user;
   if($('navUsers'))$('navUsers').hidden=String(user?.role||'').toUpperCase()!=='MANAGER'; // Users: managers only
+  if($('navTeams'))$('navTeams').hidden=String(user?.role||'').toUpperCase()!=='MANAGER'; // Teams: managers only
   // Same profile menu (avatar ▾ → name, role, Sign out) as the other pages, at the right end of the top bar.
   const signOut=$('mgSignOut');
   if(signOut&&window.TestNexusProfileMenu){const slot=document.createElement('span');signOut.closest('header').append(slot);signOut.remove();window.TestNexusProfileMenu.mount(slot,user||{});}

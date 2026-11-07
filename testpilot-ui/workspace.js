@@ -13,7 +13,10 @@ const iconPaths={
  remove:'<path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7M10 11v5m4-5v5"/>',
  video:'<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/>',
  image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 16-6-6L5 21"/>',
- download:'<path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4"/>'
+ download:'<path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4"/>',
+ pause:'<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
+ userPlus:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
+ assign:'<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M12 11v5M9.5 13.5h5"/>'
 };
 function actionIcon(name,attributes,label){
  return '<button type="button" class="tn-icon-action" '+attributes+' aria-label="'+esc(label)+'" title="'+esc(label)+'"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+(iconPaths[name]||iconPaths.eye)+'</svg></button>';
@@ -119,14 +122,15 @@ function openCreatePopup(href){
  if(url.pathname==='/task-create.html'&&state.projectId)url.searchParams.set('projectId',state.projectId);
  url.searchParams.set('embed','1');
  $('createFrame').src=url.pathname+url.search;
- $('createDialog').showModal();
+ $('createDialog').dataset.openedAt=Date.now();$('createDialog').style.height='';$('createDialog').showModal();
 }
 document.addEventListener('click',e=>{
  const a=e.target.closest('a[href^="/task-create.html"],a[href^="/project-create.html"]');
  if(!a||e.ctrlKey||e.metaKey||e.shiftKey)return;
  e.preventDefault();openCreatePopup(a.getAttribute('href'));
 });
-window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='tn-popup-size')$('createDialog').style.height=Math.min(e.data.height+4,innerHeight-48)+'px';});
+// The popup fits the form when it opens, then keeps its size: longer content scrolls inside it.
+window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='tn-popup-size'){const d=$('createDialog');if(Date.now()-Number(d.dataset.openedAt||0)<1500)d.style.height=Math.min(e.data.height+4,innerHeight-48,680)+'px';}});
 window.addEventListener('message',async e=>{
  if(e.origin!==location.origin||e.data?.type!=='tn-popup-done')return;
  $('createDialog').close();$('createFrame').src='about:blank';
@@ -205,14 +209,9 @@ document.addEventListener('submit',async e=>{
 });
 // AI learning tab: Local (this project's learnings) or Global (shared by all projects).
 function renderLearning(list){
- // The Local / Global switch sits on its own row, directly under the search box.
- const toggle=$('learningScopeToggle'),toolbar=document.querySelector('.tn-table-filters[data-table-key="repairMemoryList"]');
- if(toggle&&toolbar){
-  let row=$('learningScopeRow');
-  if(!row){row=document.createElement('div');row.id='learningScopeRow';row.className='tn-learning-scope-row';}
-  if(row.previousElementSibling!==toolbar)toolbar.after(row);
-  if(toggle.parentElement!==row)row.append(toggle);
- }
+ // The Local / Global switch sits right after the search box and the column filter.
+ const toggle=$('learningScopeToggle'),toolbar=document.querySelector('.tn-table-filters[data-table-key="repairMemoryList"]'),row=toolbar?.querySelector('.tn-table-filters-main')||toolbar;
+ if(toggle&&row&&toggle.parentElement!==row)row.append(toggle);
  const global=state.learningView==='global',canEdit=['PROJECT_MANAGER','QA'].includes(state.context?.projectRole);
  $('repairMemoryList').innerHTML=list.map(r=>{
   const own=String(r.project_id)===String(state.projectId),isGlobal=r.scope==='GLOBAL';
@@ -247,8 +246,8 @@ function personCell(name,when){
  return '<span class="tn-who">'+(name?esc(name):'<span class="tn-muted">Not recorded</span>')+'</span><div class="tn-when">'+esc(dateTime(when))+'</div>';
 }
 function statusTag(s){const x=String(s||'PENDING');const c=x==='COMPLETED'?'success':x==='ON_HOLD'?'warn':x==='PENDING'?'':'danger';return '<span class="tn-tag '+c+'">'+esc(x.replaceAll('_',' '))+'</span>';}
-const detailViews=new Set(['details','stories','inventory','audit','learning','executions','tasks','team','attachments']);
-const regularViews=new Set(['overview','projects','reports','users']);
+const detailViews=new Set(['details','stories','inventory','audit','learning','executions','tasks','team','attachments','environments','run']);
+const regularViews=new Set(['overview','projects','reports','users','teams']);
 function show(view,historyMode='push'){
  if(!regularViews.has(view)&&!detailViews.has(view))view='projects';
  if(detailViews.has(view)&&(!state.projectId||!state.context))view='projects';
@@ -258,13 +257,13 @@ function show(view,historyMode='push'){
  $('projectDetailTabs').classList.toggle('d-none',!inDetails);
  document.querySelectorAll('[data-view]').forEach(el=>{
   const tab=!!el.closest('#projectDetailTabs');
-  const active=el.dataset.view===view||(!tab&&inDetails&&el.dataset.view==='projects'&&!!el.closest('.tn-top'));
+  const active=el.dataset.view===view||(view==='run'&&el.dataset.view==='executions')||(!tab&&inDetails&&el.dataset.view==='projects'&&!!el.closest('.tn-top'));
   el.classList.toggle('active',active);
   if(tab){el.setAttribute('aria-selected',String(active));el.tabIndex=active?0:-1;}
   else if(active)el.setAttribute('aria-current','page');
   else el.removeAttribute('aria-current');
  });
- const labels={overview:'Home',projects:'Projects',users:'Users',details:'Project context & scope',stories:'Project stories',tasks:'Project tasks',reports:'Test reports & evidence',executions:'Project runs & reports',inventory:'Project test cases',audit:'Project audit',learning:'Project AI learning',team:'Project team',attachments:'Project attachments'};
+ const labels={teams:'Teams',run:'Run details',environments:'Project environments',overview:'Home',projects:'Projects',users:'Administration',details:'Project context & scope',stories:'Project stories',tasks:'Project tasks',reports:'Test reports & evidence',executions:'Project runs & reports',inventory:'Project test cases',audit:'Project audit',learning:'Project AI learning',team:'Project team',attachments:'Project attachments'};
  const project=state.context?.project;
  if(inDetails&&project){
   // Project pages: the project's name is the title, with its key facts underneath.
@@ -281,7 +280,7 @@ function show(view,historyMode='push'){
  }else{
   $('pageTitle').textContent=labels[view]||'TestNexus';
   if(view==='overview')$('pageTitle').textContent=greeting();
- $('pageSubtitle').textContent=view==='overview'?'Here is how your projects are doing.':view==='projects'?'Open a project to see its details, environments and test results, or start testing directly':'Execution results and reports';
+ $('pageSubtitle').textContent=view==='teams'?'Teams for the whole company, assigned to projects':view==='users'?'Sign-in accounts for TestNexus':view==='overview'?'Here is how your projects are doing.':view==='projects'?'Open a project to see its details, environments and test results, or start testing directly':'Execution results and reports';
   $('breadcrumb').textContent='Project workspace';
  }
  clearNotice();
@@ -290,11 +289,13 @@ function show(view,historyMode='push'){
  if(view==='users')loadUsers().catch(e=>notice(e.message));
  if(view==='details'&&state.projectId)loadRepos().catch(()=>{});
  if(view==='team'&&state.projectId)loadTeams().catch(e=>notice(e.message));
+ if(view==='teams')loadCompanyTeams().catch(e=>notice(e.message));
+ if(view==='environments'&&state.projectId)loadEnvironments().catch(e=>notice(e.message));
+ if(view==='run'&&state.projectId)loadRunPage().catch(e=>notice(e.message));
  const startCardShown=view==='details'&&$('projectStartCard')&&!$('projectStartCard').hidden;
  // Start Testing lives only on Context & scope (its card there); the header button is a fallback for when that card is hidden.
  for(const el of document.querySelectorAll('.tn-page-actions [data-start-project]'))el.hidden=view!=='details'||startCardShown;
- const configLink=$('navEnvironmentConfig');if(configLink)configLink.hidden=!inDetails;
- const path=inDetails?projectRoute(state.projectId,view):'/workspace.html#'+view;
+ const path=inDetails?(view==='run'&&state.runId?'/workspace.html?projectId='+encodeURIComponent(state.projectId)+'&runId='+encodeURIComponent(state.runId)+'#run':projectRoute(state.projectId,view)):'/workspace.html#'+view;
  if(historyMode!=='none'&&window.location.pathname+window.location.search+window.location.hash!==path){
   if(historyMode==='replace')window.history.replaceState(null,'',path);
   else window.history.pushState(null,'',path);
@@ -314,6 +315,7 @@ async function openProject(id,section='details',historyMode='push'){
 }
 async function routeFromUrl(){
  const requested=new URLSearchParams(window.location.search).get('projectId');
+ state.runId=new URLSearchParams(window.location.search).get('runId')||state.runId||'';
  const fragment=window.location.hash.replace('#','');
  const view=fragment||(requested?'details':'projects');
  if(detailViews.has(view)||requested&&(!fragment||fragment==='details')){
@@ -365,12 +367,12 @@ function applyRoleUI(){
  window.testnexusWorkspaceRole={platformManager:globalManager,projectManager,canReview};
  const toggles=[['newProjectForm',globalManager],['memberForm',projectManager],['userForm',globalManager],['environmentForm',projectManager],['newTaskForm',canReview],['storyForm',canReview]];
  if($('navUsers'))$('navUsers').hidden=!globalManager; // Users: managers only
+ if($('navTeams'))$('navTeams').hidden=!globalManager; // Teams: managers only
  for(const [id,allowed] of [['openAssignMember',projectManager],['openManageTeams',projectManager],['teamCreateForm',globalManager]])if($(id))$(id).hidden=!allowed;
  for(const [id,allowed] of toggles){const form=$(id);if(!form)continue;form.querySelectorAll('input,select,textarea,button').forEach(el=>{el.disabled=!allowed;});if(['newProjectForm','memberForm','userForm'].includes(id))form.hidden=!allowed;}
  $('editProfile').disabled=!projectManager;
  if($('addScope'))$('addScope').hidden=!projectManager;
- $('attachmentsEditProfile').disabled=!projectManager;
- for(const [zoneId,inputId] of [['detailDrop','detailFiles'],['projectDrop','projectFiles']]){
+ for(const [zoneId,inputId] of [['detailDrop','detailFiles']]){
   $(zoneId).setAttribute('aria-disabled',String(!canReview));
   $(zoneId).tabIndex=canReview?0:-1;
   $(inputId).disabled=!canReview;
@@ -378,7 +380,6 @@ function applyRoleUI(){
  if($('projectStartCard'))$('projectStartCard').hidden=!canReview;
  $('projectRunAll').disabled=!canReview;
  if(!canReview)$('batchRetest').disabled=true;
- if($('navEnvironmentConfig')){$('navEnvironmentConfig').href=state.projectId?'/environment-config.html?projectId='+encodeURIComponent(state.projectId):'/workspace.html#projects';$('navEnvironmentConfig').hidden=!state.projectId||!detailViews.has(state.view);}
  window.TNTableControls?.refresh();
 }
 function renderAll(){renderOverview();renderStoryList();renderTasks();renderReports();renderTeam();applyRoleUI();}
@@ -398,8 +399,7 @@ function renderOverview(){
  if($('statRetest'))$('statRetest').textContent=pending;
  $('environmentList').innerHTML=c.environments.map(e=>'<div class="tn-kv"><span>'+esc(e.name)+(e.is_default?' ★':'')+'</span><span>'+esc(e.base_url)+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
  renderDetailEnvironments(c);renderStartCard(c);renderRecentRuns(c);
- $('profileDocumentList').innerHTML=c.documents.map(d=>'<div class="tn-kv"><span>'+categoryTag(d.category)+'</span><span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button> <small class="tn-muted">'+Math.ceil(d.file_size/1024)+' KB</small></span></div>').join('')||'<div class="tn-muted">No documents attached yet.</div>';
- $('detailDocumentsList').innerHTML=c.documents.map(d=>'<tr><td><strong>'+esc(d.filename)+'</strong></td><td>'+categoryTag(d.category)+'</td><td>'+Math.ceil(d.file_size/1024)+' KB</td>'+createdCell(d.uploaded_by_name,d.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('download','data-doc="'+esc(d.id)+'"','Download '+d.filename)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-doc="'+esc(d.id)+'"','Delete '+d.filename):'')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No project attachments. Upload documents above.</td></tr>';
+ if($('docCount'))$('docCount').textContent=c.documents.length;$('detailDocumentsList').innerHTML=c.documents.map(d=>'<tr><td><strong>'+esc(d.filename)+'</strong></td><td>'+categoryTag(d.category)+'</td><td>'+Math.ceil(d.file_size/1024)+' KB</td>'+createdCell(d.uploaded_by_name,d.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-preview-doc="'+esc(d.id)+'"','Preview '+d.filename)+actionIcon('download','data-doc="'+esc(d.id)+'"','Download '+d.filename)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-doc="'+esc(d.id)+'"','Delete '+d.filename):'')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No project attachments yet. Use + Upload documents.</td></tr>';
 }
 function renderStoryList(){
  const c=state.context;
@@ -493,7 +493,7 @@ function renderReports(){
   kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>'),failed?'orange':'slate','Tests failed',failed)+
   kpi(svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),'blue','Last run',last?esc(date(last.completed_at)):'—',last?'<div class="tn-kpi-sub">'+esc(last.executed_by_name||'Unknown')+'</div>':'');
  $('runsCountRuns').textContent=runs.length;$('runsCountEvidence').textContent=state.evidence.length;
- $('runsBody').innerHTML=runs.map(r=>{const p=Number(r.passed||0),f=Number(r.failed||0),t=p+f,pct=t?Math.round(p/t*100):0;return '<tr><td data-sort="'+esc(r.completed_at||'')+'"><strong>Run #'+esc(r.run_number)+'</strong><div><span class="tn-session-id" title="'+esc(r.session_id||'')+'">'+esc(r.session_id||'')+'</span></div></td><td data-sort="'+pct+'"><div class="tn-run-result"><span class="tn-result '+(f?'fail':'pass')+'">'+(f?'Failed':'Passed')+'</span><span class="tn-run-bar" role="img" aria-label="'+p+' passed, '+f+' failed"><span style="width:'+pct+'%"></span></span><span class="tn-run-counts">'+p+' / '+t+'</span></div></td><td>'+display(r.environment)+'</td><td>'+(r.executed_by_name?'<span class="tn-who">'+esc(r.executed_by_name)+'</span>':'<span class="tn-muted">Not recorded</span>')+'</td><td>'+dateTime(r.completed_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('eye','data-report="'+esc(r.session_id)+'" data-run-number="'+esc(r.run_number)+'"','View run '+r.run_number+' test cases')+'</span></td></tr>';}).join('')||'<tr><td colspan="6" class="tn-empty">No test runs yet. Start testing from Context &amp; scope.</td></tr>';
+ $('runsBody').innerHTML=runs.map(r=>{const p=Number(r.passed||0),f=Number(r.failed||0),t=p+f,pct=t?Math.round(p/t*100):0;return '<tr><td data-sort="'+esc(r.completed_at||'')+'"><strong>Run #'+esc(r.run_number)+'</strong><div><span class="tn-session-id" title="'+esc(r.session_id||'')+'">'+esc(r.session_id||'')+'</span></div></td><td data-sort="'+pct+'"><div class="tn-run-result"><span class="tn-result '+(f?'fail':'pass')+'">'+(f?'Failed':'Passed')+'</span><span class="tn-run-bar" role="img" aria-label="'+p+' passed, '+f+' failed"><span style="width:'+pct+'%"></span></span><span class="tn-run-counts">'+p+' / '+t+'</span></div></td><td>'+display(r.environment)+'</td><td>'+(r.executed_by_name?'<span class="tn-who">'+esc(r.executed_by_name)+'</span>':'<span class="tn-muted">Not recorded</span>')+'</td><td>'+dateTime(r.completed_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('eye','data-open-run="'+esc(r.id)+'"','View run '+r.run_number+' details')+'</span></td></tr>';}).join('')||'<tr><td colspan="6" class="tn-empty">No test runs yet. Start testing from Context &amp; scope.</td></tr>';
  $('evidenceBody').innerHTML=state.evidence.map(x=>'<tr><td><span class="tn-case-title">'+esc(String(x.title||x.external_case_id||'Test').replace(/^Test execution\s+\S+\s+-\s+/i,''))+'</span><div><span class="tn-case-id">'+esc(x.external_case_id||'')+'</span></div></td><td>Run #'+esc(x.run_number)+'</td><td><span class="tn-result '+(x.passed?'pass':'fail')+'">'+(x.passed?'Passed':'Failed')+'</span></td><td>'+evidenceButtons(x.evidence_json)+'</td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No stored execution evidence yet.</td></tr>';
 }
 // Run details (eye on Runs & reports): every test case of that run with its result and evidence.
@@ -534,19 +534,18 @@ async function loadInventory(){const project=requireProject();const [inventory,a
 // Project teams (option B): teams belong to the project; each member has one team, chosen in the members table.
 async function loadTeams(){
  const project=requireProject();
- const [teams,assignees]=await Promise.all([api('/api/projects/'+encodeURIComponent(project)+'/project-teams'),api('/api/projects/'+encodeURIComponent(project)+'/team-assignees')]);
+ const [teams,assignees,mt]=await Promise.all([api('/api/projects/'+encodeURIComponent(project)+'/project-teams'),api('/api/projects/'+encodeURIComponent(project)+'/team-assignees'),api('/api/projects/'+encodeURIComponent(project)+'/member-teams').catch(()=>({memberships:[]}))]);
+ state.memberTeams={};for(const m of mt.memberships||[])(state.memberTeams[m.user_id]=state.memberTeams[m.user_id]||[]).push(m);
+ $('teamManageLink').hidden=!state.user||String(state.user.role||'').toUpperCase()!=='MANAGER';
  state.projectTeams=teams.teams||[];
  state.teamOfUser={};for(const m of teams.memberships||[])state.teamOfUser[m.user_id]=m.team_id;
- state.hasTeams=state.projectTeams.length>0;
+ state.hasTeams=state.projectTeams.some(t=>t.member_count>0); // the assignment rule applies once teams have members
  renderTeam();renderTeamList();
  if($('newTaskAssignee'))$('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+(assignees.users||[]).map(u=>'<option value="'+esc(u.id)+'">'+esc(u.display_name)+'</option>').join('');
 }
-// Ready-made team names. Each one is saved in the DB only when its first member is added.
-const DEFAULT_TEAMS=['QA team','Development team','Project management','Observers'];
+// Teams of this project, as saved in the DB (every project has QA team, Development team, Project management, Observers).
 function teamChoices(){
- const saved=(state.projectTeams||[]).map(t=>({id:t.id,name:t.name}));
- const names=new Set(saved.map(t=>t.name.toLowerCase()));
- return saved.concat(DEFAULT_TEAMS.filter(n=>!names.has(n.toLowerCase())).map(n=>({id:'new:'+n,name:n,unsaved:true})));
+ return (state.projectTeams||[]).map(t=>({id:t.id,name:t.name}));
 }
 // Returns a saved team id; creates the ready-made team first if needed.
 async function ensureTeamId(value){
@@ -565,11 +564,13 @@ function renderTeamList(){
  if(!team)return;
  const members=state.context?.members||[],inTeam=members.filter(m=>state.teamOfUser?.[m.user_id]===team.id);
  $('teamMemberCount').textContent=inTeam.length;
- $('teamMemberList').innerHTML=inTeam.map(m=>'<div class="tn-team-member"><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><strong>'+esc(m.display_name)+'</strong></span><span class="tn-role-chip role-'+esc(m.project_role||'')+'">'+esc(ROLE_LABELS[m.project_role]||m.project_role)+'</span>'+actionIcon('remove','data-team-remove-member="'+esc(m.user_id)+'"','Remove '+m.display_name+' from this team')+'</div>').join('')||'<div class="tn-empty">No members in this team yet. Add one below.</div>';
- const others=members.filter(m=>state.teamOfUser?.[m.user_id]!==team.id);
- $('teamAddMemberSelect').innerHTML='<option value="">Choose a project member…</option>'+others.map(m=>{const cur=teams.find(t=>t.id===state.teamOfUser?.[m.user_id]);return '<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+' · '+esc(ROLE_LABELS[m.project_role]||m.project_role)+(cur?' (now in '+esc(cur.name)+')':'')+'</option>';}).join('');
- $('teamAddMemberForm').hidden=!others.length;
+ $('teamMemberList').innerHTML=inTeam.map(m=>'<div class="tn-team-member"><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><strong>'+esc(m.display_name)+'</strong></span><select class="form-select form-select-sm tn-move-team" data-member-role="'+esc(m.user_id)+'" aria-label="Project role of '+esc(m.display_name)+'">'+Object.entries(ROLE_LABELS).map(([k,l])=>'<option value="'+k+'"'+(k===m.project_role?' selected':'')+'>'+esc(l)+'</option>').join('')+'</select>'+'<select class="form-select form-select-sm tn-move-team" data-team-move-member="'+esc(m.user_id)+'" aria-label="Move '+esc(m.display_name)+' to another team"><option value="">Move to…</option>'+teams.filter(t=>t.id!==team.id).map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>').join('')+'</select>'+'</div>').join('')||'<div class="tn-empty">No members in this team yet. Use + Add member, or move someone here from another team.</div>';
 }
+document.addEventListener('change',async e=>{
+ const mv=e.target.closest('[data-team-move-member]');if(!mv||!mv.value)return;
+ try{await api('/api/projects/'+encodeURIComponent(state.projectId)+'/members/'+encodeURIComponent(mv.dataset.teamMoveMember)+'/team',{method:'PUT',body:JSON.stringify({teamId:mv.value})});notice('Moved to '+mv.selectedOptions[0].text+'.','success');await loadTeams();}
+ catch(err){notice(err.message);}
+});
 document.addEventListener('change',e=>{
  if(e.target.id!=='teamPicker')return;
  $('teamAddForm').hidden=true;
@@ -579,22 +580,12 @@ document.addEventListener('click',async e=>{
  const project=state.projectId;
  if(e.target.closest('#teamNewBtn')){$('teamAddForm').hidden=false;$('teamAddForm').elements.name.focus();return;}
  if(e.target.closest('#teamAddCancel')){$('teamAddForm').hidden=true;$('teamAddForm').reset();renderTeamList();return;}
- const rm=e.target.closest('[data-team-remove-member]');
- try{
-  if(rm){await api('/api/projects/'+encodeURIComponent(project)+'/members/'+encodeURIComponent(rm.dataset.teamRemoveMember)+'/team',{method:'PUT',body:JSON.stringify({teamId:null})});notice('Removed from the team.','success');await loadTeams();}
- }catch(err){notice(err.message);}
 });
-document.addEventListener('submit',async e=>{
- if(e.target.id!=='teamAddMemberForm')return;e.preventDefault();
- const userId=$('teamAddMemberSelect').value;if(!userId)return;
- try{const teamId=await ensureTeamId(state.selectedTeamId);state.selectedTeamId=teamId;await api('/api/projects/'+encodeURIComponent(state.projectId)+'/members/'+encodeURIComponent(userId)+'/team',{method:'PUT',body:JSON.stringify({teamId})});notice('Added to the team.','success');await loadTeams();}
- catch(err){notice(err.message);}
-});
-// Members table: role is a label; team is a dropdown for project managers.
+// Members table: role and team are labels; teams are changed in the Teams popup.
 function teamCell(m){
- const teams=state.projectTeams||[],current=state.teamOfUser?.[m.user_id]||'';
- if(state.context?.projectRole==='PROJECT_MANAGER')return '<select class="form-select tn-inline-select" data-member-team="'+esc(m.user_id)+'" aria-label="Team of '+esc(m.display_name)+'"><option value="">No team</option>'+teamChoices().map(t=>'<option value="'+esc(t.id)+'"'+(t.id===current?' selected':'')+'>'+esc(t.name)+'</option>').join('')+'</select>';
- const t=teams.find(x=>x.id===current);return t?'<span class="tn-team-chip">'+esc(t.name)+'</span>':'<span class="tn-muted">'+(state.hasTeams?'No team (cannot be assigned tasks)':'—')+'</span>';
+ const list=state.memberTeams?.[m.user_id]||[];
+ if(!list.length)return '<span class="tn-muted">No team</span>';
+ return list.map(t=>'<span class="tn-team-chip'+(t.assigned?'':' muted')+'" title="'+(t.assigned?'Team assigned to this project':'Company team (not assigned to this project)')+'">'+esc(t.name)+'</span>').join(' ');
 }
 function roleCell(m){
  return '<span class="tn-role-chip role-'+esc(m.project_role||'')+'">'+esc(ROLE_LABELS[m.project_role]||m.project_role||'Member')+'</span>';
@@ -619,12 +610,12 @@ function teamChips(userId){
  return names.map(n=>'<span class="tn-team-chip">'+esc(String(n).replace(/^[A-Z0-9-]+ \/ /,''))+'</span>').join(' ');
 }
 function renderTeam(){
- $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><span><strong>'+esc(m.display_name)+'</strong><span class="tn-member-email">'+esc(m.email)+'</span></span></span></td><td>'+roleCell(m)+'</td><td>'+teamCell(m)+'</td>'+createdCell(m.added_by_name,m.created_at)+'<td><span class="tn-icon-actions">'+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-remove-project-member="'+esc(m.user_id)+'"','Remove project member '+m.display_name):'')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No members.</td></tr>';
+ $('teamBody').innerHTML=state.context.members.map(m=>'<tr><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><span><strong>'+esc(m.display_name)+'</strong><span class="tn-member-email">'+esc(m.email)+'</span></span></span></td><td>'+roleCell(m)+'</td><td>'+teamCell(m)+'</td>'+createdCell(m.added_by_name,m.created_at)+'<td><span class="tn-icon-actions">'+(state.view==='teams'&&state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-remove-project-member="'+esc(m.user_id)+'"','Remove project member '+m.display_name):'')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No members.</td></tr>';
  const list=state.users||state.context.members;
  state.accountRoles={};for(const x of list)state.accountRoles[x.id||x.user_id]=accountProjectRole(x);
  $('memberUser').innerHTML='<option value="">Select user</option>'+list.map(x=>'<option value="'+esc(x.id||x.user_id)+'">'+esc(x.displayName||x.display_name||x.email)+'</option>').join('');
  if($('memberProject'))$('memberProject').innerHTML=(state.projects||[]).map(p=>'<option value="'+esc(p.id)+'"'+(p.id===state.projectId?' selected':'')+'>'+esc(p.name)+'</option>').join('');
- showMemberRole();
+ showMemberRole();fillMemberTeams($('memberProject')?.value||state.projectId);
  if($('newTaskAssignee'))$('newTaskAssignee').innerHTML='<option value="">Unassigned</option>'+state.context.members.map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
  $('workflowDeveloper').innerHTML='<option value="">Manual assignment</option>'+state.context.members.filter(m=>m.project_role==='DEVELOPER').map(m=>'<option value="'+esc(m.user_id)+'">'+esc(m.display_name)+'</option>').join('');
  renderDetailTeam();
@@ -632,7 +623,7 @@ function renderTeam(){
 // Project details page: read-only environments and team, plus the "Start testing this project" box.
 function renderDetailEnvironments(c){
  const box=$('detailEnvironments');if(!box)return;
- if($('detailEnvManage'))$('detailEnvManage').href='/environment-config.html?projectId='+encodeURIComponent(state.projectId||'');
+ if($('detailEnvManage'))$('detailEnvManage').href=projectRoute(state.projectId,'environments');
  box.innerHTML=c.environments.map(e=>'<div class="tn-env-row'+(e.is_active===false?' is-disabled':'')+'"><div><div class="tn-env-name">'+esc(e.name)+(e.is_default?'<span class="tn-chip tn-chip-blue">Default</span>':'')+(e.is_active===false?'<span class="tn-chip">Disabled</span>':'')+'</div><div class="tn-env-meta">'+esc(e.stage_type||'')+' · '+esc(e.base_url)+'</div></div><span class="tn-env-login'+(e.login_required?' is-on':'')+'">'+(e.login_required?'Login ✓'+(e.test_user_count>1?' · '+e.test_user_count+' users':''):'No login')+'</span></div>').join('')||'<div class="tn-muted">No environment configured yet.</div>';
 }
 const ROLE_LABELS={PROJECT_MANAGER:'Project manager',QA:'QA',DEVELOPER:'Developer',VIEWER:'Viewer'};
@@ -840,13 +831,14 @@ function dropZone(zoneId,inputId,kind){
  zone.onclick=()=>{if(zone.getAttribute('aria-disabled')!=='true'&&!needsCategory())input.click();};zone.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&zone.getAttribute('aria-disabled')!=='true'){e.preventDefault();if(!needsCategory())input.click();}};
  for(const event of ['dragenter','dragover'])zone.addEventListener(event,e=>{e.preventDefault();if(zone.getAttribute('aria-disabled')!=='true')zone.classList.add('drag');});
  for(const event of ['dragleave','drop'])zone.addEventListener(event,e=>{e.preventDefault();zone.classList.remove('drag');});
- const picker=()=>$(zoneId==='detailDrop'?'detailCategory':'projectCategory');
+ const picker=()=>$('detailCategory');
  const category=()=>picker()?.value||'';
  // Project documents need a category chosen on purpose before uploading.
  const needsCategory=()=>{if(kind!=='project'||category())return false;notice('Choose a category before uploading documents.','warning');picker()?.focus();picker()?.classList.add('is-invalid');return true;};
  picker()?.addEventListener('change',()=>picker().classList.remove('is-invalid'));
- zone.addEventListener('drop',e=>{if(zone.getAttribute('aria-disabled')!=='true'&&!needsCategory())uploadMany([...e.dataTransfer.files],kind,category());});
- input.onchange=e=>{uploadMany([...e.target.files],kind,category());input.value='';};
+ const done=ok=>{if(ok&&zoneId==='detailDrop')bootstrap.Modal.getInstance($('uploadDocsModal'))?.hide();};
+ zone.addEventListener('drop',async e=>{if(zone.getAttribute('aria-disabled')!=='true'&&!needsCategory())done(await uploadMany([...e.dataTransfer.files],kind,category()));});
+ input.onchange=async e=>{const files=[...e.target.files];input.value='';done(await uploadMany(files,kind,category()));};
 }
 let evidenceObjectUrl='';
 async function previewEvidence(url){
@@ -869,6 +861,26 @@ async function previewEvidence(url){
  view.appendChild(node);bootstrap.Modal.getOrCreateInstance($('evidenceModal')).show();
 }
 document.addEventListener('click',e=>{const d=$('evidenceDialog');if(d?.open&&(e.target.closest('[data-close-evidence]')||e.target===d))d.close();});
+// Attachment preview: images, PDF and text open in the popup; other files offer Download.
+let docPreviewUrl='';
+async function previewDocument(id){
+ const d=(state.context?.documents||[]).find(x=>String(x.id)===String(id));if(!d)return;
+ const url='/api/projects/'+encodeURIComponent(requireProject())+'/documents/'+encodeURIComponent(id)+'/download';
+ $('docPreviewTitle').textContent=d.filename;
+ $('docPreviewMeta').textContent=[(DOC_CATEGORIES[String(d.category||'').toUpperCase()]||d.category||''),Math.ceil(d.file_size/1024)+' KB',d.uploaded_by_name?'Uploaded by '+d.uploaded_by_name:''].filter(Boolean).join(' · ');
+ $('docPreviewDownload').onclick=()=>download(url).catch(err=>notice(err.message));
+ const body=$('docPreviewBody');body.innerHTML='<div class="tn-muted">Loading preview…</div>';
+ $('docPreviewDialog').showModal();
+ const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});
+ if(!r.ok){body.innerHTML='<div class="tn-evidence-missing"><strong>This document is no longer available.</strong><span>The file may have been removed from storage.</span></div>';return;}
+ const blob=await r.blob(),name=d.filename.toLowerCase(),type=blob.type||'';
+ if(docPreviewUrl)URL.revokeObjectURL(docPreviewUrl);docPreviewUrl=URL.createObjectURL(blob);
+ if(/^image\//.test(type)||/\.(png|jpe?g|webp|gif)$/.test(name)){const img=new Image();img.src=docPreviewUrl;img.alt=d.filename;body.replaceChildren(img);}
+ else if(type==='application/pdf'||name.endsWith('.pdf')){const f=document.createElement('iframe');f.className='tn-doc-frame';f.title=d.filename;f.src=URL.createObjectURL(new Blob([blob],{type:'application/pdf'}));body.replaceChildren(f);}
+ else if(/^text\//.test(type)||/\.(txt|csv|md|json|log)$/.test(name)){const pre=document.createElement('pre');pre.className='tn-doc-text';pre.textContent=(await blob.text()).slice(0,200000);body.replaceChildren(pre);}
+ else body.innerHTML='<div class="tn-evidence-missing"><strong>Preview is not available for this file type.</strong><span>Word, Excel, PowerPoint and ZIP files open on your computer. Use Download.</span></div>';
+}
+document.addEventListener('click',e=>{const d=$('docPreviewDialog');if(d?.open&&(e.target.closest('[data-close-doc]')||e.target===d))d.close();});
 async function download(url){
  const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('Evidence or attachment is no longer available ('+r.status+').');
  const blob=await r.blob(),href=URL.createObjectURL(blob),link=document.createElement('a');
@@ -970,17 +982,16 @@ function bind(){
  $('commentForm').onsubmit=async e=>{e.preventDefault();try{const id=state.taskId;await api('/api/work-items/'+encodeURIComponent(id)+'/comments',{method:'POST',body:JSON.stringify({comment:$('commentText').value})});e.target.reset();await openTask(id);notice('Comment added.','success');}catch(err){notice(err.message);}};
  $('retestOne').onclick=async()=>{try{await retest([state.taskId]);closeTask();show('tasks');}catch(e){notice(e.message);}};
  $('retestWithChildren').onclick=async()=>{try{await retest([state.taskId],true);closeTask();show('tasks');}catch(e){notice(e.message);}};
- $('memberForm').onsubmit=async e=>{e.preventDefault();try{const v=formPayload(e.target),project=v.projectId||requireProject(),role=state.accountRoles?.[v.userId]||'QA';await api('/api/projects/'+encodeURIComponent(project)+'/members',{method:'POST',body:JSON.stringify({userId:v.userId,projectRole:role})});bootstrap.Modal.getOrCreateInstance($('assignMemberModal')).hide();await loadWorkspace();notice(project===state.projectId?'Member added to the project.':'Member added to '+((state.projects||[]).find(p=>p.id===project)?.name||'the project')+'.','success');}catch(err){notice(err.message);}};
+ $('memberForm').onsubmit=async e=>{e.preventDefault();try{const v=formPayload(e.target),project=v.projectId||requireProject(),role=v.projectRole||state.accountRoles?.[v.userId]||'QA';await api('/api/projects/'+encodeURIComponent(project)+'/members',{method:'POST',body:JSON.stringify({userId:v.userId,projectRole:role,teamId:v.teamId||null})});if(project===state.projectId)await loadTeams();bootstrap.Modal.getOrCreateInstance($('assignMemberModal')).hide();await loadWorkspace();notice(project===state.projectId?'Member added to the project.':'Member added to '+((state.projects||[]).find(p=>p.id===project)?.name||'the project')+'.','success');}catch(err){notice(err.message);}};
  if($('userForm'))$('userForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/users',{method:'POST',body:JSON.stringify(formPayload(e.target))});e.target.reset();bootstrap.Modal.getOrCreateInstance($('newUserModal')).hide();await fetchDirectory();if(state.view==='users')await loadUsers();notice('User created.','success');}catch(err){notice(err.message);}};
  $('editProfile').onclick=()=>{
  const p=state.context?.project;if(!p)return;const f=$('profileForm');
  for(const [k,v] of Object.entries({name:p.name,referenceNo:p.reference_no,startDate:p.start_date?.slice(0,10),endDate:p.end_date?.slice(0,10),description:p.description,objectives:p.objectives,scopeIn:p.scope_in,scopeOut:p.scope_out,businessRules:p.business_rules,acceptanceCriteria:p.acceptance_criteria,targetUrl:p.target_url,technologyStack:p.technology_stack})){const el=f.elements.namedItem(k);if(el)el.value=v||'';}
- $('profileDocumentList').innerHTML=(state.context?.documents||[]).map(d=>'<div class="tn-kv"><span>'+categoryTag(d.category)+'</span><button class="tn-link" data-doc="'+esc(d.id)+'">'+esc(d.filename)+'</button></div>').join('')||'<span class="tn-muted">No documents attached.</span>';
  bootstrap.Modal.getOrCreateInstance($('profileModal')).show();
  };
  $('profileForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/profile',{method:'PATCH',body:JSON.stringify(formPayload(e.target))});bootstrap.Modal.getOrCreateInstance($('profileModal')).hide();await loadWorkspace();notice('Project profile saved.','success');}catch(err){notice(err.message);}};
- $('attachmentsEditProfile').onclick=()=> $('editProfile').click();
- dropZone('projectDrop','projectFiles','project');dropZone('detailDrop','detailFiles','project');dropZone('taskDrop','taskFiles','task');
+
+ dropZone('detailDrop','detailFiles','project');dropZone('taskDrop','taskFiles','task');
  document.body.addEventListener('click',async e=>{
  const removeMember=e.target.closest('[data-remove-project-member]');if(removeMember){if(!await confirmDanger({title:'Remove project member?',message:'Do you want to remove '+(nameFrom(removeMember,'Remove project member ')||'this member')+' from the project?',note:'They will lose access to this project. Their past work stays in the history.',confirmLabel:'Remove'}))return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/members/'+encodeURIComponent(removeMember.dataset.removeProjectMember),{method:'DELETE'});await loadWorkspace();notice('Member removed.','success');}catch(err){notice(err.message);}return;}
  const editProject=e.target.closest('[data-edit-project]');if(editProject){
@@ -995,6 +1006,7 @@ function bind(){
  }
  const st=e.target.closest('[data-story]');if(st){selectStory(st.dataset.story);return;}
  const t=e.target.closest('[data-task]');if(t){lastTaskTrigger=t;try{await openTask(t.dataset.task);}catch(err){notice(err.message);}return;}
+ const pv=e.target.closest('[data-preview-doc]');if(pv){previewDocument(pv.dataset.previewDoc).catch(err=>notice(err.message));return;}
  const doc=e.target.closest('[data-doc]');if(doc){try{await download('/api/projects/'+encodeURIComponent(requireProject())+'/documents/'+encodeURIComponent(doc.dataset.doc)+'/download');}catch(err){notice(err.message);}return;}
  const file=e.target.closest('[data-task-file]');if(file){try{await download('/api/work-items/'+encodeURIComponent(state.taskId)+'/attachments/'+encodeURIComponent(file.dataset.taskFile)+'/download');}catch(err){notice(err.message);}return;}
  const evidence=e.target.closest('[data-evidence]');if(evidence){try{await previewEvidence(evidence.dataset.evidence);}catch(err){notice(err.message);}return;}
@@ -1052,8 +1064,336 @@ function accountProjectRole(u){
 function showMemberRole(){
  const el=$('memberRoleNote');if(!el)return;
  const r=state.accountRoles?.[$('memberUser')?.value];
- el.textContent=r?'Role: '+(ROLE_LABELS[r]||r)+' (from the user account)':'';
+ if(r&&$('memberRole'))$('memberRole').value=r;
+ el.textContent=r?'From the user account: '+(ROLE_LABELS[r]||r):'';
 }
-document.addEventListener('change',e=>{if(e.target.id==='memberUser')showMemberRole();});
+document.addEventListener('change',e=>{if(e.target.id==='memberUser'){showMemberRole();pickMemberTeam();}if(e.target.id==='memberRole')pickMemberTeam();if(e.target.id==='memberProject')fillMemberTeams(e.target.value);});
+// Add member popup: teams of the chosen project, from the DB.
+async function fillMemberTeams(projectId){
+ const sel=$('memberTeam');if(!sel)return;
+ let teams=state.projectTeams||[];
+ if(projectId&&projectId!==state.projectId){try{teams=(await api('/api/projects/'+encodeURIComponent(projectId)+'/project-teams')).teams||[];}catch{teams=[];}}
+ sel.innerHTML=teams.map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>').join('')||'<option value="">No teams in this project</option>';
+ pickMemberTeam();
+}
+// Pre-select the team that matches the chosen user's role (can be changed).
+const ROLE_TEAM={QA:'QA team',DEVELOPER:'Development team',PROJECT_MANAGER:'Project management',VIEWER:'Observers'};
+function pickMemberTeam(){
+ const sel=$('memberTeam');if(!sel)return;
+ const want=(ROLE_TEAM[$('memberRole')?.value||state.accountRoles?.[$('memberUser')?.value]]||'').toLowerCase();
+ const opt=[...sel.options].find(o=>o.text.toLowerCase()===want);if(opt)sel.value=opt.value;
+}
+// ---- Environments tab: same list as the old Environments page, inside the project ----
+async function loadEnvironments(){
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments');
+ state.environments=d.environments||[];state.envCanManage=!!d.canManage;
+ renderEnvironments();
+}
+function renderEnvironments(){
+ const list=state.environments||[],manage=state.envCanManage;
+ $('envCount').textContent=list.length;
+ $('envCreate').hidden=!manage;
+ $('envRows').innerHTML=list.map(e=>{
+  const name=e.name||'environment';
+  const actions=actionIcon('eye','data-env-open="view" data-env-id="'+esc(e.id)+'"','View environment '+name)
+   +(manage?actionIcon('edit','data-env-open="edit" data-env-id="'+esc(e.id)+'"','Edit environment '+name)
+   +actionIcon(e.is_active?'pause':'play','data-env-toggle="'+esc(e.id)+'"',(e.is_active?'Disable':'Enable')+' environment '+name)
+   +actionIcon('remove','data-env-open="delete" data-env-id="'+esc(e.id)+'"','Delete environment '+name):'');
+  const updatedBy=e.updated_by_name||(Math.abs(new Date(e.updated_at)-new Date(e.created_at))<2000?e.created_by_name:'');
+  return '<tr><td><strong>'+esc(name)+'</strong></td><td>'+esc(e.stage_type||'—')+'</td><td class="tn-env-url">'+esc(e.base_url||'—')+'</td><td><span class="tn-env-status'+(e.is_active?'':' off')+'">'+(e.is_active?'Active':'Disabled')+'</span></td><td>'+Number(e.usage?.total||0)+' reference(s)</td><td>'+(e.is_default?'Yes':'—')+'</td>'+createdCell(e.created_by_name,e.created_at)+updatedCell(updatedBy,e.updated_at||e.created_at)+'<td><span class="tn-icon-actions">'+actions+'</span></td></tr>';
+ }).join('')||'<tr><td colspan="9" class="tn-empty">No environments yet.'+(manage?' Create the first one.':'')+'</td></tr>';
+}
+function envFormUrl(id,mode){
+ const u=new URLSearchParams({projectId:state.projectId||''});if(id)u.set('id',id);if(mode&&mode!=='edit')u.set('mode',mode);
+ return '/environment-form.html?'+u.toString();
+}
+document.addEventListener('click',async e=>{
+ if(e.target.closest('#envCreate')){openCreatePopup(envFormUrl());return;}
+ const open=e.target.closest('[data-env-open]');if(open){openCreatePopup(envFormUrl(open.dataset.envId,open.dataset.envOpen));return;}
+ const t=e.target.closest('[data-env-toggle]');if(!t)return;
+ const env=(state.environments||[]).find(x=>String(x.id)===String(t.dataset.envToggle));if(!env)return;
+ const activate=!env.is_active;
+ if(!await window.TestNexusConfirm({title:(activate?'Enable':'Disable')+' environment?',message:'Do you want to '+(activate?'enable':'disable')+' '+env.name+'?',note:activate?'It becomes available for new testing again.':'It will not be offered for new testing. Past runs are kept.',confirmLabel:activate?'Enable':'Disable'}))return;
+ try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments/'+encodeURIComponent(env.id),{method:'PATCH',body:JSON.stringify({isActive:activate,isDefault:false})});await loadEnvironments();notice('Environment '+(activate?'enabled':'disabled')+'.','success');}
+ catch(err){notice(err.message);}
+});
+// The environment form (in the popup) reports back when it saved or deleted something.
+window.addEventListener('message',async e=>{
+ if(e.origin!==location.origin||e.data?.type!=='tn-env-form')return;
+ $('createDialog').close();$('createFrame').src='about:blank';
+ if(!e.data.changed)return;
+ try{await loadEnvironments();await loadWorkspace();show('environments','none');if(e.data.message)notice(e.data.message,'success');}catch(err){notice(err.message);}
+});
+// ---- Run details page: results, evidence and report of one run ----
+const runPage={data:null,shots:[],shotIndex:0,urls:[]};
+document.addEventListener('click',e=>{
+ const open=e.target.closest('[data-open-run]');if(open){state.runId=open.dataset.openRun;show('run');return;}
+ if(e.target.closest('#runPageBack')){show('executions');return;}
+ const tab=e.target.closest('[data-run-tab]');if(tab){showRunTab(tab.dataset.runTab);return;}
+});
+function showRunTab(name){
+ for(const b of document.querySelectorAll('[data-run-tab]')){const on=b.dataset.runTab===name;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;$('runPanel'+b.dataset.runTab).hidden=!on;}
+ $('runResultFilter').hidden=name==='Report';
+}
+const caseTitle=t=>String(t||'').replace(/^Test execution\s+\S+\s+-\s+/i,'');
+const secs=ms=>ms==null?'—':(Number(ms)/1000).toFixed(1)+' s';
+function evidenceOf(r){const e=r.evidence_json?.evidence||r.evidence_json||{};const ok=u=>typeof u==='string'&&(u.startsWith('/api/artifacts/')||/^\/api\/projects\/[^/]+\/run-evidence\//.test(u));return {shot:ok(e.screenshotUrl)?e.screenshotUrl:'',video:ok(e.videoUrl)?e.videoUrl:''};}
+async function loadRunPage(){
+ if(!state.runId){show('executions','replace');return;}
+ for(const u of runPage.urls)URL.revokeObjectURL(u);runPage.urls=[];
+ $('runResultsBody').innerHTML='<tr><td colspan="6" class="tn-empty">Loading run…</td></tr>';
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(state.runId)+'/details');
+ runPage.data=d;runPdf.runId='';const run=d.run,project=state.context?.project||{};
+ const passed=Number(run.passed||0),failed=Number(run.failed||0),total=Number(run.total||passed+failed),rate=total?Math.round(passed/total*100):0;
+ $('runPageTitle').innerHTML='Run #'+esc(run.run_number)+' <span class="tn-result '+(failed?'fail':'pass')+'">'+(failed?'Failed':'Passed')+'</span>';
+ $('runPageMeta').textContent=[dateTime(run.completed_at),run.environment,run.executed_by_name?'by '+run.executed_by_name:'',run.browser?run.browser.charAt(0).toUpperCase()+run.browser.slice(1):'',run.duration_ms?'took '+secs(run.duration_ms):''].filter(Boolean).join(' · ');
+ const svg=p=>'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">'+p+'</svg>';
+ const kpi=(icon,tone,label,value,extra='')=>'<div class="tn-kpi"><span class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-'+tone+'" aria-hidden="true">'+icon+'</span>'+label+'</span><b>'+value+'</b>'+extra+'</div>';
+ $('runPageKpis').innerHTML=kpi(svg('<path d="M3 12h18M3 6h18M3 18h18"/>'),'violet','Total tests',total)
+  +kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>'),'green','Passed',passed)
+  +kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>'),failed?'orange':'slate','Failed',failed)
+  +kpi(svg('<path d="M20 6 9 17l-5-5"/>'),rate>=90?'green':rate>=70?'amber':'orange','Pass rate',total?rate+'%':'—',total?'<div class="tn-mini-bar" role="img" aria-label="'+rate+' percent passed"><span style="width:'+rate+'%"></span></div>':'');
+ // breadcrumb: Projects › project › Runs & reports › Run #N
+ $('breadcrumb').innerHTML='<a href="/workspace.html#projects">Projects</a><span aria-hidden="true">›</span><a href="'+esc(projectRoute(state.projectId,'details'))+'">'+esc(project.name||'Project')+'</a><span aria-hidden="true">›</span><a href="'+esc(projectRoute(state.projectId,'executions'))+'">Runs &amp; reports</a><span aria-hidden="true">›</span><span aria-current="page">Run #'+esc(run.run_number)+'</span>';
+ runPage.shots=d.results.map(r=>({r,...evidenceOf(r)})).filter(x=>x.shot);
+ $('runCountResults').textContent=d.results.length;$('runCountEvidence').textContent=runPage.shots.length;
+ renderRunResults();renderRunEvidence();renderRunReport();showRunTab('Results');
+}
+function filteredResults(){const f=$('runResultFilter').value;return (runPage.data?.results||[]).filter(r=>!f||(f==='failed'?!r.passed:r.passed));}
+function renderRunResults(){
+ const list=filteredResults();
+ $('runResultsBody').innerHTML=list.map(r=>{
+  const ev=evidenceOf(r),i=runPage.shots.findIndex(x=>x.r===r);
+  const err=!r.passed&&r.error_message?'<details class="tn-run-error"><summary>Why it failed</summary><pre>'+esc(String(r.error_message).slice(0,4000))+'</pre></details>':'';
+  const evid=(ev.shot?actionIcon('image','data-run-shot="'+i+'"','View screenshot of '+r.external_case_id):'')+(ev.video?actionIcon('video','data-evidence="'+esc(ev.video)+'"','View video of '+r.external_case_id):'');
+  return '<tr><td><span class="tn-case-id">'+esc(r.external_case_id||'—')+'</span> '+esc(caseTitle(r.title))+err+'</td><td>'+esc([r.test_category,r.scenario_type].filter(Boolean).map(x=>String(x).charAt(0)+String(x).slice(1).toLowerCase()).join(' · ')||'—')+'</td><td>'+(r.priority?priorityTag(r.priority):'—')+'</td><td><span class="tn-result '+(r.passed?'pass':'fail')+'">'+(r.passed?'Passed':'Failed')+'</span></td><td>'+secs(r.duration_ms)+'</td><td><span class="tn-icon-actions">'+(evid||'<span class="tn-muted">None</span>')+'</span></td></tr>';
+ }).join('')||'<tr><td colspan="6" class="tn-empty">No results match this filter.</td></tr>';
+}
+document.addEventListener('change',e=>{if(e.target.id==='runResultFilter'){renderRunResults();renderRunEvidence();}});
+// Attachments: "Edit project details" opens the same project form as on Context & scope.
+async function authedUrl(url){const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('missing');const u=URL.createObjectURL(await r.blob());runPage.urls.push(u);return u;}
+function renderRunEvidence(){
+ const f=$('runResultFilter').value,cards=runPage.shots.map((x,i)=>({x,i})).filter(({x})=>!f||(f==='failed'?!x.r.passed:x.r.passed));
+ const grid=$('runEvidenceGrid');
+ grid.innerHTML=cards.map(({x,i})=>'<button type="button" class="tn-shot-card" data-run-shot="'+i+'" aria-label="Open screenshot of '+esc(x.r.external_case_id)+'"><span class="tn-shot-thumb" data-thumb="'+i+'"><span class="tn-muted">Loading…</span></span><span class="tn-shot-info"><span><span class="tn-case-id">'+esc(x.r.external_case_id)+'</span><span class="tn-result '+(x.r.passed?'pass':'fail')+'">'+(x.r.passed?'Passed':'Failed')+'</span></span><span class="tn-shot-title">'+esc(caseTitle(x.r.title))+'</span></span></button>').join('')||'<div class="tn-empty">No screenshots were stored for this run.</div>';
+ for(const {x,i} of cards){authedUrl(x.shot).then(u=>{x.url=u;const t=grid.querySelector('[data-thumb="'+i+'"]');if(t){const img=new Image();img.src=u;img.alt='';t.replaceChildren(img);}}).catch(()=>{const t=grid.querySelector('[data-thumb="'+i+'"]');if(t)t.innerHTML='<span class="tn-muted">Not available</span>';});}
+}
+// Evidence viewer: large screenshot with Previous / Next (arrow keys), case details, download, video.
+async function openShot(i){
+ const shots=runPage.shots;if(!shots.length)return;
+ runPage.shotIndex=(i+shots.length)%shots.length;const x=shots[runPage.shotIndex],r=x.r;
+ $('shotViewerTitle').textContent=(r.external_case_id||'')+' · '+caseTitle(r.title);
+ $('shotViewerMeta').innerHTML='<span class="tn-result '+(r.passed?'pass':'fail')+'">'+(r.passed?'Passed':'Failed')+'</span> '+esc([r.priority?String(r.priority).charAt(0).toUpperCase()+String(r.priority).slice(1)+' priority':'',secs(r.duration_ms)].filter(Boolean).join(' · '));
+ $('shotViewerCount').textContent=(runPage.shotIndex+1)+' of '+shots.length;
+ $('shotPrev').hidden=$('shotNext').hidden=shots.length<2;
+ $('shotViewerVideo').hidden=!x.video;$('shotViewerVideo').onclick=async()=>{try{const u=await authedUrl(x.video);const v=document.createElement('video');v.src=u;v.controls=true;v.autoplay=true;$('shotViewerBody').replaceChildren(v);}catch{notice('The video is no longer available.');}};
+ $('shotViewerDownload').onclick=()=>download(x.shot).catch(err=>notice(err.message));
+ const err=$('shotViewerError');err.hidden=r.passed||!r.error_message;err.textContent=r.error_message?String(r.error_message).slice(0,1500):'';
+ const body=$('shotViewerBody');body.innerHTML='<span class="tn-muted">Loading…</span>';
+ if(!$('shotViewer').open)$('shotViewer').showModal();
+ try{const u=x.url||await authedUrl(x.shot);x.url=u;const img=new Image();img.src=u;img.alt='Screenshot of '+(r.external_case_id||'');body.replaceChildren(img);}
+ catch{body.innerHTML='<div class="tn-evidence-missing"><strong>This screenshot is no longer available.</strong><span>Re-run the test to capture a new one.</span></div>';}
+}
+document.addEventListener('click',e=>{
+ const s=e.target.closest('[data-run-shot]');if(s){openShot(Number(s.dataset.runShot));return;}
+ const v=$('shotViewer');if(!v?.open)return;
+ if(e.target.closest('[data-close-shot]')||e.target===v)v.close();
+ else if(e.target.closest('#shotPrev'))openShot(runPage.shotIndex-1);
+ else if(e.target.closest('#shotNext'))openShot(runPage.shotIndex+1);
+});
+document.addEventListener('keydown',e=>{if(!$('shotViewer')?.open)return;if(e.key==='ArrowLeft'){e.preventDefault();openShot(runPage.shotIndex-1);}if(e.key==='ArrowRight'){e.preventDefault();openShot(runPage.shotIndex+1);}});
+// Report tab: an execution report built from the stored results (and the saved execution snapshot).
+function runReportHtml(forPrint){
+ const d=runPage.data;if(!d)return '';const run=d.run,project=state.context?.project||{};
+ const passed=Number(run.passed||0),failed=Number(run.failed||0),total=Number(run.total||passed+failed),rate=total?Math.round(passed/total*100):0;
+ const row=(k,v)=>v?'<tr><th>'+esc(k)+'</th><td>'+esc(v)+'</td></tr>':'';
+ const failedList=d.results.filter(r=>!r.passed);
+ return '<div class="tn-report-doc">'
+  +'<div class="tn-report-title"><div><div class="tn-report-eyebrow">Execution report</div><h3>'+esc(project.name||'Project')+' · Run #'+esc(run.run_number)+'</h3></div><span class="tn-result '+(failed?'fail':'pass')+'">'+(failed?'Failed':'Passed')+'</span></div>'
+  +'<table class="tn-report-facts">'+row('Completed',dateTime(run.completed_at))+row('Environment',[run.environment,run.target_url].filter(Boolean).join(' · '))+row('Story',run.story_ref?run.story_ref+' · '+(run.story_title||''):'Whole project')+row('Executed by',run.executed_by_name||'')+row('Browser',run.browser||'')+row('Duration',run.duration_ms?secs(run.duration_ms):'')+row('Session',run.session_id||'')+'</table>'
+  +'<div class="tn-report-stats"><div><b>'+total+'</b><span>Total</span></div><div class="ok"><b>'+passed+'</b><span>Passed</span></div><div class="bad"><b>'+failed+'</b><span>Failed</span></div><div><b>'+(total?rate+'%':'—')+'</b><span>Pass rate</span></div></div>'
+  +'<h4>Results</h4><table class="tn-report-table"><thead><tr><th>ID</th><th>Test case</th><th>Priority</th><th>Result</th><th>Duration</th></tr></thead><tbody>'+d.results.map(r=>'<tr><td>'+esc(r.external_case_id||'')+'</td><td>'+esc(caseTitle(r.title))+'</td><td>'+esc(r.priority?String(r.priority).charAt(0).toUpperCase()+String(r.priority).slice(1):'—')+'</td><td class="'+(r.passed?'ok':'bad')+'">'+(r.passed?'Passed':'Failed')+'</td><td>'+secs(r.duration_ms)+'</td></tr>').join('')+'</tbody></table>'
+  +(failedList.length?'<h4>Failures</h4>'+failedList.map(r=>{const x=runPage.shots.find(s=>s.r===r);return '<div class="tn-report-failure"><div><strong>'+esc(r.external_case_id||'')+' · '+esc(caseTitle(r.title))+'</strong>'+(r.error_message?'<pre>'+esc(String(r.error_message).slice(0,2500))+'</pre>':'<p>No error message was recorded.</p>')+'</div>'+(x?.url?'<img src="'+x.url+'" alt="Screenshot of '+esc(r.external_case_id||'')+'">':'')+'</div>';}).join(''):'<h4>Failures</h4><p>No failures in this run.</p>')
+  +'<p class="tn-report-foot">'+(d.report?'Saved execution record by '+esc(d.report.recorded_by_name||'the system')+' on '+esc(dateTime(d.report.created_at))+'.':'Built from the stored run results.')+' Generated by TestNexus on '+esc(dateTime(new Date()))+'.</p>'
+  +'</div>';
+}
+function renderRunReport(){
+ const d=runPage.data;
+ $('runReportBody').innerHTML='<div class="tn-report-actions"><button type="button" class="btn btn-outline-primary tn-btn" data-run-pdf>View PDF</button><button type="button" class="btn btn-outline-primary tn-btn" data-run-pdf-download>Download PDF</button>'+(d?.report?.has_html?'<button type="button" class="btn btn-outline-primary tn-btn" data-run-html>Open saved HTML report</button>':'')+'<button type="button" class="btn btn-outline-primary tn-btn" data-run-ai>AI analysis report</button></div><div class="tn-muted small" id="runReportNote"></div>'+runReportHtml();
+}
+// Report as a real PDF: built in the browser, shown in the PDF viewer popup (zoom, pages, print) and downloadable.
+let html2pdfReady=null,runPdf={url:'',blob:null,runId:''};
+function loadHtml2pdf(){
+ if(window.html2pdf)return Promise.resolve();
+ return html2pdfReady||(html2pdfReady=new Promise((ok,bad)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';s.onload=ok;s.onerror=()=>{html2pdfReady=null;bad(Error('The PDF tool could not be loaded. Check the internet connection and try again.'));};document.head.appendChild(s);}));
+}
+async function buildRunPdf(){
+ if(runPdf.blob&&runPdf.runId===state.runId)return runPdf.blob;
+ await loadHtml2pdf();
+ for(const x of runPage.shots.filter(s=>!s.r.passed&&!s.url)){try{x.url=await authedUrl(x.shot);}catch{}}
+ const box=document.createElement('div');box.className='tn-pdf-render';box.innerHTML=runReportHtml(true);box.firstElementChild.classList.add('tn-pdf');document.body.appendChild(box);
+ try{
+  const blob=await window.html2pdf().set({margin:[10,10,12,10],image:{type:'jpeg',quality:0.95},html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},pagebreak:{mode:['css','legacy'],avoid:['.tn-report-failure','.tn-report-stats','tr']}}).from(box.firstElementChild).outputPdf('blob');
+  if(runPdf.url)URL.revokeObjectURL(runPdf.url);
+  runPdf={blob,url:URL.createObjectURL(blob),runId:state.runId};
+  return blob;
+ }finally{box.remove();}
+}
+const runPdfName=()=>'Run-'+(runPage.data?.run?.run_number||'')+'-'+String(state.context?.project?.reference_no||'report').replace(/[^\w-]+/g,'_')+'.pdf';
+async function viewRunPdf(){
+ const run=runPage.data?.run;if(!run)return;
+ $('pdfViewerTitle').textContent='Execution report · Run #'+run.run_number;
+ $('pdfViewerMeta').textContent=[state.context?.project?.name,dateTime(run.completed_at)].filter(Boolean).join(' · ');
+ $('pdfViewerDownload').disabled=true;$('pdfViewerBody').innerHTML='<span>Preparing the PDF…</span>';
+ if(!$('pdfViewer').open)$('pdfViewer').showModal();
+ try{await buildRunPdf();}catch(err){$('pdfViewerBody').innerHTML='<span>'+esc(err.message)+'</span>';return;}
+ const f=document.createElement('iframe');f.title='Execution report PDF';f.src=runPdf.url;$('pdfViewerBody').replaceChildren(f);
+ $('pdfViewerDownload').disabled=false;
+}
+async function downloadRunPdf(){
+ await buildRunPdf();
+ const a=document.createElement('a');a.href=runPdf.url;a.download=runPdfName();document.body.appendChild(a);a.click();a.remove();
+}
+document.addEventListener('click',e=>{
+ if(e.target.closest('#pdfViewerDownload')){downloadRunPdf().catch(err=>notice(err.message));return;}
+ const d=$('pdfViewer');if(d?.open&&(e.target.closest('[data-close-pdf]')||e.target===d))d.close();
+});
+document.addEventListener('click',async e=>{
+ if(e.target.closest('[data-run-pdf]')){viewRunPdf().catch(err=>notice(err.message));return;}
+ if(e.target.closest('[data-run-pdf-download]')){downloadRunPdf().catch(err=>notice(err.message));return;}
+ if(e.target.closest('[data-run-ai]')){try{await download('/api/reports/'+encodeURIComponent(runPage.data.run.session_id));}catch{$('runReportNote').textContent='No AI analysis report was generated for this run. Use "Generate AI Analysis Report" on the testing page after a run to create one.';}return;}
+ if(e.target.closest('[data-run-html]')){try{const r=await fetch('/api/projects/'+encodeURIComponent(requireProject())+'/report-snapshots/'+encodeURIComponent(runPage.data.report.id)+'?format=html',{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error();const f=document.createElement('iframe');f.setAttribute('sandbox','');f.className='tn-doc-frame';f.srcdoc=await r.text();$('runReportBody').append(f);}catch{$('runReportNote').textContent='The saved HTML report is not available.';}}
+});
+// ---- Teams page: company-wide teams ----
+// List like Stories (+ Create, Created, Last updated). Each row: Add members, Assign project, Edit, Delete.
+const ct={teams:[],team:null,detailId:''};
+async function loadCompanyTeams(){
+ const [d,u]=await Promise.all([api('/api/company-teams'),state.users?Promise.resolve(null):api('/api/users').catch(()=>null)]);
+ if(u)state.users=u.users||[];
+ ct.teams=d.teams||[];renderCompanyTeams();
+ if(ct.detailId){if($('ctMembersModal').classList.contains('show'))renderTeamMembers();if($('ctProjectsModal').classList.contains('show'))renderTeamProjects();}
+}
+function renderCompanyTeams(){
+ $('ctCount').textContent=ct.teams.length;
+ $('ctRows').innerHTML=ct.teams.map(t=>{
+  const faces=t.members.slice(0,4).map((m,i)=>'<span class="tn-avatar tn-avatar-'+(i%4)+'" title="'+esc(m.display_name)+'">'+esc(initialsOf(m.display_name||m.email))+'</span>').join('');
+  const projects=t.projects.map(p=>'<span class="tn-team-chip">'+esc(p.name)+'</span>').join(' ')||'<span class="tn-muted">Not assigned</span>';
+  return '<tr><td><strong>'+esc(t.name)+'</strong>'+(t.description?'<div class="tn-muted small">'+esc(t.description)+'</div>':'')+'</td><td>'+(t.members.length?'<span class="tn-ct-faces">'+faces+'</span>':'')+'<span class="tn-muted">'+(t.members.length?t.members.length+' member'+(t.members.length===1?'':'s'):'No members yet')+'</span></td><td>'+projects+'</td>'+createdCell(t.created_by_name,t.created_at)+updatedCell(t.updated_by_name,t.updated_at||t.created_at,t.created_by_name,t.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('userPlus','data-ct-members="'+esc(t.id)+'"','Add members to '+t.name)+actionIcon('assign','data-ct-projects="'+esc(t.id)+'"','Assign '+t.name+' to a project')+actionIcon('edit','data-ct-edit="'+esc(t.id)+'"','Edit team '+t.name)+actionIcon('remove','data-ct-delete="'+esc(t.id)+'"','Delete team '+t.name)+'</span></td></tr>';
+ }).join('')||'<tr><td colspan="6" class="tn-empty">No teams yet. Use + Create to add one.</td></tr>';
+}
+// Create / edit: team name and description
+function openTeamForm(team){
+ ct.team=team||null;
+ $('ctModalTitle').textContent=team?'Edit team':'Create team';
+ $('ctModalSub').textContent=team?'Change the team name or description.':'Give the team a name. Then add its members and assign it to projects.';
+ $('ctSave').textContent=team?'Save changes':'Create team';
+ $('ctName').value=team?.name||'';$('ctDesc').value=team?.description||'';
+ bootstrap.Modal.getOrCreateInstance($('ctModal')).show();
+}
+const ACCOUNT_ROLE_NAMES={DEV:'Developer',QA:'QA',MANAGER:'Manager'};
+const detailTeam=()=>ct.teams.find(x=>String(x.id)===ct.detailId);
+// Add members popup
+function renderTeamMembers(){
+ const t=detailTeam();if(!t)return;
+ $('ctMembersTitle').textContent='Add members · '+t.name;
+ $('ctMembersCount').textContent=t.members.length;
+ const inTeam=new Set(t.members.map(m=>String(m.id)));
+ const people=(state.users||[]).filter(u=>u.isActive!==false&&!inTeam.has(String(u.id)));
+ $('ctAddMemberSelect').innerHTML='<option value="">Choose a user…</option>'+people.map(u=>'<option value="'+esc(u.id)+'">'+esc(u.displayName||u.email)+' · '+esc(u.email||'')+'</option>').join('');
+ $('ctAddMemberForm').hidden=!people.length;
+ $('ctMembersBody').innerHTML=t.members.map(m=>'<tr data-search="'+esc(((m.display_name||'')+' '+(m.email||'')).toLowerCase())+'"><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(m.display_name||m.email))+'</span><span><strong>'+esc(m.display_name)+'</strong><span class="tn-member-email">'+esc(ACCOUNT_ROLE_NAMES[String(m.role||'').toUpperCase()]||m.role||'')+'</span></span></span></td><td>'+esc(m.email||'')+'</td>'+createdCell(m.added_by_name,m.added_at)+'<td><span class="tn-icon-actions">'+actionIcon('remove','data-ct-remove-member="'+esc(m.id)+'"','Remove '+m.display_name+' from '+t.name)+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No members yet. Choose a user above and click + Add.</td></tr>';
+}
+// Assign project popup
+function renderTeamProjects(){
+ const t=detailTeam();if(!t)return;
+ $('ctProjectsTitle').textContent='Assign project · '+t.name;
+ $('ctProjectsCount').textContent=t.projects.length;
+ const assigned=new Set(t.projects.map(p=>String(p.id)));
+ const open=(state.projects||[]).filter(p=>!assigned.has(String(p.id)));
+ $('ctAssignSelect').innerHTML='<option value="">Choose a project…</option>'+open.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+(p.reference_no?' · '+esc(p.reference_no):'')+'</option>').join('');
+ $('ctAssignForm').hidden=!open.length;
+ $('ctProjectsBody').innerHTML=t.projects.map(p=>'<tr data-search="'+esc(((p.name||'')+' '+(p.reference_no||'')).toLowerCase())+'"><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.reference_no||'—')+'</td>'+createdCell(p.assigned_by_name,p.assigned_at)+'<td><span class="tn-icon-actions">'+actionIcon('remove','data-ct-unassign="'+esc(p.id)+'"','Unassign '+t.name+' from '+p.name)+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">Not assigned to any project yet. Choose a project above and click + Add.</td></tr>';
+}
+async function saveTeamLists(t,memberIds,projectIds,message){
+ await api('/api/company-teams/'+encodeURIComponent(t.id),{method:'PUT',body:JSON.stringify({name:t.name,description:t.description||'',memberIds,projectIds})});
+ notice(message,'success');await loadCompanyTeams();
+}
+function openTeamPopup(kind,id){
+ ct.detailId=String(id);
+ if(kind==='members'){renderTeamMembers();bootstrap.Modal.getOrCreateInstance($('ctMembersModal')).show();}
+ else{renderTeamProjects();bootstrap.Modal.getOrCreateInstance($('ctProjectsModal')).show();}
+}
+document.addEventListener('click',async e=>{
+ if(e.target.closest('#ctCreate')){openTeamForm();return;}
+ const mem=e.target.closest('[data-ct-members]');if(mem){openTeamPopup('members',mem.dataset.ctMembers);return;}
+ const prj=e.target.closest('[data-ct-projects]');if(prj){openTeamPopup('projects',prj.dataset.ctProjects);return;}
+ const ed=e.target.closest('[data-ct-edit]');if(ed){openTeamForm(ct.teams.find(x=>String(x.id)===String(ed.dataset.ctEdit)));return;}
+ const rm=e.target.closest('[data-ct-remove-member]'),un=e.target.closest('[data-ct-unassign]');
+ if(rm||un){
+  const t=detailTeam();if(!t)return;
+  try{
+   if(rm){const who=t.members.find(m=>String(m.id)===String(rm.dataset.ctRemoveMember));
+    if(!await window.TestNexusConfirm({title:'Remove member?',message:'Remove '+(who?.display_name||'this person')+' from '+t.name+'?',note:t.projects.length?'They also leave the team\'s projects, unless another assigned team or a direct membership keeps them there.':'The team is not assigned to any project yet.',confirmLabel:'Remove'}))return;
+    await saveTeamLists(t,t.members.map(m=>String(m.id)).filter(x=>x!==String(rm.dataset.ctRemoveMember)),t.projects.map(p=>String(p.id)),'Member removed from the team.');}
+   else{const p=t.projects.find(x=>String(x.id)===String(un.dataset.ctUnassign));
+    if(!await window.TestNexusConfirm({title:'Unassign project?',message:'Unassign '+t.name+' from '+(p?.name||'this project')+'?',note:'Members who are on that project only through this team will leave it.',confirmLabel:'Unassign'}))return;
+    await saveTeamLists(t,t.members.map(m=>String(m.id)),t.projects.map(x=>String(x.id)).filter(x=>x!==String(un.dataset.ctUnassign)),'Team unassigned from the project.');}
+  }catch(err){notice(err.message);}
+  return;
+ }
+ const del=e.target.closest('[data-ct-delete]');if(!del)return;
+ const t=ct.teams.find(x=>String(x.id)===String(del.dataset.ctDelete));if(!t)return;
+ if(!await window.TestNexusConfirm({title:'Delete team?',message:'Do you want to delete the team "'+t.name+'"?',note:t.projects.length?'It is assigned to '+t.projects.length+' project(s). People who joined those projects only through this team will be removed from them.':'It is not assigned to any project.',confirmLabel:'Delete team'}))return;
+ try{await api('/api/company-teams/'+encodeURIComponent(t.id),{method:'DELETE'});notice('Team deleted.','success');await loadCompanyTeams();}catch(err){notice(err.message);}
+});
+document.addEventListener('submit',async e=>{
+ const id=e.target.id;if(!['ctForm','ctAddMemberForm','ctAssignForm'].includes(id))return;e.preventDefault();
+ try{
+  if(id==='ctForm'){
+   const name=$('ctName').value.trim(),description=$('ctDesc').value.trim();
+   if(ct.team){await api('/api/company-teams/'+encodeURIComponent(ct.team.id),{method:'PUT',body:JSON.stringify({name,description,memberIds:ct.team.members.map(m=>String(m.id)),projectIds:ct.team.projects.map(p=>String(p.id))})});bootstrap.Modal.getInstance($('ctModal'))?.hide();notice('Team saved.','success');await loadCompanyTeams();return;}
+   await api('/api/company-teams',{method:'POST',body:JSON.stringify({name,description})});
+   bootstrap.Modal.getInstance($('ctModal'))?.hide();notice('Team created. Use the row buttons to add members and assign projects.','success');
+   await loadCompanyTeams();return;
+  }
+  const t=detailTeam();if(!t)return;
+  if(id==='ctAddMemberForm'){const v=$('ctAddMemberSelect').value;if(!v){notice('Choose a user from the list first.','warning');return;}await saveTeamLists(t,[...t.members.map(m=>String(m.id)),v],t.projects.map(p=>String(p.id)),'Member added to the team.');}
+  else{const v=$('ctAssignSelect').value;if(!v){notice('Choose a project from the list first.','warning');return;}await saveTeamLists(t,t.members.map(m=>String(m.id)),[...t.projects.map(p=>String(p.id)),v],'Team assigned to the project. Its members joined.');}
+ }catch(err){notice(err.message);}
+});
+// Searchable dropdown: one box; type to filter, pick from the list. The hidden select keeps the chosen value.
+function makeCombo(selectId,placeholder){
+ const sel=$(selectId);if(!sel||sel.dataset.combo)return;sel.dataset.combo='1';sel.hidden=true;sel.removeAttribute('required');
+ const wrap=document.createElement('div');wrap.className='tn-combo';
+ const input=document.createElement('input');input.type='text';input.className='form-control tn-combo-input';input.placeholder=placeholder;input.autocomplete='off';
+ input.setAttribute('role','combobox');input.setAttribute('aria-expanded','false');input.setAttribute('aria-label',sel.getAttribute('aria-label')||placeholder);
+ const list=document.createElement('div');list.className='tn-combo-list';list.setAttribute('role','listbox');list.hidden=true;
+ sel.before(wrap);wrap.append(input,list,sel);
+ let active=-1;
+ const items=()=>[...sel.options].filter(o=>o.value);
+ const close=()=>{list.hidden=true;input.setAttribute('aria-expanded','false');active=-1;};
+ const pick=o=>{sel.value=o.value;input.value=o.textContent;close();};
+ const draw=()=>{
+  const q=input.value.trim().toLowerCase(),found=items().filter(o=>!q||o.textContent.toLowerCase().includes(q));
+  list.innerHTML=found.map((o,i)=>'<div class="tn-combo-item'+(i===active?' active':'')+'" role="option" data-value="'+esc(o.value)+'">'+esc(o.textContent)+'</div>').join('')||'<div class="tn-combo-empty">No matches</div>';
+  list.hidden=false;input.setAttribute('aria-expanded','true');
+ };
+ input.addEventListener('focus',()=>{active=-1;draw();});
+ input.addEventListener('click',()=>{if(list.hidden){active=-1;draw();}});
+ input.addEventListener('input',()=>{sel.value='';active=-1;draw();});
+ input.addEventListener('keydown',e=>{
+  const rows=[...list.querySelectorAll('.tn-combo-item')];
+  if(e.key==='ArrowDown'){e.preventDefault();if(list.hidden)draw();active=Math.min(active+1,rows.length-1);draw();}
+  else if(e.key==='ArrowUp'){e.preventDefault();active=Math.max(active-1,0);draw();}
+  else if(e.key==='Enter'&&!list.hidden&&active>=0){e.preventDefault();const o=items().find(x=>x.value===rows[active]?.dataset.value);if(o)pick(o);}
+  else if(e.key==='Escape')close();
+ });
+ list.addEventListener('mousedown',e=>{const r=e.target.closest('.tn-combo-item');if(!r)return;e.preventDefault();const o=items().find(x=>x.value===r.dataset.value);if(o)pick(o);});
+ input.addEventListener('blur',()=>setTimeout(close,120));
+ // when the options are rebuilt (after Add), clear the box
+ new MutationObserver(()=>{input.value='';sel.value='';close();}).observe(sel,{childList:true});
+}
+makeCombo('ctAddMemberSelect','Search users by name or email');
+makeCombo('ctAssignSelect','Search projects');
 initialize();
 })();

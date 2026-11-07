@@ -633,7 +633,7 @@ router.delete('/api/projects/:projectId/teams/:teamId',requireAuth,async(req,res
 }catch(e){respond(res,e);}});
 router.get('/api/projects/:projectId/team-assignees',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);
- const r=await db.query(`select distinct u.id,u.display_name,u.email,pm.project_role from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and u.is_active=true and (exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=u.id) or not exists(select 1 from project_teams where project_id=$1)) order by u.display_name`,[req.params.projectId]);
+ const r=await db.query(`select distinct u.id,u.display_name,u.email,pm.project_role from project_members pm join users u on u.id=pm.user_id where pm.project_id=$1 and u.is_active=true and (exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=u.id) or not exists(select 1 from project_teams pt0 join team_members tm0 on tm0.team_id=pt0.team_id join project_members pm0 on pm0.project_id=pt0.project_id and pm0.user_id=tm0.user_id where pt0.project_id=$1)) order by u.display_name`,[req.params.projectId]);
  res.json({ok:true,users:r.rows});
 }catch(e){respond(res,e);}});
 router.get('/api/projects/:projectId/test-inventory',requireAuth,async(req,res)=>{try{
@@ -656,6 +656,17 @@ router.get('/api/projects/:projectId/report-snapshots',requireAuth,async(req,res
  if(kind&&!['REVIEWED_CASE','EXECUTION','AI_LEARNING'].includes(kind))throw fail(400,'Invalid report kind.');
  const r=await db.query("select id,session_id,run_id,external_case_id,report_kind,revision,report_json,recorded_by,created_at from test_report_snapshots where project_id=$1 and ($2::text='' or report_kind=$2) order by created_at desc limit 250",[req.params.projectId,kind]);
  res.json({ok:true,reports:r.rows});
+}catch(e){respond(res,e);}});
+// Run details page: the run, every test result (failed first) and its saved execution report.
+router.get('/api/projects/:projectId/runs/:runId/details',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ if(!id(req.params.runId))throw fail(400,'Invalid run ID.');
+ const run=await db.query('select r.id,r.session_id,r.run_number,r.total,r.passed,r.failed,r.duration_ms,r.browser,r.completed_at,r.summary_json,t.environment,t.target_url,ps.reference_no story_ref,ps.title story_title,u.display_name executed_by_name from test_runs r left join test_sessions t on t.id=r.session_id left join project_stories ps on ps.id=t.project_story_id left join users u on u.id=r.executed_by where r.project_id=$1 and r.id=$2',[req.params.projectId,req.params.runId]);
+ if(!run.rowCount)throw fail(404,'Run not found.');
+ const results=await db.query('select external_case_id,title,passed,duration_ms,error_message,evidence_json,test_category,scenario_type,priority,severity from test_results where run_id=$1 order by passed asc,external_case_id',[req.params.runId]);
+ const report=await db.query("select s.id,s.created_at,(s.report_html is not null) has_html,u.display_name recorded_by_name from test_report_snapshots s left join users u on u.id=s.recorded_by where s.project_id=$1 and s.run_id=$2 and s.report_kind='EXECUTION' order by s.created_at desc limit 1",[req.params.projectId,req.params.runId]);
+ const r=run.rows[0],summary=r.summary_json||{};delete r.summary_json;
+ res.json({ok:true,run:{...r,execution_mode:summary.executionMode||null,skipped:Number(summary.skipped||0)},results:results.rows,report:report.rows[0]||null});
 }catch(e){respond(res,e);}});
 router.get('/api/projects/:projectId/report-snapshots/:reportId',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);

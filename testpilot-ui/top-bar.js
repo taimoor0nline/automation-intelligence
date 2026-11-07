@@ -1,6 +1,6 @@
 // Shared top bar for the Start Testing, REST API, Reports and Project Work pages.
 // Main bar (same on every page): TN TestNexus | Home  Projects  Users (managers) | Profile ▾
-// Page strip below it. Web testing: Projects › project › Start testing ... [Source code ▾] [Defects]. REST/other: [Project ▾] Start Testing ▾
+// Page strip below it. Web testing: Projects › project › Start testing ... (project name in the centre) ... [Source code ▾]. REST/other: [Project ▾] Start Testing ▾
 // Existing actions (Defects, Users, Platform setup) reuse the original buttons/popups on the Start Testing page.
 (function () {
   if (window.__testNexusTopBar) return;
@@ -76,7 +76,8 @@
       #tnProfile .tn-panel .status{display:flex;margin:4px 6px;padding:7px 9px;border-radius:8px;border:1px solid #e2e8f0!important;background:#f8fafc!important;color:#475569!important;font-size:11px}
       #tnProfile .tn-signout{color:#b91c1c}
       #tnProfile .tn-signout:hover{background:#fee2e2;color:#991b1b}
-      #tnSubbar.tn-strip{align-items:center;justify-content:space-between;min-height:46px;gap:12px}
+      #tnSubbar.tn-strip{align-items:center;justify-content:space-between;min-height:46px;gap:12px;position:relative}
+      #tnProjectTitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dc2626;font-size:16px;font-weight:700;pointer-events:none}
       #tnSubbar.tn-strip .testing-crumb{margin:0!important;font-size:13px}
       .tn-strip-tools{display:flex;align-items:center;gap:8px;margin-left:auto}
       .tn-strip #tnProject{padding-right:0;margin-right:0;border-right:0}
@@ -256,34 +257,19 @@
     main.append(
       mainLink('Home', '/workspace.html#overview'),
       mainLink('Projects', '/workspace.html#projects', page !== 'guide'),
-      ...(isManager ? [mainLink('Users', '/workspace.html#users')] : []),
+      ...(isManager ? [mainLink('Administration', '/workspace.html#users'), mainLink('Teams', '/workspace.html#teams')] : []),
     );
 
     // Page toolbar below the bar: this page's own tools.
     const sub = el('nav');
     sub.id = 'tnSubbar';
     sub.setAttribute('aria-label', 'Page tools');
-    // On the web testing page the strip is: breadcrumb (project) ... Source code + Defects. Elsewhere: Start Testing switch.
+    // On the web testing page the strip is: breadcrumb · project name (centre) · Source code. Elsewhere: Start Testing switch.
     if (canTest && page !== 'web') {
       sub.appendChild(dropdown('Start Testing', [
         { label: 'Web UI testing', current: page === 'web', onClick: () => go(TESTING_PAGE) },
         { label: 'REST API testing', current: page === 'rest', onClick: () => go('/rest.html') },
       ], { active: testing }));
-    }
-    // Defects from failed runs (opens the defect popup on the testing page).
-    if (page === 'web' && canTest) {
-      // Switch to REST API testing (the Web UI page is this one).
-      const rest = el('button', 'tn-strip-btn', 'REST API');
-      rest.type = 'button';
-      rest.title = 'Test REST APIs (Swagger/OpenAPI or manual endpoints)';
-      rest.onclick = () => go('/rest.html');
-      sub.appendChild(rest);
-    }
-    if (page === 'web') {
-      const defects = el('button', 'tn-strip-btn', 'Defects');
-      defects.type = 'button';
-      defects.onclick = () => openOnTestingPage('platformDefects', '#defects');
-      sub.appendChild(defects);
     }
 
     // Profile: avatar + name ▾ (same as the other pages), with connection status on the testing page.
