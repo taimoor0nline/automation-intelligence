@@ -4,6 +4,8 @@
 
   const WEB_EXCLUDED_CATEGORIES = new Set(['API', 'CUSTOM']);
   const WEB_EXCLUDED_SECURITY_AREAS = new Set(['API_SECURITY', 'CUSTOM']);
+  // Not offered anywhere (generation, editor, filters).
+  const GENERATION_EXCLUDED_CATEGORIES = new Set([...WEB_EXCLUDED_CATEGORIES, 'SECURITY', 'ACCESSIBILITY', 'INTEGRATION']);
 
   function pretty(value) { return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
   function sanitizeStoredArray(key, excludedValues) {
@@ -17,7 +19,7 @@
 
   function hideGenerationExcludedOptions() {
     document.querySelectorAll('#generationCategoryMenu input[data-test-category]').forEach((input) => {
-      if (!WEB_EXCLUDED_CATEGORIES.has(String(input.value).toUpperCase())) return;
+      if (!GENERATION_EXCLUDED_CATEGORIES.has(String(input.value).toUpperCase())) return;
       input.checked = false;
       input.closest('.generation-category-option')?.remove();
     });
@@ -29,8 +31,10 @@
     document.getElementById('generationCustomCategories')?.remove();
   }
 
+  // Security, Accessibility and Integration are not used any more: removed from every category dropdown
+  // (generation, the test case editor and the review filters). Old cases keep their saved category in the database.
   function removeReviewExcludedOptions() {
-    for (const value of WEB_EXCLUDED_CATEGORIES) {
+    for (const value of GENERATION_EXCLUDED_CATEGORIES) {
       document.querySelector(`#reviewCategory option[value="${value}"]`)?.remove();
       document.querySelector(`#editTestCategory option[value="${value}"]`)?.remove();
     }
@@ -50,7 +54,7 @@
     const selectAll = document.getElementById('generationCategorySelectAll');
     if (!menu || !button || !selectAll) return;
     const visibleInputs = [...menu.querySelectorAll('input[data-test-category]:not(:disabled)')]
-      .filter((input) => !WEB_EXCLUDED_CATEGORIES.has(String(input.value).toUpperCase()));
+      .filter((input) => !GENERATION_EXCLUDED_CATEGORIES.has(String(input.value).toUpperCase()));
     const selected = visibleInputs.filter((input) => input.checked);
     const all = visibleInputs.length > 0 && selected.length === visibleInputs.length;
     selectAll.checked = all; selectAll.indeterminate = !all && selected.length > 0;
@@ -77,7 +81,7 @@
 
   function enforceWebOnlyUi() { hideGenerationExcludedOptions(); removeReviewExcludedOptions(); syncCategorySummary(); syncSecuritySummary(); }
 
-  sanitizeStoredArray('aiTestPilotGenerationCategories', WEB_EXCLUDED_CATEGORIES);
+  sanitizeStoredArray('aiTestPilotGenerationCategories', GENERATION_EXCLUDED_CATEGORIES);
   sanitizeStoredArray('aiTestPilotSecuritySubcategories', WEB_EXCLUDED_SECURITY_AREAS);
   try { sessionStorage.removeItem('testNexusCustomCategories'); } catch {}
 
@@ -90,7 +94,7 @@
       if (isGenerationRequest && typeof init?.body === 'string') {
         const body = JSON.parse(init.body);
         if (Array.isArray(body.selectedTestCategories)) {
-          body.selectedTestCategories = body.selectedTestCategories.filter((value) => !WEB_EXCLUDED_CATEGORIES.has(String(value).toUpperCase()));
+          body.selectedTestCategories = body.selectedTestCategories.filter((value) => !GENERATION_EXCLUDED_CATEGORIES.has(String(value).toUpperCase()));
         }
         if (Array.isArray(body.selectedSecuritySubcategories)) {
           body.selectedSecuritySubcategories = body.selectedSecuritySubcategories.filter((value) => !WEB_EXCLUDED_SECURITY_AREAS.has(String(value).toUpperCase()));
@@ -110,5 +114,7 @@
   });
 
   function start() { [0,40,100,220,500,900,1500].forEach((delay) => setTimeout(enforceWebOnlyUi, delay)); }
+  // The test case editor builds its Category dropdown when it opens, so clean up after clicks too.
+  document.addEventListener('click', () => setTimeout(enforceWebOnlyUi, 60));
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
 })();

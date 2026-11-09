@@ -87,7 +87,8 @@ function collectArtifacts(tests, forcedTeardown) {
   const videoFiles = forcedTeardown ? [] : findFiles(VIDEO_DIR, ".mp4");
   const sharedVideo = videoFiles.length ? path.resolve(videoFiles[0]) : null;
   const videosByTestCase = {};
-  for (const test of tests) if (test.fail && test.testCaseId && sharedVideo) videosByTestCase[test.testCaseId] = sharedVideo;
+  // Video is evidence for every test (passed and failed), whenever video recording is on (AUTOMATION_VIDEO=true).
+  for (const test of tests) if (test.testCaseId && sharedVideo) videosByTestCase[test.testCaseId] = sharedVideo;
   return { sharedVideo, videosByTestCase, screenshotsByTestCase };
 }
 

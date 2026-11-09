@@ -56,9 +56,12 @@ router.get('/api/projects/:projectId/workspace',requireAuth,async(req,res)=>{
  db.query('select s.*,u.display_name created_by_name,uu.display_name updated_by_name from project_stories s left join users u on u.id=s.created_by left join users uu on uu.id=s.updated_by where s.project_id=$1 order by s.updated_at desc limit 200',[req.params.projectId]),
  db.query('select d.id,d.filename,d.mime_type,d.category,d.file_size,d.version,d.uploaded_by,d.created_at,u.display_name uploaded_by_name from project_documents d left join users u on u.id=d.uploaded_by where d.project_id=$1 order by d.created_at desc limit 200',[req.params.projectId]),
  db.query('select pm.user_id,pm.project_role,pm.created_at,u.display_name,u.email,ab.display_name added_by_name from project_members pm join users u on u.id=pm.user_id left join users ab on ab.id=pm.added_by where pm.project_id=$1 and u.is_active=true order by u.display_name',[req.params.projectId]),
- db.query('select r.id,r.session_id,r.run_number,r.total,r.passed,r.failed,r.duration_ms,r.completed_at,t.environment,u.display_name executed_by_name from test_runs r left join test_sessions t on t.id=r.session_id left join users u on u.id=r.executed_by where r.project_id=$1 order by r.completed_at desc limit 50',[req.params.projectId])
+ db.query('select r.id,r.session_id,r.run_number,r.total,r.passed,r.failed,r.duration_ms,r.completed_at,t.environment,u.display_name executed_by_name,src.id source_run_id,src.run_number source_run_number,coalesce(lu.whole_reruns,0)::int rerun_count,(select count(*) from test_runs z where z.session_id=r.session_id)::int runs_in_session,exists(select 1 from test_report_snapshots ai where ai.run_id=r.id and ai.report_kind=\'AI_ANALYSIS\' and ai.report_html is not null) has_ai_snapshot,lu.executed_by_name last_by_name,lu.completed_at last_at from test_runs r left join test_sessions t on t.id=r.session_id left join users u on u.id=r.executed_by left join test_run_reruns rl on rl.session_id=r.session_id and rl.run_number=r.run_number left join test_runs src on src.id=rl.source_run_id left join lateral (select ku.display_name executed_by_name,kr.completed_at,count(*) over() whole_reruns from test_runs kr left join users ku on ku.id=kr.executed_by where kr.session_id=r.session_id and kr.run_number>r.run_number and not exists (select 1 from test_results a where a.run_id=r.id and not exists (select 1 from test_results b where b.run_id=kr.id and b.external_case_id=a.external_case_id)) order by kr.run_number desc limit 1) lu on true where r.project_id=$1 order by r.completed_at desc limit 50',[req.params.projectId])
  ]);
- res.json({ok:true,project:ctx.project,projectRole:ctx.role,environments:envs.rows,stories:stories.rows,documents:docs.rows,members:team.rows,runs:runs.rows});
+ // AI report available: saved with the run, or (older runs) the session's report file when that session has a single run.
+ const {REPORT_DIR,reportFileName}=require('../services/reportGenerator');
+ for(const r of runs.rows){r.has_ai_report=r.has_ai_snapshot||(r.runs_in_session===1&&fs.existsSync(path.join(REPORT_DIR,reportFileName(r.session_id))));delete r.has_ai_snapshot;delete r.runs_in_session;}
+ res.json({ok:true,project:ctx.project,projectRole:ctx.role,environments:envs.rows,stories:stories.rows,documents:docs.rows,members:team.rows,runs:runs.rows,runGroups:await groupedRunRows(req.params.projectId)});
  }catch(e){respond(res,e);}
 });
 router.patch('/api/projects/:projectId/profile',requireAuth,async(req,res)=>{
@@ -432,6 +435,67 @@ router.delete('/api/work-items/:id/test-links/:linkId',requireAuth,async(req,res
  try{const ctx=await task(req);reviewer(ctx.role);const r=await db.query('delete from task_test_case_links where id=$1 and work_item_id=$2 and project_id=$3 returning id',[req.params.linkId,ctx.item.id,ctx.item.project_id]);if(!r.rowCount)throw fail(404,'Link not found.');res.json({ok:true});}catch(e){respond(res,e);}
 });
 
+// ---- Runs grouped as attempts (Runs & reports) ----
+// Every execution stays its own saved run (own time, runner, results, screenshots, reports). For display, a re-run is an
+// attempt of the run it repeats: the saved link from the ↻ / ▶ button, or for older re-runs the earliest earlier run in the
+// same session that contains all of its test cases. Attempt 1 is the original run.
+async function runGroups(projectId){
+ const runs=(await db.query(`select r.id,r.session_id,r.run_number,r.project_run_number,r.passed,r.failed,r.total,r.completed_at,t.environment,u.display_name executed_by_name,
+   coalesce((select array_agg(x.external_case_id) from test_results x where x.run_id=r.id),'{}') case_ids
+   from test_runs r left join test_sessions t on t.id=r.session_id left join users u on u.id=r.executed_by where r.project_id=$1 order by r.session_id,r.run_number`,[projectId])).rows;
+ const links=new Map((await db.query('select k.session_id,k.run_number,k.source_run_id from test_run_reruns k join test_runs src on src.id=k.source_run_id where src.project_id=$1',[projectId])).rows.map(l=>[l.session_id+'#'+l.run_number,l.source_run_id]));
+ const byId=new Map(runs.map(r=>[r.id,r])),parent=new Map();
+ for(const r of runs){
+  const linked=links.get(r.session_id+'#'+r.run_number);
+  if(linked&&byId.has(linked)&&linked!==r.id){parent.set(r.id,linked);continue;}
+  if(r.run_number>1&&r.case_ids.length){const src=runs.find(e=>e.session_id===r.session_id&&e.run_number<r.run_number&&r.case_ids.every(c=>e.case_ids.includes(c)));if(src)parent.set(r.id,src.id);}
+ }
+ const rootOf=runId=>{let cur=runId,guard=0;while(parent.has(cur)&&guard++<200)cur=parent.get(cur);return cur;};
+ const groups=new Map();
+ for(const r of runs){const root=rootOf(r.id);if(!groups.has(root))groups.set(root,[]);groups.get(root).push(r);}
+ for(const list of groups.values())list.sort((a,b)=>a.run_number-b.run_number);
+ // Project-wide run number: given once to each run (attempt 1), in the order runs were first made, then saved.
+ const unnumbered=[...groups.values()].map(l=>l[0]).filter(r=>r.project_run_number==null).sort((a,b)=>new Date(a.completed_at)-new Date(b.completed_at));
+ if(unnumbered.length){
+  await db.withTransaction(async client=>{
+   await client.query('select pg_advisory_xact_lock(hashtext($1))',['run-number:'+projectId]);
+   let next=Number((await client.query('select coalesce(max(project_run_number),0) n from test_runs where project_id=$1',[projectId])).rows[0].n);
+   for(const r of unnumbered){
+    const done=await client.query('update test_runs set project_run_number=$2 where id=$1 and project_run_number is null returning project_run_number',[r.id,next+1]);
+    if(done.rowCount){next+=1;r.project_run_number=next;}
+    else r.project_run_number=(await client.query('select project_run_number from test_runs where id=$1',[r.id])).rows[0]?.project_run_number??null;
+   }
+  });
+ }
+ return {byId,rootOf,groups};
+}
+// AI report available for a run: saved with it, or (older runs) the session's report file when that session has one run.
+async function aiAvailability(projectId,runs){
+ const snaps=new Set((await db.query("select run_id from test_report_snapshots where project_id=$1 and report_kind='AI_ANALYSIS' and report_html is not null",[projectId])).rows.map(x=>x.run_id));
+ const perSession=new Map();for(const r of runs)perSession.set(r.session_id,(perSession.get(r.session_id)||0)+1);
+ const {REPORT_DIR,reportFileName}=require('../services/reportGenerator');
+ return r=>snaps.has(r.id)||(perSession.get(r.session_id)===1&&fs.existsSync(path.join(REPORT_DIR,reportFileName(r.session_id))));
+}
+// Latest result of each test case across a group's attempts.
+async function groupCaseState(list){
+ const rows=(await db.query('select run_id,external_case_id,title,passed,test_category,scenario_type,priority from test_results where run_id=any($1::uuid[])',[list.map(r=>r.id)])).rows;
+ const state=new Map();
+ list.forEach((a,i)=>{for(const x of rows.filter(y=>y.run_id===a.id)){const prev=state.get(x.external_case_id);state.set(x.external_case_id,{...(prev||{}),...x,first:prev?.first||x,latest_attempt:i+1,latest_run_id:a.id,latest_by_name:a.executed_by_name,latest_completed_at:a.completed_at,times_run:(prev?.times_run||0)+1});}});
+ return state;
+}
+// Runs & reports list: one row per run; Result = current status of its test cases; Times run = attempts.
+async function groupedRunRows(projectId){
+ const {groups}=await runGroups(projectId);
+ const all=[...groups.values()].flat(),hasAi=await aiAvailability(projectId,all),out=[];
+ for(const list of groups.values()){
+  const root=list[0],latest=list[list.length-1],state=await groupCaseState(list);
+  const cases=root.case_ids.map(c=>state.get(c)).filter(Boolean),passed=cases.filter(c=>c.passed).length;
+  out.push({id:root.id,session_id:root.session_id,run_number:root.project_run_number??root.run_number,environment:root.environment,executed_by_name:root.executed_by_name,completed_at:root.completed_at,
+   passed,failed:cases.length-passed,total:cases.length,rerun_count:list.length-1,last_by_name:latest.executed_by_name,last_at:latest.completed_at,
+   latest_attempt_id:latest.id,latest_run_number:latest.run_number,has_ai_report:hasAi(latest)});
+ }
+ return out.sort((a,b)=>new Date(b.last_at)-new Date(a.last_at)).slice(0,100);
+}
 async function projectSession(sessionId,projectId){
  const session=getSession(sessionId);
  if(String(session.projectId)===String(projectId) && Array.isArray(session.testCases) && session.testCases.length)return session;
@@ -479,6 +543,144 @@ router.post('/api/projects/:projectId/retest-plan',requireAuth,requireRole('QA',
  }catch(e){respond(res,e);}
 });
 
+
+// Re-run (Runs & reports): which cases of a run, or one case, can run again in their original session.
+// Same rules as task retest: the session must be restored and reviewed, and each case approved and Automation Ready.
+// The browser then starts it with the existing POST /api/test-runs/start, so it is saved as a new run of that session.
+router.post('/api/projects/:projectId/runs/:runId/rerun-plan',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ if(!id(req.params.runId))throw fail(400,'Invalid run ID.');
+ const run=await db.query('select r.session_id,r.run_number,t.environment from test_runs r left join test_sessions t on t.id=r.session_id where r.project_id=$1 and r.id=$2',[req.params.projectId,req.params.runId]);
+ if(!run.rowCount)throw fail(404,'Run not found.');
+ const {session_id:sessionId,run_number:runNumber,environment}=run.rows[0];
+ const onlyCase=s(req.body?.caseId,80);
+ const wanted=onlyCase?[onlyCase]:(await db.query('select distinct external_case_id from test_results r join test_runs tr on tr.id=r.run_id where tr.id=$1 order by 1',[req.params.runId])).rows.map(x=>x.external_case_id);
+ const session=await projectSession(sessionId,req.params.projectId);
+ if(!session)throw fail(409,'This testing session can no longer be restored. Generate the test cases again on the testing page.');
+ if(session.state==='RUNNING')throw fail(409,'A test is already running in this session. Wait for it to finish.');
+ if(!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state))throw fail(409,'This session has not been reviewed. Review its test cases on the testing page before re-running.');
+ const caseIds=[],blocked=[];
+ for(const caseId of wanted){
+  const tc=(session.testCases||[]).find(x=>String(x.id).toUpperCase()===String(caseId).toUpperCase());
+  if(!tc)blocked.push({caseId,reason:'no longer in this session'});
+  else if(tc.automationReadiness?.status!=='READY')blocked.push({caseId,reason:'not Automation Ready'});
+  // Same AI-repair safety rule the runner applies: a repaired case needs a passing full regression first.
+  else if(tc.canonicalIr&&!require('../services/repairLearning').gateCheck(session,tc).ok)blocked.push({caseId,reason:'fixed by AI repair; run the full regression on the testing page first'});
+  else caseIds.push(tc.id);
+ }
+ res.json({ok:true,sessionId,runNumber,environment,caseIds,blocked});
+ }catch(e){respond(res,e);}
+});
+
+router.post('/api/projects/:projectId/runs/:runId/rerun-link',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ if(!id(req.params.runId))throw fail(400,'Invalid run ID.');
+ const runNumber=Number(req.body?.runNumber);
+ if(!Number.isInteger(runNumber)||runNumber<1)throw fail(400,'Invalid run number.');
+ const src=await db.query('select session_id,run_number from test_runs where project_id=$1 and id=$2',[req.params.projectId,req.params.runId]);
+ if(!src.rowCount)throw fail(404,'Run not found.');
+ if(runNumber<=src.rows[0].run_number)throw fail(400,'A re-run must come after the run it repeats.');
+ const caseIds=(Array.isArray(req.body?.caseIds)?req.body.caseIds:[]).map(x=>s(x,80)).filter(Boolean).slice(0,500);
+ await db.query('insert into test_run_reruns(session_id,run_number,source_run_id,case_ids,started_by) values($1,$2,$3,$4::jsonb,$5) on conflict(session_id,run_number) do nothing',[src.rows[0].session_id,runNumber,req.params.runId,JSON.stringify(caseIds),req.user.sub]);
+ res.json({ok:true});
+ }catch(e){respond(res,e);}
+});
+
+// Testing page → "Run existing tests": the saved, reviewed test cases of this project (or story), grouped by the session
+// they were generated in (one run can only use one session). Same rules as the run plan: the session is restored and
+// reviewed, the case is approved and Automation Ready, and AI-repaired cases need a passing full regression first.
+router.get('/api/projects/:projectId/existing-tests',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ const storyId=id(req.query.storyId)?req.query.storyId:null;
+ const rows=(storyId
+  ?await db.query('select distinct s.id session_id,s.updated_at,s.environment,ps.reference_no story_ref,ps.title story_title from test_sessions s left join story_test_sessions sts on sts.session_id=s.id left join project_stories ps on ps.id=coalesce(s.project_story_id,sts.story_id) where s.project_id=$1 and (sts.story_id=$2 or s.project_story_id=$2) order by s.updated_at desc limit 60',[req.params.projectId,storyId])
+  :await db.query('select s.id session_id,s.updated_at,s.environment,ps.reference_no story_ref,ps.title story_title from test_sessions s left join project_stories ps on ps.id=s.project_story_id where s.project_id=$1 order by s.updated_at desc limit 60',[req.params.projectId])).rows;
+ const {gateCheck}=require('../services/repairLearning');
+ // One entry per unique test: a test generated again in another session with the same steps, test data and expected
+ // result is listed once (newest session), even if the AI worded its title differently. Cases that cannot run are left out.
+ const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
+ const signature=tc=>JSON.stringify([(tc.steps||[]).map(st=>typeof st==='string'?norm(st):[norm(st.action),norm(st.target),norm(st.value)]),
+  (tc.expectedResults||[]).map(norm),Object.entries(tc.testData||{}).map(([k,v])=>[norm(k),norm(typeof v==='string'?v:JSON.stringify(v))]).sort()]);
+ const seen=new Set(),cases=[];
+ for(const row of rows){
+  const session=await projectSession(row.session_id,req.params.projectId);
+  if(!session||String(session.projectId)!==String(req.params.projectId)||!session.readinessValidated||!['AWAITING_APPROVAL','DONE'].includes(session.state))continue;
+  for(const tc of session.testCases||[]){
+   if(tc.automationReadiness?.status!=='READY'||tc.approved===false)continue;
+   if(tc.canonicalIr&&!gateCheck(session,tc).ok)continue;
+   const sig=signature(tc);if(seen.has(sig))continue;seen.add(sig);
+   cases.push({key:row.session_id+'|'+tc.id,sessionId:row.session_id,id:tc.id,title:String(tc.title||'').replace(/^Test execution\s+\S+\s+-\s+/i,''),type:tc.type||'functional',category:tc.testCategory||null,priority:tc.priority||'medium',
+    source:tc.source||'ai',steps:Array.isArray(tc.steps)?tc.steps.length:0,expected:(Array.isArray(tc.expectedResults)?tc.expectedResults:[]).slice(0,2).join(' · '),
+    savedAt:row.updated_at,environment:session.environment||row.environment||null,story:row.story_ref?(row.story_ref+' · '+(row.story_title||'')):null});
+  }
+ }
+ const envs=(await db.query('select id,name,base_url,is_default from project_environments where project_id=$1 and is_active=true order by is_default desc,name',[req.params.projectId])).rows;
+ res.json({ok:true,cases,environments:envs});
+ }catch(e){respond(res,e);}
+});
+// "Run existing tests" with another environment: point the saved session at that environment before it runs.
+router.post('/api/projects/:projectId/sessions/:sessionId/environment',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ if(!id(req.body?.environmentId))throw fail(400,'Choose an environment.');
+ const env=await db.query('select name,base_url from project_environments where project_id=$1 and id=$2 and is_active=true',[req.params.projectId,req.body.environmentId]);
+ if(!env.rowCount)throw fail(404,'Environment not found or disabled.');
+ const session=await projectSession(s(req.params.sessionId,120),req.params.projectId);
+ if(!session)throw fail(404,'This testing session can no longer be restored.');
+ if(session.state==='RUNNING')throw fail(409,'A test is already running in this session.');
+ session.targetUrl=env.rows[0].base_url;session.environment=env.rows[0].name;
+ await persistence.persistSession(req.params.sessionId,session,{projectId:req.params.projectId,repositoryId:session.repositoryId||null,userId:req.user.sub});
+ await db.query('update test_sessions set environment=$1,target_url=$4 where id=$2 and project_id=$3',[env.rows[0].name,req.params.sessionId,req.params.projectId,env.rows[0].base_url]);
+ res.json({ok:true,environment:env.rows[0].name,targetUrl:env.rows[0].base_url});
+ }catch(e){respond(res,e);}
+});
+
+// ---- Manual test cases (testing page ⊕ "Add Human Test Case") ----
+// A manual case is saved to the database as soon as it is saved in the editor (before, it lived only in the page until
+// a run). Without generated cases there is no session yet, so one is started for the project (story optional).
+router.post('/api/projects/:projectId/manual-session',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ const targetUrl=s(req.body?.targetUrl,500),environment=s(req.body?.environmentName,120)||'Test',storyId=id(req.body?.storyId)?req.body.storyId:null;
+ if(!/^https?:\/\//i.test(targetUrl))throw fail(400,'The project needs an application URL or environment before adding test cases.');
+ if(storyId){const st=await db.query('select id from project_stories where id=$1 and project_id=$2',[storyId,req.params.projectId]);if(!st.rowCount)throw fail(400,'Story does not belong to this project.');}
+ const sessionId='run-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7);
+ const session=getSession(sessionId);
+ Object.assign(session,{projectId:req.params.projectId,projectStoryId:storyId,contextSource:{type:storyId?'STORY':'PROJECT',storyId,taskId:null},createdBy:req.user.sub,
+  story:s(req.body?.story,20000)||'Manual test cases',targetUrl,environment,state:'AWAITING_APPROVAL',testCases:[],manualOnly:true});
+ await persistence.persistSession(sessionId,session,{projectId:req.params.projectId,userId:req.user.sub});
+ if(storyId){await db.query('update test_sessions set project_story_id=$1 where id=$2',[storyId,sessionId]);await db.query('insert into story_test_sessions(story_id,session_id) values($1,$2) on conflict do nothing',[storyId,sessionId]);}
+ res.status(201).json({ok:true,sessionId});
+ }catch(e){respond(res,e);}
+});
+router.post('/api/projects/:projectId/sessions/:sessionId/manual-test-cases',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ const session=await projectSession(s(req.params.sessionId,120),req.params.projectId);
+ if(!session)throw fail(404,'This testing session is not part of the project.');
+ if(session.state==='RUNNING')throw fail(409,'Wait for the current run to finish.');
+ const raw=req.body?.testCase||{},list=v=>(Array.isArray(v)?v:[]).map(x=>typeof x==='string'?s(x,2000):x).filter(Boolean).slice(0,100);
+ const caseId=s(raw.id,40).toUpperCase();
+ if(!/^TC-?[A-Z]?\d{1,4}$/.test(caseId))throw fail(400,'Invalid test case ID.');
+ if(!s(raw.title))throw fail(400,'Title is required.');
+ const prev=(session.testCases||[]).find(x=>String(x.id).toUpperCase()===caseId);
+ // Keep everything the editor sends (e.g. the manual automation script and its parsed form); the main fields are cleaned below.
+ const tc={...(prev||{}),...raw,id:caseId,title:s(raw.title,300),type:s(raw.type,40)||'functional',priority:s(raw.priority,20)||'medium',
+  preconditions:list(raw.preconditions),steps:list(raw.steps),expectedResults:list(raw.expectedResults),testData:raw.testData&&typeof raw.testData==='object'?raw.testData:(prev?.testData||{}),
+  testCategory:s(raw.testCategory,40).toUpperCase()||prev?.testCategory||'FUNCTIONAL',testSubcategory:s(raw.testSubcategory,80)||prev?.testSubcategory||null,
+  securitySubcategory:raw.securitySubcategory?s(raw.securitySubcategory,60):(prev?.securitySubcategory||null),
+  source:/^human/.test(String(raw.source||''))?s(raw.source,40):prev&&!/^human/.test(String(prev.source||''))?'ai-reviewed':'human',createdBy:prev?.createdBy||req.user.sub};
+ // An edited case must be validated again before it can run (same rule as the testing page's own editor).
+ if(prev&&JSON.stringify([prev.steps,prev.expectedResults,prev.preconditions])!==JSON.stringify([tc.steps,tc.expectedResults,tc.preconditions]))delete tc.automationReadiness;
+ session.testCases=prev?(session.testCases||[]).map(x=>String(x.id).toUpperCase()===caseId?tc:x):[tc,...(session.testCases||[])];
+ await persistence.persistSession(req.params.sessionId,session,{projectId:req.params.projectId,userId:req.user.sub});
+ await persistence.persistTestCases(req.params.sessionId,[tc],null,req.user.sub);
+ res.json({ok:true,testCase:{id:tc.id,source:tc.source,testCategory:tc.testCategory}});
+ }catch(e){respond(res,e);}
+});
 
 router.get('/api/projects/:projectId/deleted-tasks',requireAuth,async(req,res)=>{
  try{
@@ -663,10 +865,89 @@ router.get('/api/projects/:projectId/runs/:runId/details',requireAuth,async(req,
  if(!id(req.params.runId))throw fail(400,'Invalid run ID.');
  const run=await db.query('select r.id,r.session_id,r.run_number,r.total,r.passed,r.failed,r.duration_ms,r.browser,r.completed_at,r.summary_json,t.environment,t.target_url,ps.reference_no story_ref,ps.title story_title,u.display_name executed_by_name from test_runs r left join test_sessions t on t.id=r.session_id left join project_stories ps on ps.id=t.project_story_id left join users u on u.id=r.executed_by where r.project_id=$1 and r.id=$2',[req.params.projectId,req.params.runId]);
  if(!run.rowCount)throw fail(404,'Run not found.');
- const results=await db.query('select external_case_id,title,passed,duration_ms,error_message,evidence_json,test_category,scenario_type,priority,severity from test_results where run_id=$1 order by passed asc,external_case_id',[req.params.runId]);
+ const results=await db.query(`select te.external_case_id,te.title,te.passed,te.duration_ms,te.error_message,te.evidence_json,te.test_category,te.scenario_type,te.priority,te.severity,
+   lt.passed latest_passed,lt.run_id latest_run_id,lt.run_number latest_run_number,lt.completed_at latest_completed_at,lt.executed_by_name latest_by_name,
+   (select count(*) from test_results y join test_runs yr on yr.id=y.run_id where yr.session_id=$2 and y.external_case_id=te.external_case_id)::int times_run,
+   tc.created_at case_created_at,tcu.display_name case_created_by_name
+  from test_results te left join test_cases tc on tc.session_id=$2 and tc.external_case_id=te.external_case_id left join users tcu on tcu.id=tc.created_by left join lateral (
+   select x.passed,rr.id run_id,rr.run_number,rr.completed_at,u.display_name executed_by_name from test_results x join test_runs rr on rr.id=x.run_id left join users u on u.id=rr.executed_by
+    where rr.session_id=$2 and x.external_case_id=te.external_case_id order by rr.completed_at desc nulls last,rr.run_number desc limit 1) lt on true
+  where te.run_id=$1 order by te.passed asc,te.external_case_id`,[req.params.runId,run.rows[0].session_id]);
  const report=await db.query("select s.id,s.created_at,(s.report_html is not null) has_html,u.display_name recorded_by_name from test_report_snapshots s left join users u on u.id=s.recorded_by where s.project_id=$1 and s.run_id=$2 and s.report_kind='EXECUTION' order by s.created_at desc limit 1",[req.params.projectId,req.params.runId]);
+ const reruns=await db.query('select kr.id,kr.run_number,kr.completed_at,ku.display_name executed_by_name from test_runs r join test_runs kr on kr.session_id=r.session_id and kr.run_number>r.run_number and not exists (select 1 from test_results a where a.run_id=r.id and not exists (select 1 from test_results b where b.run_id=kr.id and b.external_case_id=a.external_case_id)) left join users ku on ku.id=kr.executed_by where r.id=$1 order by kr.run_number',[req.params.runId]);
+ const source=await db.query('select src.id,src.run_number from test_run_reruns k join test_runs src on src.id=k.source_run_id where k.session_id=$1 and k.run_number=$2',[run.rows[0].session_id,run.rows[0].run_number]);
  const r=run.rows[0],summary=r.summary_json||{};delete r.summary_json;
- res.json({ok:true,run:{...r,execution_mode:summary.executionMode||null,skipped:Number(summary.skipped||0)},results:results.rows,report:report.rows[0]||null});
+ res.json({ok:true,run:{...r,execution_mode:summary.executionMode||null,skipped:Number(summary.skipped||0)},results:results.rows,report:report.rows[0]||null,reruns:reruns.rows,source:source.rows[0]||null});
+}catch(e){respond(res,e);}});
+// Run page (Runs & reports → 👁): the run (attempt 1), all its attempts, and each test case's latest result across them.
+router.get('/api/projects/:projectId/runs/:runId/group',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ if(!id(req.params.runId))throw fail(400,'Invalid run ID.');
+ const {byId,rootOf,groups}=await runGroups(req.params.projectId);
+ if(!byId.has(req.params.runId))throw fail(404,'Run not found.');
+ const list=groups.get(rootOf(req.params.runId)),root=list[0],hasAi=await aiAvailability(req.params.projectId,[...groups.values()].flat());
+ const state=await groupCaseState(list);
+ const created=new Map((await db.query('select c.external_case_id,c.created_at,u.display_name created_by_name from test_cases c left join users u on u.id=c.created_by where c.session_id=$1',[root.session_id])).rows.map(c=>[c.external_case_id,c]));
+ const cases=root.case_ids.map(c=>state.get(c)).filter(Boolean).sort((a,b)=>String(a.external_case_id).localeCompare(String(b.external_case_id),undefined,{numeric:true})).map(c=>({
+  external_case_id:c.external_case_id,title:c.first.title,test_category:c.first.test_category,scenario_type:c.first.scenario_type,priority:c.first.priority,
+  passed:c.passed,times_run:c.times_run,latest_attempt:c.latest_attempt,latest_by_name:c.latest_by_name,latest_completed_at:c.latest_completed_at,
+  case_created_at:created.get(c.external_case_id)?.created_at||null,case_created_by_name:created.get(c.external_case_id)?.created_by_name||null}));
+ res.json({ok:true,run:{id:root.id,session_id:root.session_id,run_number:root.project_run_number??root.run_number,environment:root.environment,executed_by_name:root.executed_by_name,completed_at:root.completed_at},
+  attempts:list.map((a,i)=>({id:a.id,attempt:i+1,run_number:a.run_number,passed:a.passed,failed:a.failed,total:a.total,completed_at:a.completed_at,executed_by_name:a.executed_by_name,has_ai_report:hasAi(a)})),cases});
+}catch(e){respond(res,e);}});
+// AI report of one run (Runs & reports → Actions). Old runs saved before reports were kept per run: the session's report
+// file is used only when that session has a single run, because then it can only belong to this run.
+router.get('/api/projects/:projectId/runs/:runId/ai-report',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ if(!id(req.params.runId))throw fail(400,'Invalid run ID.');
+ const run=await db.query('select session_id,run_number,(select count(*) from test_runs x where x.session_id=r.session_id)::int runs_in_session from test_runs r where project_id=$1 and id=$2',[req.params.projectId,req.params.runId]);
+ if(!run.rowCount)throw fail(404,'Run not found.');
+ const snap=await db.query("select report_html from test_report_snapshots where run_id=$1 and report_kind='AI_ANALYSIS' and report_html is not null order by revision desc limit 1",[req.params.runId]);
+ let html=snap.rows[0]?.report_html||null;
+ if(!html&&run.rows[0].runs_in_session===1){
+  const {REPORT_DIR,reportFileName}=require('../services/reportGenerator');
+  const file=require('path').join(REPORT_DIR,reportFileName(run.rows[0].session_id));
+  if(require('fs').existsSync(file))html=require('fs').readFileSync(file,'utf8');
+ }
+ if(!html)throw fail(404,'No AI report was generated for this run.');
+ res.setHeader('Content-Type','text/html; charset=utf-8');res.send(html);
+}catch(e){respond(res,e);}});
+// Test case popup (Run details → Actions): the case itself (steps, test data, passing criteria) and every run of it.
+// History is matched by session + case ID, because generated case IDs (TC001…) restart in every session.
+router.get('/api/projects/:projectId/runs/:runId/cases/:caseId',requireAuth,async(req,res)=>{try{
+ await access(req,req.params.projectId);
+ if(!id(req.params.runId))throw fail(400,'Invalid run ID.');
+ const caseId=String(req.params.caseId||'').slice(0,80);
+ const run=await db.query('select session_id from test_runs where project_id=$1 and id=$2',[req.params.projectId,req.params.runId]);
+ if(!run.rowCount)throw fail(404,'Run not found.');
+ const sessionId=run.rows[0].session_id;
+ const tc=await db.query('select c.external_case_id,c.title,c.type,c.priority,c.case_json,c.created_at,c.updated_at,cu.display_name created_by_name,uu.display_name updated_by_name from test_cases c left join users cu on cu.id=c.created_by left join users uu on uu.id=c.updated_by where c.session_id=$1 and c.external_case_id=$2',[sessionId,caseId]);
+ const history=await db.query(`select rr.id run_id,rr.run_number,rr.completed_at,u.display_name executed_by_name,t.environment,x.title,x.passed,x.error_message,x.evidence_json,x.priority
+   from test_results x join test_runs rr on rr.id=x.run_id left join test_sessions t on t.id=rr.session_id left join users u on u.id=rr.executed_by
+  where rr.project_id=$1 and rr.session_id=$2 and x.external_case_id=$3 order by rr.completed_at desc nulls last,rr.run_number desc`,[req.params.projectId,sessionId,caseId]);
+ if(!tc.rowCount&&!history.rowCount)throw fail(404,'Test case not found.');
+ // Evidence links are sent only when the file still exists, so the popup never offers a screenshot that is gone.
+ // Per-run evidence (run-evidence folder, recorded in test_run_evidence) is permanent. Older links (/api/artifacts/...)
+ // point at the session's latest files kept in memory, so they are valid only for the newest run and only while the file exists.
+ const saved=await db.query('select run_id,kind,relative_path from test_run_evidence where run_id=any($1::uuid[]) and external_case_id=$2',[history.rows.map(x=>x.run_id),caseId]);
+ const onDisk=async rel=>{const f=path.resolve(ARTIFACT_ROOT,rel);if(!f.startsWith(ARTIFACT_ROOT+path.sep))return false;try{await fs.promises.access(f,fs.constants.R_OK);return true;}catch{return false;}};
+ const legacy=getSession(sessionId).artifacts||{};
+ for(const [i,x] of history.rows.entries()){
+  const ev=x.evidence_json?.evidence||x.evidence_json||{},out={};
+  for(const kind of ['screenshot','video']){
+   // A permanently stored file for this run always wins, even if the result's link was later rewritten.
+   const row=saved.rows.find(e=>e.run_id===x.run_id&&e.kind===kind);
+   if(row&&await onDisk(row.relative_path)){out[kind+'Url']='/api/projects/'+encodeURIComponent(req.params.projectId)+'/run-evidence/'+x.run_id+'/'+encodeURIComponent(caseId)+'/'+kind;continue;}
+   const url=ev[kind+'Url'];if(typeof url!=='string')continue;
+   if(url.startsWith('/api/artifacts/')&&i===0){const file=(kind==='video'?legacy.videosByTestCase:legacy.screenshotsByTestCase)?.[String(caseId).toUpperCase()];if(file&&fs.existsSync(file))out[kind+'Url']=url;}
+  }
+  x.evidence_json=out;
+ }
+ const c=tc.rows[0]||null,j=c?.case_json||{};
+ res.json({ok:true,testCase:c?{id:c.external_case_id,title:c.title,type:c.type,priority:c.priority,category:j.testCategory||null,
+   preconditions:Array.isArray(j.preconditions)?j.preconditions:[],steps:Array.isArray(j.steps)?j.steps:[],testData:j.testData&&typeof j.testData==='object'?j.testData:{},
+   expectedResults:Array.isArray(j.expectedResults)?j.expectedResults:[],review:j.review||null,
+   created_at:c.created_at,created_by_name:c.created_by_name,updated_at:c.updated_at,updated_by_name:c.updated_by_name}:null,history:history.rows});
 }catch(e){respond(res,e);}});
 router.get('/api/projects/:projectId/report-snapshots/:reportId',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);

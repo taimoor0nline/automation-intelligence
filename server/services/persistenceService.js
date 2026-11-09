@@ -169,12 +169,8 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
          session_id,project_id,repository_id,run_number,executed_by,executed_by_role,
          approved_ids,total,passed,failed,duration_ms,browser,summary_json,target_type,api_target_id,completed_at)
        values($1,$2,$3,$4,$5,(select role::text from users where id=$5),$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,now())
-       on conflict(session_id,run_number) do update set
-         executed_by=excluded.executed_by,executed_by_role=excluded.executed_by_role,
-         approved_ids=excluded.approved_ids,total=excluded.total,passed=excluded.passed,failed=excluded.failed,
-         duration_ms=excluded.duration_ms,browser=excluded.browser,summary_json=excluded.summary_json,
-         target_type=excluded.target_type,api_target_id=excluded.api_target_id,completed_at=now()
-       returning id`,
+       on conflict(session_id,run_number) do update set session_id=test_runs.session_id
+       returning id,(xmax=0) as inserted`,
       [
         sessionId,
         session.projectId || null,
@@ -193,6 +189,13 @@ async function persistRun({ sessionId, session, runNumber, summary, approvedIds,
       ]
     );
     const runId = run.rows[0].id;
+    // The session is saved again after later requests (even progress checks). A run that is already saved keeps
+    // its original time, runner, results and evidence links, and gets no second "test run completed" audit entry;
+    // only its report snapshots are refreshed (e.g. after the AI report is generated).
+    if (!run.rows[0].inserted) {
+      await persistRunReportSnapshots({sessionId,session,runId,userId,client});
+      return runId;
+    }
     if(session.projectId)await client.query("insert into project_audit_events(project_id,session_id,actor_id,event_type,metadata) values($1,$2,$3,'TEST_RUN_COMPLETED',$4::jsonb)",[session.projectId,sessionId,userId||null,JSON.stringify({runId,runNumber,total:summary.total||0,passed:summary.passed||0,failed:summary.failed||0})]);
     const classificationByCaseId = new Map(
       (session.testCases || []).map((testCase) => {
@@ -303,6 +306,23 @@ async function persistReviewedCase(sessionId, session, testCase, actorId = null)
   return true;
 }
 
+// AI analysis report of one run. Called every time the report HTML is (re)built, after the run has finished,
+// so session.lastResults.runNumber is the run the report describes.
+async function saveAiReportForRun(sessionId,html){
+ if(!sessionId||!html)return false;
+ const session=require('../data/sessionStore').getSession(sessionId);
+ const runNumber=Number(session?.lastResults?.runNumber||0);
+ if(!runNumber)return false;
+ const run=await db.query('select id,project_id from test_runs where session_id=$1 and run_number=$2',[sessionId,runNumber]);
+ if(!run.rowCount)return false;
+ await db.query(`insert into test_report_snapshots(project_id,session_id,run_id,report_kind,revision,report_json,report_html,recorded_by)
+   values($1,$2,$3,'AI_ANALYSIS',1,$4::jsonb,$5,$6)
+   on conflict(run_id,report_kind,revision) where run_id is not null
+   do update set report_json=excluded.report_json,report_html=excluded.report_html,created_at=now()`,
+  [run.rows[0].project_id||session.projectId||null,sessionId,run.rows[0].id,JSON.stringify({sessionId,runNumber,generatedAt:new Date().toISOString()}),html,session.createdBy||null]);
+ return true;
+}
+
 async function persistRunReportSnapshots({sessionId,session,runId,userId,client=null}) {
  if(!enabled()||!runId)return false;
  const runNumber=session.lastResults?.runNumber;
@@ -341,6 +361,7 @@ module.exports = {
   persistReviewedCase,
   persistRun,
   persistRunReportSnapshots,
+  saveAiReportForRun,
   persistAnalyses,
   latestRunId,
   loadSession,

@@ -102,7 +102,8 @@
  </section>
  <section id="view-users" class="tn-view">
   <div class="tn-card"><div class="tn-card-head"><div><h2>Users</h2><div class="tn-muted">Sign-in accounts for TestNexus. Add people to a project from that project's Team tab.</div></div><div class="tn-head-actions"><button type="button" class="btn btn-outline-primary tn-btn" data-bs-toggle="modal" data-bs-target="#newUserModal">+ New user</button></div></div>
-   <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>User</th><th>Platform role</th><th>Status</th><th>Created</th></tr></thead><tbody id="usersBody"></tbody></table></div></div>
+   <div class="tn-status-switch tn-users-switch" role="radiogroup" aria-label="Show users"><button type="button" role="radio" data-user-filter="active" aria-checked="true">Active <span id="userCountActive">0</span></button><button type="button" role="radio" data-user-filter="all" aria-checked="false">All <span id="userCountAll">0</span></button><button type="button" role="radio" data-user-filter="inactive" aria-checked="false">Inactive <span id="userCountInactive">0</span></button></div>
+   <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>User</th><th>Platform role</th><th>Status</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="usersBody"></tbody></table></div></div>
  </section>
  <section id="view-details" class="tn-view" role="tabpanel">
   <div id="overviewHealth" class="tn-health-strip d-none" aria-live="polite"></div>
@@ -153,21 +154,11 @@
  </section>
  <section id="view-run" class="tn-view" role="tabpanel">
   <div class="tn-card">
-   <div class="tn-card-head"><div><h2 id="runPageTitle">Run</h2><div class="tn-muted" id="runPageMeta"></div></div><div class="d-flex gap-2 flex-wrap"><button type="button" id="runPageBack" class="btn btn-outline-secondary tn-btn">Back to runs</button><button type="button" id="runPagePdf" class="btn btn-outline-primary tn-btn" data-run-pdf>View PDF</button></div></div>
-   <div class="tn-kpis tn-run-page-kpis" id="runPageKpis"></div>
+   <div class="tn-card-head"><div><h2 id="runPageTitle">Run</h2><div class="tn-muted" id="runPageMeta"></div></div><button type="button" id="runPageBack" class="btn btn-outline-secondary tn-btn">Back to runs</button></div>
   </div>
   <div class="tn-card mt-3">
-   <div class="tn-card-head tn-subtabs-head">
-    <div class="tn-subtabs" role="tablist" aria-label="Run details">
-     <button type="button" role="tab" data-run-tab="Results" aria-selected="true">Results <span class="tn-subtab-count" id="runCountResults">0</span></button>
-     <button type="button" role="tab" data-run-tab="Evidence" aria-selected="false" tabindex="-1">Evidence <span class="tn-subtab-count" id="runCountEvidence">0</span></button>
-     <button type="button" role="tab" data-run-tab="Report" aria-selected="false" tabindex="-1">Report</button>
-    </div>
-    <select id="runResultFilter" class="form-select tn-run-filter" aria-label="Show results"><option value="">All results</option><option value="failed">Failed only</option><option value="passed">Passed only</option></select>
-   </div>
-   <div id="runPanelResults" role="tabpanel"><div class="tn-scroll"><table class="table tn-table tn-run-results"><thead><tr><th>Test case</th><th>Type</th><th>Priority</th><th>Result</th><th>Duration</th><th>Evidence</th></tr></thead><tbody id="runResultsBody"></tbody></table></div></div>
-   <div id="runPanelEvidence" role="tabpanel" hidden><div class="tn-evidence-grid" id="runEvidenceGrid"></div></div>
-   <div id="runPanelReport" role="tabpanel" hidden><div class="tn-run-report" id="runReportBody"></div></div>
+   <div class="tn-card-head"><h2>Test cases <span class="tn-badge-counter" id="runCasesCount">0</span></h2><span class="tn-muted">Latest result of each test case across all attempts.</span></div>
+   <div class="tn-scroll"><table class="table tn-table tn-run-results"><thead><tr><th>Test case</th><th>Category</th><th>Type</th><th>Priority</th><th>Status</th><th>Times run</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="runResultsBody"></tbody></table></div>
   </div>
  </section>
  <section id="view-environments" class="tn-view" role="tabpanel">
@@ -188,20 +179,8 @@
  <section id="view-reports" class="tn-view">
   <div class="tn-kpis tn-kpis-5" id="runKpis" aria-live="polite"></div>
   <div class="tn-card">
-   <div class="tn-card-head tn-subtabs-head">
-    <div class="tn-subtabs" role="tablist" aria-label="Runs and reports">
-     <button type="button" role="tab" id="runsTabRuns" aria-controls="runsPanelRuns" aria-selected="true" data-runs-tab="Runs">Test runs <span class="tn-subtab-count" id="runsCountRuns">0</span></button>
-     <button type="button" role="tab" id="runsTabEvidence" aria-controls="runsPanelEvidence" aria-selected="false" tabindex="-1" data-runs-tab="Evidence">Evidence <span class="tn-subtab-count" id="runsCountEvidence">0</span></button>
-     <button type="button" role="tab" id="runsTabSaved" aria-controls="runsPanelSaved" aria-selected="false" tabindex="-1" data-runs-tab="Saved">Saved reports <span class="tn-subtab-count" id="runsCountSaved">0</span></button>
-    </div>
-   </div>
-   <div id="runsPanelRuns" role="tabpanel" aria-labelledby="runsTabRuns"><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Run</th><th>Result</th><th>Environment</th><th>Executed by</th><th>Completed</th><th>Report</th></tr></thead><tbody id="runsBody"></tbody></table></div></div>
-   <div id="runsPanelEvidence" role="tabpanel" aria-labelledby="runsTabEvidence" hidden><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Test case</th><th>Run</th><th>Result</th><th>Evidence</th></tr></thead><tbody id="evidenceBody"></tbody></table></div></div>
-   <div id="runsPanelSaved" role="tabpanel" aria-labelledby="runsTabSaved" hidden>
-    <div class="tn-saved-toolbar"><label for="savedReportKind">Report type</label><select id="savedReportKind" class="form-select"><option value="">All reports</option><option value="REVIEWED_CASE">Reviewed test cases</option><option value="EXECUTION">Execution reports</option><option value="AI_LEARNING">AI learning</option></select></div>
-    <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Type</th><th>Case / Run</th><th>Revision</th><th>Saved</th><th>View</th></tr></thead><tbody id="savedReportsBody"></tbody></table></div>
-    <div id="savedReportDetail" class="px-3 pb-3" aria-live="polite"></div>
-   </div>
+   <div class="tn-card-head"><h2>Test runs <span class="tn-badge-counter" id="runsCountRuns">0</span></h2><span class="tn-muted">Open a run to see its test cases. Reports are under Actions.</span></div>
+   <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Run</th><th>Result</th><th>Environment</th><th>Times run</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="runsBody"></tbody></table></div>
   </div>
  </section>
  <section id="view-inventory" class="tn-view" role="tabpanel">
@@ -230,6 +209,17 @@
 <dialog id="docPreviewDialog" class="tn-dialog tn-evidence-dialog tn-doc-preview" aria-labelledby="docPreviewTitle">
  <div class="tn-dialog-head"><div><h2 id="docPreviewTitle">Document</h2><div class="tn-muted" id="docPreviewMeta"></div></div><div class="d-flex gap-2 align-items-center"><button type="button" class="btn btn-outline-primary tn-btn" id="docPreviewDownload">Download</button><button type="button" class="tn-dialog-close" data-close-doc aria-label="Close">×</button></div></div>
  <div class="tn-dialog-body" id="docPreviewBody"></div>
+</dialog>
+<dialog id="caseViewer" class="tn-dialog tn-case-viewer" aria-labelledby="caseViewerTitle">
+ <div class="tn-dialog-head"><div><h2 id="caseViewerTitle">Test case</h2><div class="tn-muted" id="caseViewerMeta"></div></div><button type="button" class="tn-dialog-close" data-close-case aria-label="Close">×</button></div>
+ <div class="tn-dialog-body">
+  <div class="tn-subtabs tn-case-tabs" role="tablist" aria-label="Test case">
+   <button type="button" role="tab" data-case-tab="Details" aria-selected="true">Details</button>
+   <button type="button" role="tab" data-case-tab="History" aria-selected="false" tabindex="-1">Run history <span class="tn-subtab-count" id="caseHistoryCount">0</span></button>
+  </div>
+  <div id="casePanelDetails" role="tabpanel"></div>
+  <div id="casePanelHistory" role="tabpanel" hidden><div class="tn-card tn-popup-table"><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Attempt</th><th>Environment</th><th>Result</th><th>Evidence</th><th>Reports</th><th>Created</th></tr></thead><tbody id="caseHistoryBody"></tbody></table></div></div></div>
+ </div>
 </dialog>
 <dialog id="pdfViewer" class="tn-dialog tn-evidence-dialog tn-pdf-viewer" aria-labelledby="pdfViewerTitle">
  <div class="tn-dialog-head"><div><h2 id="pdfViewerTitle">Report</h2><div class="tn-muted" id="pdfViewerMeta"></div></div><div class="d-flex gap-2 align-items-center"><button type="button" class="btn btn-outline-primary tn-btn" id="pdfViewerDownload" disabled>Download PDF</button><button type="button" class="tn-dialog-close" data-close-pdf aria-label="Close">×</button></div></div>
@@ -321,7 +311,7 @@
  <div class="modal-header"><div><h2 id="ctProjectsTitle">Assign project</h2><div class="tn-muted" id="ctProjectsSub">One team can be assigned to several projects. Its members join each one with the role from their account.</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
  <div class="modal-body">
   <form id="ctAssignForm" class="tn-ct-add"><select id="ctAssignSelect" class="form-select" required aria-label="Project to assign this team to"></select><button class="btn btn-outline-primary tn-btn" type="submit">+ Add</button></form>
-  <div class="tn-card tn-popup-table"><div class="tn-card-head"><h2>Assigned projects <span class="tn-badge-counter" id="ctProjectsCount">0</span></h2></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Project</th><th>Reference</th><th>Assigned by</th><th>Action</th></tr></thead><tbody id="ctProjectsBody"></tbody></table></div></div>
+  <div class="tn-card tn-popup-table"><div class="tn-card-head"><h2>Assigned projects <span class="tn-badge-counter" id="ctProjectsCount">0</span></h2><div class="tn-status-switch" role="radiogroup" aria-label="Show assigned projects"><button type="button" role="radio" data-assign-filter="active" aria-checked="true">Active <span id="ctCountActive">0</span></button><button type="button" role="radio" data-assign-filter="all" aria-checked="false">All <span id="ctCountAll">0</span></button><button type="button" role="radio" data-assign-filter="inactive" aria-checked="false">Inactive <span id="ctCountInactive">0</span></button></div></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Project</th><th>Reference</th><th>Status</th><th>Assigned by</th><th>Last updated</th><th>Action</th></tr></thead><tbody id="ctProjectsBody"></tbody></table></div></div>
  </div>
  <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Done</button></div>
 </div></div></div>
@@ -343,7 +333,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="/confirm-dialog.js"></script>
 <script src="/profile-menu.js"></script>
-<script src="/workspace.js"></script>
+<script src="/run-progress.js"></script><script src="/workspace.js"></script>
 <script src="/workspace-testing-launcher.js"></script>
 <script src="/table-controls.js"></script>
 </body>

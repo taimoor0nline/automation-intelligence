@@ -24,7 +24,7 @@ async function syncProject(client, projectId, actorId) {
     `select distinct u.id, u.display_name, u.email, u.role
        from project_teams pt join team_members tm on tm.team_id = pt.team_id
        join users u on u.id = tm.user_id
-      where pt.project_id = $1 and u.is_active = true`, [projectId]);
+      where pt.project_id = $1 and pt.is_active = true and u.is_active = true`, [projectId]);
   const wantedIds = new Set(wanted.rows.map((u) => String(u.id)));
   const current = await client.query(
     `select pm.user_id, pm.source, pm.project_role, u.display_name, u.email
@@ -67,8 +67,8 @@ router.get('/api/company-teams', requireAuth, requireRole('MANAGER'), async (req
          from team_members tm join users u on u.id = tm.user_id left join users ab on ab.id = tm.added_by
         join teams t on t.id = tm.team_id where t.project_id is null order by u.display_name`);
     const projects = await db.query(
-      `select pt.team_id, p.id, p.name, p.reference_no, pt.created_at assigned_at, ab.display_name assigned_by_name
-         from project_teams pt join projects p on p.id = pt.project_id left join users ab on ab.id = pt.added_by
+      `select pt.team_id, p.id, p.name, p.reference_no, pt.created_at assigned_at, ab.display_name assigned_by_name, pt.is_active, pt.status_updated_at, su.display_name status_updated_by_name
+         from project_teams pt join projects p on p.id = pt.project_id left join users ab on ab.id = pt.added_by left join users su on su.id = pt.status_updated_by
         join teams t on t.id = pt.team_id where t.project_id is null order by p.name`);
     res.json({
       ok: true,
@@ -133,6 +133,23 @@ router.put('/api/company-teams/:teamId', requireAuth, requireRole('MANAGER'), as
   } catch (e) { respond(res, e); }
 });
 
+// Activate / deactivate one team-to-project assignment (Teams → Assign project). Inactive keeps the assignment
+// listed, but its members get no access through it; project members follow straight away.
+router.patch('/api/company-teams/:teamId/projects/:projectId/status', requireAuth, requireRole('MANAGER'), async (req, res) => {
+  try {
+    if (!isId(req.params.teamId) || !isId(req.params.projectId)) throw fail(400, 'Invalid team or project.');
+    if (typeof req.body?.active !== 'boolean') throw fail(400, 'Choose active or inactive.');
+    await db.withTransaction(async (client) => {
+      const team = await loadTeam(client, req.params.teamId);
+      const r = await client.query('update project_teams set is_active=$3, status_updated_at=now(), status_updated_by=$4 where team_id=$1 and project_id=$2 returning project_id', [team.id, req.params.projectId, req.body.active, req.user.sub]);
+      if (!r.rowCount) throw fail(404, 'This team is not assigned to that project.');
+      await audit(client, req.params.projectId, req.user.sub, req.body.active ? 'TEAM_ASSIGNMENT_ACTIVATED' : 'TEAM_ASSIGNMENT_DEACTIVATED', { teamId: team.id, teamName: team.name });
+      await syncProject(client, req.params.projectId, req.user.sub);
+    });
+    res.json({ ok: true });
+  } catch (e) { respond(res, e); }
+});
+
 // Delete: unassign from all projects (their team-only members leave), then delete.
 router.delete('/api/company-teams/:teamId', requireAuth, requireRole('MANAGER'), async (req, res) => {
   try {
@@ -155,11 +172,11 @@ router.get('/api/projects/:projectId/member-teams', requireAuth, async (req, res
       const m = await db.query('select 1 from project_members where project_id=$1 and user_id=$2', [req.params.projectId, req.user.sub]);
       if (!m.rowCount) throw fail(403, 'Not a member of this project.');
     }
-    const assigned = await db.query('select t.id,t.name from project_teams pt join teams t on t.id=pt.team_id where pt.project_id=$1 order by t.name', [req.params.projectId]);
+    const assigned = await db.query('select t.id,t.name from project_teams pt join teams t on t.id=pt.team_id where pt.project_id=$1 and pt.is_active=true order by t.name', [req.params.projectId]);
     const rows = await db.query(
       `select pm.user_id, pm.source, t.name, (pt.team_id is not null) assigned
          from project_members pm join team_members tm on tm.user_id = pm.user_id join teams t on t.id = tm.team_id and t.project_id is null
-         left join project_teams pt on pt.team_id = t.id and pt.project_id = pm.project_id
+         left join project_teams pt on pt.team_id = t.id and pt.project_id = pm.project_id and pt.is_active = true
         where pm.project_id = $1 order by t.name`, [req.params.projectId]);
     res.json({ ok: true, assignedTeams: assigned.rows, memberships: rows.rows });
   } catch (e) { respond(res, e); }

@@ -907,3 +907,62 @@ h1.tn-title{margin:0 0 12px;line-height:1.2}
 .tn-popup-table .tn-scroll{border:0!important;border-radius:0!important}
 
 .tn-table-filters .tn-column-filter[hidden]{display:none!important}
+
+/* Runs & reports: re-run tag, which cases a run had, up-to-date status lines */
+.tn-rerun-tag{display:inline-block;margin-left:4px;padding:1px 8px;border-radius:99px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:600;vertical-align:middle}
+.tn-run-scope,.tn-status-sub{color:#64748b;font-size:12px;margin-top:2px;line-height:1.35}
+/* Test case popup: Details | Run history */
+.tn-case-viewer{width:min(860px,calc(100vw - 32px))}
+.tn-case-viewer .tn-dialog-body{display:grid;gap:14px}
+.tn-case-tabs{border-bottom:1px solid #e7edf5}
+.tn-case-status{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 18px;align-items:center;padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;font-size:13.5px}
+.tn-case-status>span{color:#64748b;font-size:12px;font-weight:600}
+.tn-case-section{margin-top:14px}
+.tn-case-section h3{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;margin:0 0 6px}
+.tn-case-section ol,.tn-case-section ul{margin:0;padding-left:22px;display:grid;gap:4px;font-size:13.5px}
+.tn-case-section code,.tn-case-data code{font-size:12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:5px;padding:0 5px;color:#0f172a;word-break:break-all}
+.tn-case-data{display:flex;flex-wrap:wrap;gap:6px}
+.tn-case-criteria{border:1px solid #e2e8f0;border-left:3px solid #16a34a;border-radius:8px;padding:10px 12px;background:#f8fafc}
+
+/* Runs: re-run links under the run title; screenshot pictures in the case popup */
+.tn-run-links{margin-top:4px;font-size:12.5px;color:#475569}
+.tn-link-btn{border:0;background:none;padding:0;color:#2563eb;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+
+/* An action that is not available for this row (e.g. no AI report): greyed out, still shows its tooltip */
+.tn-icon-action[aria-disabled="true"]{background:#cbd5e1!important;color:#fff;cursor:not-allowed;box-shadow:none}
+
+/* One search box everywhere: [ Column ▾ | 🔍 Search… ] — same width and height on every table, popup and the Home page */
+.tn-searchbar{display:flex;align-items:stretch;width:min(560px,100%);height:40px;border:1px solid #94a3b8;border-radius:9px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.06);overflow:hidden}
+.tn-searchbar:focus-within{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.18)}
+.tn-table-filters .tn-searchbar .tn-column-filter{flex:0 0 auto;width:auto;max-width:170px;height:100%!important;min-height:0!important;max-height:none!important;margin:0;padding:0 30px 0 12px;border:0!important;border-right:1px solid #e2e8f0!important;border-radius:0!important;background-color:#f8fafc;box-shadow:none!important;font-size:13px!important;color:#334155}
+.tn-table-filters .tn-searchbar .tn-column-filter:focus{box-shadow:none!important;outline:0}
+.tn-table-filters .tn-searchbar .tn-search{flex:1 1 auto;min-width:0;margin:0}
+.tn-table-filters .tn-searchbar .tn-search .tn-table-query{height:100%!important;min-height:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent}
+.tn-table-filters .tn-searchbar .tn-search .tn-table-query:focus{box-shadow:none!important;outline:0}
+.tn-home-search{flex:0 1 560px;width:min(560px,100%)}
+.tn-home-search .form-control{height:40px!important;padding:8px 12px 8px 38px!important;font-size:13.5px!important;border:1px solid #94a3b8!important;border-radius:9px!important}
+.tn-home-search svg{left:12px;width:17px;height:17px}
+@media(max-width:650px){.tn-searchbar{width:100%}}
+
+/* Projects: Active · All · Inactive switch */
+.tn-status-switch{display:inline-flex;gap:2px;margin:14px 16px 0;padding:3px;border:1px solid #dde3ec;border-radius:10px;background:#eef1f6}
+.tn-status-switch button{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border:0;border-radius:7px;background:transparent;color:#475569;font-size:13px;font-weight:600;cursor:pointer}
+.tn-status-switch button span{min-width:20px;padding:0 6px;border-radius:99px;background:#e2e8f0;color:#334155;font-size:11px;line-height:18px;text-align:center}
+.tn-status-switch button:hover{background:#e2e8f0;color:#0f172a}
+.tn-status-switch button[aria-checked="true"]{background:#0f1f5c;color:#fff;box-shadow:0 1px 3px rgba(15,31,92,.3)}
+.tn-status-switch button[aria-checked="true"] span{background:rgba(255,255,255,.2);color:#fff}
+.tn-status-switch button:focus-visible{outline:3px solid #93b0ff;outline-offset:1px}
+.tn-home-search{height:40px}
+
+/* Teams popups: the add box (searchable dropdown + Add) matches the table search below: 560 × 40 */
+.tn-ct-add{max-width:min(560px,100%);width:100%}
+.tn-ct-add .tn-combo-input{height:40px!important;min-height:40px!important;border:1px solid #94a3b8!important;border-radius:9px!important;font-size:13.5px!important}
+.tn-ct-add .btn{height:40px;min-height:40px!important}
+.tn-popup-table .tn-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.tn-popup-table .tn-status-switch{margin:0}
+
+/* Teams popups: the add input is exactly as wide as the table search below (560 × 40) and lined up with it; Add sits beside it */
+.tn-ct-add{max-width:none!important;width:auto!important;padding-left:17px}
+.tn-ct-add .tn-combo{flex:0 1 560px!important;width:min(560px,100%);max-width:560px}
+.tn-ct-add .btn{flex:none}
+.tn-users-switch{margin:14px 16px 0}

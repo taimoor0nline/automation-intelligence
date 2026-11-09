@@ -65,6 +65,9 @@
       #tnProject .tn-field label{display:block;margin:0 0 5px;color:#475569;font-size:11px;font-weight:700}
       #tnProject .tn-field select{width:100%;margin:0;padding:8px 9px;border:1px solid #d0d5dd;border-radius:8px;background:#fff;color:#10141c;font-size:12.5px}
       #tnProject .tn-hint{margin-top:9px;color:#64748b;font-size:11px;line-height:1.45}
+.tn-choice-menu{display:grid;gap:2px;min-width:250px}
+.tn-panel button.tn-choice{font-weight:600}
+.tn-panel button.tn-choice.on{background:#eef2ff;color:#1d4ed8}
       #tnProfile>.tn-item{height:40px;gap:8px;padding:0 8px;border:0;border-radius:8px;color:#fff;font-size:13.5px;font-weight:500}
       #tnProfile>.tn-item:hover,#tnProfile.open>.tn-item{background:rgba(255,255,255,.12);color:#fff}
       .tn-avatar{display:grid;place-items:center;width:30px;height:30px;flex:0 0 30px;border-radius:50%;background:#60a5fa;color:#0f1f5c;font-size:12px;font-weight:700;box-shadow:0 0 0 2px rgba(255,255,255,.35)}
@@ -191,7 +194,7 @@
     const name = el('span', 'tn-btn-name', 'Select project');
     btn.append(el('span', 'tn-btn-kicker', 'Project'), name, el('span', 'tn-caret', '▾'));
     btn.onclick = (e) => { e.stopPropagation(); const open = !wrap.classList.contains('open'); closeMenus(wrap); wrap.classList.toggle('open', open); };
-    const panel = el('div', 'tn-panel');
+    const panel = el('div', 'tn-panel right'); // opens to the left, so it stays on screen at the top-right
     wrap.append(btn, panel);
 
     async function moveInto(id, label) {
@@ -209,15 +212,32 @@
 
     (async () => {
       const project = await moveInto(PROJECT_SELECT[page], 'Project');
-      const repo = REPO_SELECT[page] ? await moveInto(REPO_SELECT[page], 'Source code repository') : null;
+      const repo = REPO_SELECT[page] ? await moveInto(REPO_SELECT[page], 'Testing mode') : null;
+      // AI icon on the testing mode choice (black box = browser only, white box = with source code).
+      if (repo) { const lab = repo.closest('.tn-field')?.querySelector('label'); if (lab) lab.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:5px"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Testing mode'; }
       // Web testing: the project is already chosen on the project page, so only the source code choice is shown.
       const sourceOnly = page === 'web' && repo;
       if (sourceOnly) { project.closest('.tn-field').hidden = true; btn.querySelector('.tn-btn-kicker').textContent = 'Source code'; }
+      // Source code: one click shows the two choices as a menu (✓ on the selected one). The select stays hidden underneath,
+      // so the page's own logic (and the "link a repository" message) works exactly as before.
+      if (sourceOnly) {
+        const field = repo.closest('.tn-field'); field.querySelector('select').style.display = 'none';
+        const menu = el('div', 'tn-choice-menu'); field.appendChild(menu);
+        const draw = () => {
+          menu.replaceChildren(...[...repo.options].map((o) => {
+            const b = el('button', 'tn-choice' + (o.selected ? ' on' : ''), (o.selected ? '✓ ' : '') + o.textContent);
+            b.type = 'button'; b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', String(o.selected));
+            b.onclick = (e) => { e.stopPropagation(); repo.value = o.value; repo.dispatchEvent(new Event('change', { bubbles: true })); draw(); if (repo.value === o.value) wrap.classList.remove('open'); };
+            return b;
+          }));
+        };
+        draw(); repo.addEventListener('change', draw); new MutationObserver(draw).observe(repo, { childList: true });
+      }
       const hint = page === 'web' ? document.getElementById('platformContextHint') : null;
       if (hint) { hint.className = 'tn-hint'; panel.appendChild(hint); }
       if (page === 'web' && project && repo) document.querySelector('.platform-card')?.style.setProperty('display', 'none');
       if (!project) return;
-      const update = () => { const sel = sourceOnly ? repo : project; const o = sel.selectedOptions[0]; name.textContent = o && o.value ? o.textContent : (sourceOnly ? 'None' : 'Select project'); };
+      const update = () => { const sel = sourceOnly ? repo : project; const o = sel.selectedOptions[0]; name.textContent = o && o.value && o.value !== '__link_repo' ? o.textContent.replace(/^[⬛⬜]\s*White box · /, '').split(' · ')[0] : (sourceOnly ? 'None' : 'Select project'); };
       update();
       project.addEventListener('change', update);
       new MutationObserver(update).observe(project, { childList: true, subtree: true });

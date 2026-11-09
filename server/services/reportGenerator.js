@@ -123,7 +123,10 @@ function assertionGroundingHtml(testCases,summary){
 }
 
 function reportFileName(sessionId){const safe=String(sessionId||"run").replace(/[^a-zA-Z0-9_-]/g,"_");return `${safe}.html`;}
-function saveReportHtml(sessionId,html){fs.mkdirSync(REPORT_DIR,{recursive:true});const filePath=path.join(REPORT_DIR,reportFileName(sessionId));fs.writeFileSync(filePath,html,"utf8");return filePath;}
+function saveReportHtml(sessionId,html){fs.mkdirSync(REPORT_DIR,{recursive:true});const filePath=path.join(REPORT_DIR,reportFileName(sessionId));fs.writeFileSync(filePath,html,"utf8");
+  // Also store it with its run, so a later re-run in the same session does not replace this run's report.
+  require("./persistenceService").saveAiReportForRun(sessionId,html).catch(e=>console.warn("[report] could not store the AI report for its run:",e.message));
+  return filePath;}
 
 function buildAnalyticsReport({sessionId,story,targetUrl,environment,summary,analyses,testCases=[]}){
   if(!reportGenerationRequested(sessionId,summary)){removeReportFile(sessionId);return null;}

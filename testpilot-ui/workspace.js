@@ -16,7 +16,9 @@ const iconPaths={
  download:'<path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4"/>',
  pause:'<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
  userPlus:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
- assign:'<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M12 11v5M9.5 13.5h5"/>'
+ assign:'<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M12 11v5M9.5 13.5h5"/>',
+ report:'<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
+ ai:'<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'
 };
 function actionIcon(name,attributes,label){
  return '<button type="button" class="tn-icon-action" '+attributes+' aria-label="'+esc(label)+'" title="'+esc(label)+'"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+(iconPaths[name]||iconPaths.eye)+'</svg></button>';
@@ -191,9 +193,27 @@ document.addEventListener('input',e=>{if(e.target.id==='homeSearch')renderHome()
 // User management (managers): all sign-in accounts. Opened from the profile menu.
 const PLATFORM_ROLES={MANAGER:'Manager',QA:'Tester / QA',DEV:'Developer'};
 async function loadUsers(){
- const d=await api('/api/users');
- $('usersBody').innerHTML=(d.users||[]).map(u=>'<tr><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(u.displayName||u.email))+'</span><span><strong>'+esc(u.displayName)+'</strong><span class="tn-member-email">'+esc(u.email)+'</span></span></span></td><td><span class="tn-role-chip role-'+esc(u.role==='DEV'?'DEVELOPER':u.role==='MANAGER'?'PROJECT_MANAGER':u.role)+'">'+esc(PLATFORM_ROLES[u.role]||u.role)+'</span></td><td>'+(u.isActive?'<span class="tn-result pass">Active</span>':'<span class="tn-result fail">Inactive</span>')+'</td><td data-sort="'+esc(u.createdAt||'')+'"><div class="tn-when">'+esc(dateTime(u.createdAt))+'</div></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No users.</td></tr>';
+ const d=await api('/api/users');state.users=d.users||[];renderUsers();
 }
+// Active · All · Inactive. Accounts are deactivated, never deleted, so their name stays on runs, tasks and the Audit.
+function renderUsers(){
+ const all=state.users||[],f=state.userFilter||'active',inactive=all.filter(u=>!u.isActive),me=String(state.user?.sub||state.user?.id||'');
+ $('userCountActive').textContent=all.length-inactive.length;$('userCountAll').textContent=all.length;$('userCountInactive').textContent=inactive.length;
+ for(const b of document.querySelectorAll('[data-user-filter]'))b.setAttribute('aria-checked',String(b.dataset.userFilter===f));
+ const list=f==='all'?all:f==='inactive'?inactive:all.filter(u=>u.isActive);
+ $('usersBody').innerHTML=list.map(u=>'<tr><td><span class="tn-row-person tn-person-sm"><span class="tn-avatar tn-avatar-0" aria-hidden="true">'+esc(initialsOf(u.displayName||u.email))+'</span><span><strong>'+esc(u.displayName)+'</strong><span class="tn-member-email">'+esc(u.email)+'</span></span></span></td><td><span class="tn-role-chip role-'+esc(u.role==='DEV'?'DEVELOPER':u.role==='MANAGER'?'PROJECT_MANAGER':u.role)+'">'+esc(PLATFORM_ROLES[u.role]||u.role)+'</span></td><td>'+(u.isActive?'<span class="tn-result pass">Active</span>':'<span class="tn-result fail">Inactive</span>')+'</td>'
+  +createdCell(u.createdByName,u.createdAt)+updatedCell(u.updatedByName,u.updatedAt,u.createdByName,u.createdAt)
+  +'<td><span class="tn-icon-actions">'+(String(u.id)===me?'<span class="tn-muted small">You</span>':u.isActive?actionIcon('pause','data-user-status="deactivate" data-user-id="'+esc(u.id)+'"','Deactivate '+(u.displayName||u.email)):actionIcon('restore','data-user-status="activate" data-user-id="'+esc(u.id)+'"','Activate '+(u.displayName||u.email)))+'</span></td></tr>').join('')
+  ||'<tr><td colspan="6" class="tn-empty">'+(f==='inactive'?'No inactive users.':'No users.')+'</td></tr>';
+}
+document.addEventListener('click',async e=>{
+ const f=e.target.closest('[data-user-filter]');if(f){state.userFilter=f.dataset.userFilter;renderUsers();return;}
+ const b=e.target.closest('[data-user-status]');if(!b)return;
+ const u=(state.users||[]).find(x=>String(x.id)===String(b.dataset.userId));if(!u)return;
+ const activate=b.dataset.userStatus==='activate',name=u.displayName||u.email;
+ if(!await confirmDanger({title:(activate?'Activate ':'Deactivate ')+name+'?',message:activate?name+' can sign in again and can be added to teams and projects.':name+' can no longer sign in and is signed out at once. Their name stays on runs, tasks and the Audit. They are not offered when adding people to teams or projects.',confirmLabel:activate?'Activate':'Deactivate',tone:'warning'}))return;
+ try{await api('/api/users/'+encodeURIComponent(u.id)+'/status',{method:'PATCH',body:JSON.stringify({active:activate})});notice((activate?'Activated ':'Deactivated ')+name+'.','success');await loadUsers();}catch(err){notice(err.message);}
+});
 // Source code card (project page): GitHub repositories linked to this project.
 async function loadRepos(){
  const d=await api('/api/projects/'+encodeURIComponent(state.projectId)+'/repositories');
@@ -284,7 +304,6 @@ function show(view,historyMode='push'){
   $('breadcrumb').textContent='Project workspace';
  }
  clearNotice();
- if((view==='reports'||view==='executions')&&state.projectId)loadSavedReports().catch(e=>notice(e.message));
  if((view==='inventory'||view==='audit'||view==='learning')&&state.projectId)loadInventory().catch(e=>notice(e.message));
  if(view==='users')loadUsers().catch(e=>notice(e.message));
  if(view==='details'&&state.projectId)loadRepos().catch(()=>{});
@@ -338,7 +357,7 @@ async function loadProjects(){
  picker.innerHTML='<option value="">Select project</option>'+state.projects.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
  picker.value=state.projectId;
  localStorage.setItem('testnexus:currentProject',state.projectId);
- $('projectsBody').innerHTML=state.projects.map(projectRow).join('')||'<tr><td colspan="8" class="tn-empty">No projects yet. Create your first project.</td></tr>';
+ $('projectsBody').innerHTML=state.projects.map(projectRow).join('')||'<tr><td colspan="9" class="tn-empty">No projects yet. Create your first project.</td></tr>';
  renderHome();
  let loaded=false,lastError=null;
  const ordered=[state.projectId,...state.projects.map(p=>p.id)].filter((v,i,a)=>v&&a.indexOf(v)===i);
@@ -473,16 +492,10 @@ function renderTasks(){
  $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(x.work_type)+'</div></div></div></td><td>'+display(x.external_case_id)+'</td><td>'+display(x.assigned_to_name)+'</td><td>'+dateTime(x.eta_at||x.due_at)+'</td><td>'+statusTag(x.status)+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('edit','data-edit-task="'+esc(x.id)+'"','View / edit task '+x.title)+actionIcon('play','data-start-task="'+esc(x.id)+'"','Start testing task '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-task="'+esc(x.id)+'"','Delete task '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="9" class="tn-empty">No tasks match your filters. Clear the search or select another status.</td></tr>';
  $('taskVisibleCount').textContent=tasks.length;updateTaskSelection();
 }
-async function loadSavedReports(){const project=requireProject(),kind=$('savedReportKind').value;const data=await api('/api/projects/'+encodeURIComponent(project)+'/report-snapshots'+(kind?'?kind='+encodeURIComponent(kind):''));if($('runsCountSaved'))$('runsCountSaved').textContent=data.reports.length;$('savedReportsBody').innerHTML=data.reports.map(r=>'<tr><td><span class="tn-report-kind kind-'+esc(String(r.report_kind).toLowerCase())+'">'+esc({REVIEWED_CASE:'Reviewed case',EXECUTION:'Execution',AI_LEARNING:'AI learning'}[r.report_kind]||r.report_kind.replaceAll('_',' '))+'</span></td><td>'+(r.external_case_id?'<span class="tn-case-id">'+esc(r.external_case_id)+'</span>':'<span class="tn-session-id" title="'+esc(r.run_id||r.session_id)+'">'+esc(r.run_id||r.session_id)+'</span>')+'</td><td>'+esc(r.revision)+'</td><td data-sort="'+esc(r.created_at||'')+'">'+dateTime(r.created_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('eye','data-saved-report="'+esc(r.id)+'"','View saved report')+'</span></td></tr>').join('')||'<tr><td colspan="5" class="tn-empty">No saved reports for this selection.</td></tr>';}
-async function openSavedReport(id){const project=requireProject(),data=await api('/api/projects/'+encodeURIComponent(project)+'/report-snapshots/'+encodeURIComponent(id));const detail=$('savedReportDetail');detail.replaceChildren();const title=document.createElement('h3');title.className='h6';title.textContent=data.report.report_kind.replaceAll('_',' ')+' · revision '+data.report.revision;const pre=document.createElement('pre');pre.className='p-3 rounded border';pre.style.cssText='white-space:pre-wrap;max-height:400px;overflow:auto';pre.textContent=JSON.stringify(data.report.report_json,null,2);detail.append(title,pre);if(data.hasHtml){const link=document.createElement('button');link.className='btn btn-outline-primary btn-sm';link.textContent='Open stored HTML report';link.onclick=async()=>{const authToken=token();const url='/api/projects/'+encodeURIComponent(project)+'/report-snapshots/'+encodeURIComponent(id)+'?format=html';const response=await fetch(url,{headers:{Authorization:'Bearer '+authToken}});if(!response.ok)throw new Error('Report unavailable');const html=await response.text();const frame=document.createElement('iframe');frame.setAttribute('sandbox','');frame.title='Stored execution report';frame.style.cssText='width:100%;height:650px;border:1px solid #ccd5e3;border-radius:8px';frame.srcdoc=html;detail.append(frame);};detail.append(link);}}
-// Runs & reports sub-tabs: Test runs | Evidence | Saved reports (one table at a time).
-function showRunsTab(name){
- for(const b of document.querySelectorAll('[data-runs-tab]')){const on=b.dataset.runsTab===name;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;$('runsPanel'+b.dataset.runsTab).hidden=!on;}
-}
-document.addEventListener('click',e=>{const b=e.target.closest('[data-runs-tab]');if(b)showRunsTab(b.dataset.runsTab);});
-document.addEventListener('keydown',e=>{const b=e.target.closest?.('[data-runs-tab]');if(!b||!['ArrowLeft','ArrowRight'].includes(e.key))return;const all=[...document.querySelectorAll('[data-runs-tab]')];const next=all[(all.indexOf(b)+(e.key==='ArrowRight'?1:all.length-1))%all.length];showRunsTab(next.dataset.runsTab);next.focus();});
+const canRerun=()=>['QA','PROJECT_MANAGER'].includes(state.context?.projectRole);
 function renderReports(){
- const runs=state.context.runs,passed=runs.reduce((n,r)=>n+Number(r.passed||0),0),failed=runs.reduce((n,r)=>n+Number(r.failed||0),0);
+ // One row per run; re-runs are attempts inside it (see runGroups on the server).
+ const runs=state.context.runGroups||[],passed=runs.reduce((n,r)=>n+Number(r.passed||0),0),failed=runs.reduce((n,r)=>n+Number(r.failed||0),0);
  const total=passed+failed,rate=total?Math.round(passed/total*100):0,last=runs[0];
  const kpi=(icon,tone,label,value,extra='')=>'<div class="tn-kpi"><span class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-'+tone+'" aria-hidden="true">'+icon+'</span>'+label+'</span><b>'+value+'</b>'+extra+'</div>';
  const svg=p=>'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">'+p+'</svg>';
@@ -491,10 +504,9 @@ function renderReports(){
   kpi(svg('<path d="m8 5 11 7-11 7z"/>'),'violet','Test runs',runs.length)+
   kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>'),'green','Tests passed',passed)+
   kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>'),failed?'orange':'slate','Tests failed',failed)+
-  kpi(svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),'blue','Last run',last?esc(date(last.completed_at)):'—',last?'<div class="tn-kpi-sub">'+esc(last.executed_by_name||'Unknown')+'</div>':'');
- $('runsCountRuns').textContent=runs.length;$('runsCountEvidence').textContent=state.evidence.length;
- $('runsBody').innerHTML=runs.map(r=>{const p=Number(r.passed||0),f=Number(r.failed||0),t=p+f,pct=t?Math.round(p/t*100):0;return '<tr><td data-sort="'+esc(r.completed_at||'')+'"><strong>Run #'+esc(r.run_number)+'</strong><div><span class="tn-session-id" title="'+esc(r.session_id||'')+'">'+esc(r.session_id||'')+'</span></div></td><td data-sort="'+pct+'"><div class="tn-run-result"><span class="tn-result '+(f?'fail':'pass')+'">'+(f?'Failed':'Passed')+'</span><span class="tn-run-bar" role="img" aria-label="'+p+' passed, '+f+' failed"><span style="width:'+pct+'%"></span></span><span class="tn-run-counts">'+p+' / '+t+'</span></div></td><td>'+display(r.environment)+'</td><td>'+(r.executed_by_name?'<span class="tn-who">'+esc(r.executed_by_name)+'</span>':'<span class="tn-muted">Not recorded</span>')+'</td><td>'+dateTime(r.completed_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('eye','data-open-run="'+esc(r.id)+'"','View run '+r.run_number+' details')+'</span></td></tr>';}).join('')||'<tr><td colspan="6" class="tn-empty">No test runs yet. Start testing from Context &amp; scope.</td></tr>';
- $('evidenceBody').innerHTML=state.evidence.map(x=>'<tr><td><span class="tn-case-title">'+esc(String(x.title||x.external_case_id||'Test').replace(/^Test execution\s+\S+\s+-\s+/i,''))+'</span><div><span class="tn-case-id">'+esc(x.external_case_id||'')+'</span></div></td><td>Run #'+esc(x.run_number)+'</td><td><span class="tn-result '+(x.passed?'pass':'fail')+'">'+(x.passed?'Passed':'Failed')+'</span></td><td>'+evidenceButtons(x.evidence_json)+'</td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">No stored execution evidence yet.</td></tr>';
+  kpi(svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),'blue','Last run',last?esc(date(last.last_at||last.completed_at)):'—',last?'<div class="tn-kpi-sub">'+esc(last.last_by_name||last.executed_by_name||'Unknown')+'</div>':'');
+ $('runsCountRuns').textContent=runs.length;
+ $('runsBody').innerHTML=runs.map(r=>{const p=Number(r.passed||0),f=Number(r.failed||0),t=p+f,pct=t?Math.round(p/t*100):0;return '<tr><td data-sort="'+esc(r.completed_at||'')+'"><strong>Run #'+esc(r.run_number)+'</strong></td><td data-sort="'+pct+'"><div class="tn-run-result"><span class="tn-result '+(f?'fail':'pass')+'">'+(f?'Failed':'Passed')+'</span><span class="tn-run-bar" role="img" aria-label="'+p+' passed, '+f+' failed"><span style="width:'+pct+'%"></span></span><span class="tn-run-counts">'+p+' / '+t+'</span></div></td><td>'+display(r.environment)+'</td><td data-sort="'+(1+Number(r.rerun_count||0))+'">'+(1+Number(r.rerun_count||0))+'</td>'+createdCell(r.executed_by_name,r.completed_at)+updatedCell(r.last_by_name||r.executed_by_name,r.last_at||r.completed_at,r.executed_by_name,r.completed_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-open-run="'+esc(r.id)+'"','View run '+r.run_number+' test cases')+actionIcon('report','data-run-report="'+esc(r.latest_attempt_id||r.id)+'" data-report-label="Run #'+esc(r.run_number)+(Number(r.rerun_count)?' · Attempt '+(1+Number(r.rerun_count)):'')+'"','Report of run '+r.run_number+(Number(r.rerun_count)?' (latest attempt)':''))+(r.has_ai_report?actionIcon('ai','data-run-ai="'+esc(r.latest_attempt_id||r.id)+'" data-report-label="Run #'+esc(r.run_number)+(Number(r.rerun_count)?' · Attempt '+(1+Number(r.rerun_count)):'')+'"','AI report of run '+r.run_number+(Number(r.rerun_count)?' (latest attempt)':'')):actionIcon('ai','aria-disabled="true" data-no-ai','No AI report was generated for this run'))+(canRerun()?actionIcon('play','data-rerun-run="'+esc(r.id)+'" data-run-label="Run #'+esc(r.run_number)+'"','Re-run run '+r.run_number):'')+'</span></td></tr>';}).join('')||'<tr><td colspan="7" class="tn-empty">No test runs yet. Start testing from Context &amp; scope.</td></tr>';
 }
 // Run details (eye on Runs & reports): every test case of that run with its result and evidence.
 function openRunDialog(sessionId,runNumber){
@@ -928,7 +940,6 @@ async function retest(taskIds,includeChildren=false){
 }
 let lastTaskTrigger=null;
 function bind(){
- if($('savedReportsRefresh'))$('savedReportsRefresh').onclick=()=>loadSavedReports().catch(e=>notice(e.message));$('savedReportKind').onchange=()=>loadSavedReports().catch(e=>notice(e.message));$('savedReportsBody').onclick=e=>{const button=e.target.closest('[data-saved-report]');if(button)openSavedReport(button.dataset.savedReport).catch(err=>notice(err.message));};
  if($('inventoryRefresh'))$('inventoryRefresh').onclick=()=>loadInventory().catch(e=>notice(e.message));
  if($('teamCreateForm'))$('teamCreateForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/teams',{method:'POST',body:JSON.stringify(formPayload(e.target))});e.target.reset();await loadTeams();notice('Team created.','success');}catch(err){notice(err.message);}};
  if($('projectTeamMembers'))$('projectTeamMembers').onclick=async e=>{const button=e.target.closest('[data-remove-team-member]');if(!button)return;if(!await confirmDanger({title:'Remove team member?',message:'Do you want to remove '+(nameFrom(button,'Remove member ')||'this member')+' from this team?',note:'They stay on the project; only their team membership is removed.',confirmLabel:'Remove'}))return;try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/teams/'+encodeURIComponent(button.dataset.removeTeamMember)+'/members/'+encodeURIComponent(button.dataset.memberId),{method:'DELETE'});await loadTeams();notice('Team member removed.','success');}catch(err){notice(err.message);}};
@@ -1124,66 +1135,167 @@ window.addEventListener('message',async e=>{
  if(!e.data.changed)return;
  try{await loadEnvironments();await loadWorkspace();show('environments','none');if(e.data.message)notice(e.data.message,'success');}catch(err){notice(err.message);}
 });
-// ---- Run details page: results, evidence and report of one run ----
-const runPage={data:null,shots:[],shotIndex:0,urls:[]};
+// ---- Run details page: the run's test cases with their up-to-date status ----
+const runPage={data:null,shots:[],viewList:[],caseShots:[],shotIndex:0,urls:[]};
 document.addEventListener('click',e=>{
  const open=e.target.closest('[data-open-run]');if(open){state.runId=open.dataset.openRun;show('run');return;}
  if(e.target.closest('#runPageBack')){show('executions');return;}
- const tab=e.target.closest('[data-run-tab]');if(tab){showRunTab(tab.dataset.runTab);return;}
 });
-function showRunTab(name){
- for(const b of document.querySelectorAll('[data-run-tab]')){const on=b.dataset.runTab===name;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;$('runPanel'+b.dataset.runTab).hidden=!on;}
- $('runResultFilter').hidden=name==='Report';
-}
 const caseTitle=t=>String(t||'').replace(/^Test execution\s+\S+\s+-\s+/i,'');
 const secs=ms=>ms==null?'—':(Number(ms)/1000).toFixed(1)+' s';
 function evidenceOf(r){const e=r.evidence_json?.evidence||r.evidence_json||{};const ok=u=>typeof u==='string'&&(u.startsWith('/api/artifacts/')||/^\/api\/projects\/[^/]+\/run-evidence\//.test(u));return {shot:ok(e.screenshotUrl)?e.screenshotUrl:'',video:ok(e.videoUrl)?e.videoUrl:''};}
 async function loadRunPage(){
  if(!state.runId){show('executions','replace');return;}
  for(const u of runPage.urls)URL.revokeObjectURL(u);runPage.urls=[];
- $('runResultsBody').innerHTML='<tr><td colspan="6" class="tn-empty">Loading run…</td></tr>';
- const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(state.runId)+'/details');
- runPage.data=d;runPdf.runId='';const run=d.run,project=state.context?.project||{};
- const passed=Number(run.passed||0),failed=Number(run.failed||0),total=Number(run.total||passed+failed),rate=total?Math.round(passed/total*100):0;
- $('runPageTitle').innerHTML='Run #'+esc(run.run_number)+' <span class="tn-result '+(failed?'fail':'pass')+'">'+(failed?'Failed':'Passed')+'</span>';
- $('runPageMeta').textContent=[dateTime(run.completed_at),run.environment,run.executed_by_name?'by '+run.executed_by_name:'',run.browser?run.browser.charAt(0).toUpperCase()+run.browser.slice(1):'',run.duration_ms?'took '+secs(run.duration_ms):''].filter(Boolean).join(' · ');
- const svg=p=>'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">'+p+'</svg>';
- const kpi=(icon,tone,label,value,extra='')=>'<div class="tn-kpi"><span class="tn-kpi-label"><span class="tn-kpi-icon tn-kpi-'+tone+'" aria-hidden="true">'+icon+'</span>'+label+'</span><b>'+value+'</b>'+extra+'</div>';
- $('runPageKpis').innerHTML=kpi(svg('<path d="M3 12h18M3 6h18M3 18h18"/>'),'violet','Total tests',total)
-  +kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>'),'green','Passed',passed)
-  +kpi(svg('<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>'),failed?'orange':'slate','Failed',failed)
-  +kpi(svg('<path d="M20 6 9 17l-5-5"/>'),rate>=90?'green':rate>=70?'amber':'orange','Pass rate',total?rate+'%':'—',total?'<div class="tn-mini-bar" role="img" aria-label="'+rate+' percent passed"><span style="width:'+rate+'%"></span></div>':'');
+ $('runResultsBody').innerHTML='<tr><td colspan="9" class="tn-empty">Loading run…</td></tr>';
+ const g=await api('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(state.runId)+'/group');
+ runPage.group=g;state.runId=g.run.id; // always the run itself (attempt 1)
+ const run=g.run,project=state.context?.project||{};
+ $('runPageTitle').textContent='Run #'+run.run_number;
+ $('runPageMeta').textContent=[run.environment,'Times run: '+g.attempts.length].filter(Boolean).join(' · ');
  // breadcrumb: Projects › project › Runs & reports › Run #N
  $('breadcrumb').innerHTML='<a href="/workspace.html#projects">Projects</a><span aria-hidden="true">›</span><a href="'+esc(projectRoute(state.projectId,'details'))+'">'+esc(project.name||'Project')+'</a><span aria-hidden="true">›</span><a href="'+esc(projectRoute(state.projectId,'executions'))+'">Runs &amp; reports</a><span aria-hidden="true">›</span><span aria-current="page">Run #'+esc(run.run_number)+'</span>';
- runPage.shots=d.results.map(r=>({r,...evidenceOf(r)})).filter(x=>x.shot);
- $('runCountResults').textContent=d.results.length;$('runCountEvidence').textContent=runPage.shots.length;
- renderRunResults();renderRunEvidence();renderRunReport();showRunTab('Results');
+ renderRunResults();
 }
-function filteredResults(){const f=$('runResultFilter').value;return (runPage.data?.results||[]).filter(r=>!f||(f==='failed'?!r.passed:r.passed));}
+const resultTag=passed=>'<span class="tn-result '+(passed?'pass':'fail')+'">'+(passed?'Passed':'Failed')+'</span>';
+const attemptLabel=n=>'Attempt '+n;
+// Test cases: latest result across all attempts.
 function renderRunResults(){
- const list=filteredResults();
- $('runResultsBody').innerHTML=list.map(r=>{
-  const ev=evidenceOf(r),i=runPage.shots.findIndex(x=>x.r===r);
-  const err=!r.passed&&r.error_message?'<details class="tn-run-error"><summary>Why it failed</summary><pre>'+esc(String(r.error_message).slice(0,4000))+'</pre></details>':'';
-  const evid=(ev.shot?actionIcon('image','data-run-shot="'+i+'"','View screenshot of '+r.external_case_id):'')+(ev.video?actionIcon('video','data-evidence="'+esc(ev.video)+'"','View video of '+r.external_case_id):'');
-  return '<tr><td><span class="tn-case-id">'+esc(r.external_case_id||'—')+'</span> '+esc(caseTitle(r.title))+err+'</td><td>'+esc([r.test_category,r.scenario_type].filter(Boolean).map(x=>String(x).charAt(0)+String(x).slice(1).toLowerCase()).join(' · ')||'—')+'</td><td>'+(r.priority?priorityTag(r.priority):'—')+'</td><td><span class="tn-result '+(r.passed?'pass':'fail')+'">'+(r.passed?'Passed':'Failed')+'</span></td><td>'+secs(r.duration_ms)+'</td><td><span class="tn-icon-actions">'+(evid||'<span class="tn-muted">None</span>')+'</span></td></tr>';
- }).join('')||'<tr><td colspan="6" class="tn-empty">No results match this filter.</td></tr>';
+ const g=runPage.group;$('runCasesCount').textContent=g.cases.length;
+ $('runResultsBody').innerHTML=g.cases.map(r=>'<tr><td><span class="tn-case-id">'+esc(r.external_case_id||'—')+'</span> '+esc(caseTitle(r.title))+'</td><td>'+esc((x=>x?String(x).charAt(0).toUpperCase()+String(x).slice(1).toLowerCase():'—')(r.test_category))+'</td><td>'+esc((x=>x?String(x).charAt(0).toUpperCase()+String(x).slice(1).toLowerCase():'—')(r.scenario_type))+'</td><td>'+(r.priority?priorityTag(r.priority):'—')+'</td><td data-sort="'+(r.passed?1:0)+'">'+resultTag(r.passed)+'</td><td data-sort="'+Number(r.times_run||1)+'">'+Number(r.times_run||1)+'</td>'+createdCell(r.case_created_by_name,r.case_created_at)+updatedCell(r.latest_by_name,r.latest_completed_at,r.case_created_by_name,r.case_created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-open-case="'+esc(r.external_case_id||'')+'"','Details and run history of '+(r.external_case_id||'this test case'))+(canRerun()?actionIcon('play','data-rerun-case="'+esc(r.external_case_id||'')+'"','Re-run '+(r.external_case_id||'this test case')):'')+'</span></td></tr>').join('')||'<tr><td colspan="9" class="tn-empty">No test cases were recorded for this run.</td></tr>';
 }
-document.addEventListener('change',e=>{if(e.target.id==='runResultFilter'){renderRunResults();renderRunEvidence();}});
-// Attachments: "Edit project details" opens the same project form as on Context & scope.
+// One attempt's results, for its PDF report (kept apart from the run page).
+const reportRun={data:null,shots:[],runId:'',label:''};
+async function loadRunData(runId,label=''){
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(runId)+'/details');
+ reportRun.data=d;reportRun.runId=runId;reportRun.label=label||('Run #'+d.run.run_number);reportRun.shots=d.results.map(r=>({r,...evidenceOf(r)})).filter(x=>x.shot);
+ return d;
+}
 async function authedUrl(url){const r=await fetch(url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('missing');const u=URL.createObjectURL(await r.blob());runPage.urls.push(u);return u;}
-function renderRunEvidence(){
- const f=$('runResultFilter').value,cards=runPage.shots.map((x,i)=>({x,i})).filter(({x})=>!f||(f==='failed'?!x.r.passed:x.r.passed));
- const grid=$('runEvidenceGrid');
- grid.innerHTML=cards.map(({x,i})=>'<button type="button" class="tn-shot-card" data-run-shot="'+i+'" aria-label="Open screenshot of '+esc(x.r.external_case_id)+'"><span class="tn-shot-thumb" data-thumb="'+i+'"><span class="tn-muted">Loading…</span></span><span class="tn-shot-info"><span><span class="tn-case-id">'+esc(x.r.external_case_id)+'</span><span class="tn-result '+(x.r.passed?'pass':'fail')+'">'+(x.r.passed?'Passed':'Failed')+'</span></span><span class="tn-shot-title">'+esc(caseTitle(x.r.title))+'</span></span></button>').join('')||'<div class="tn-empty">No screenshots were stored for this run.</div>';
- for(const {x,i} of cards){authedUrl(x.shot).then(u=>{x.url=u;const t=grid.querySelector('[data-thumb="'+i+'"]');if(t){const img=new Image();img.src=u;img.alt='';t.replaceChildren(img);}}).catch(()=>{const t=grid.querySelector('[data-thumb="'+i+'"]');if(t)t.innerHTML='<span class="tn-muted">Not available</span>';});}
+// Short failure reason for tables: first line, without internal tags like [TN_ITEM=...] or "AssertionError:".
+const failReason=m=>{const t=String(m||'').split('\n')[0].replace(/\[[A-Z_]+=[^\]]*\]/g,'').replace(/^\s*\w*Error:\s*/,'').replace(/\s+/g,' ').trim();return t.length>110?t.slice(0,110)+'…':t;};
+// ---- Test case popup: Details (steps, test data, passing criteria) and Run history ----
+function showCaseTab(name){for(const b of document.querySelectorAll('[data-case-tab]')){const on=b.dataset.caseTab===name;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;$('casePanel'+b.dataset.caseTab).hidden=!on;}}
+const titleCase=v=>String(v||'').toLowerCase().replace(/_/g,' ').replace(/^./,c=>c.toUpperCase());
+function stepText(st){
+ if(typeof st==='string')return esc(st);
+ const action=titleCase(st?.action||'Step'),target=st?.target?' <code>'+esc(st.target)+'</code>':'',value=st?.value!=null&&st.value!==''?' with <code>'+esc(String(st.value))+'</code>':'';
+ return '<strong>'+esc(action)+'</strong>'+target+value;
 }
+async function openCase(caseId){
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(state.runId)+'/cases/'+encodeURIComponent(caseId));
+ const tc=d.testCase,h=d.history,last=h[0];
+ const title=caseTitle(tc?.title||last?.title||caseId);
+ $('caseViewerTitle').innerHTML='<span class="tn-case-id">'+esc(caseId)+'</span> '+esc(title);
+ $('caseViewerMeta').textContent=[tc?.category?titleCase(tc.category):'',tc?.type?titleCase(tc.type):'',tc?.priority?titleCase(tc.priority)+' priority':'',tc?.review?.status==='CONFIRMED'?'Approved'+(tc.review.confirmedAt?' on '+dateTime(tc.review.confirmedAt):''):tc?.review?.status?titleCase(tc.review.status):'',tc?.review?.revision?'Revision '+tc.review.revision:''].filter(Boolean).join(' · ');
+ const list=(items,ordered)=>items.length?'<'+(ordered?'ol':'ul')+'>'+items.map(x=>'<li>'+(ordered?stepText(x):esc(typeof x==='string'?x:JSON.stringify(x)))+'</li>').join('')+'</'+(ordered?'ol':'ul')+'>':'<p class="tn-muted">Not recorded</p>';
+ const data=tc?Object.entries(tc.testData||{}):[];
+ runPage.caseShots=h.map(x=>({r:{...x,external_case_id:caseId,title:x.title||title},meta:(((runPage.group?.attempts||[]).find(a=>a.id===x.run_id))?attemptLabel((runPage.group.attempts.find(a=>a.id===x.run_id)).attempt):'Run #'+x.run_number)+' · '+(x.executed_by_name||'Not recorded')+' · '+dateTime(x.completed_at),...evidenceOf(x)})).filter(x=>x.shot||x.video);
+ $('casePanelDetails').innerHTML='<div class="tn-case-status"><span>Status</span><div>'+(last?resultTag(last.passed):'—')+'</div><span>Last run by</span><div>'+esc(last?.executed_by_name||'Not recorded')+(last?' · '+dateTime(last.completed_at):'')+'</div><span>Times run</span><div>'+h.length+'</div></div>'
+  +(tc?'<div class="tn-case-section"><h3>Preconditions</h3>'+list(tc.preconditions)+'</div>'
+  +'<div class="tn-case-section"><h3>Test data</h3>'+(data.length?'<div class="tn-case-data">'+data.map(([k,v])=>'<code>'+esc(k)+': '+esc(typeof v==='string'?v:JSON.stringify(v))+'</code>').join('')+'</div>':'<p class="tn-muted">None</p>')+'</div>'
+  +'<div class="tn-case-section"><h3>Steps</h3>'+list(tc.steps,true)+'</div>'
+  +'<div class="tn-case-section tn-case-criteria"><h3>Passing criteria (expected result)</h3>'+list(tc.expectedResults)+'</div>'
+  :'<p class="tn-muted">The test case details were not saved for this run.</p>');
+ $('caseHistoryCount').textContent=h.length;
+ $('caseHistoryBody').innerHTML=h.map(x=>{
+  const i=runPage.caseShots.findIndex(s=>s.r.run_id===x.run_id);
+  const why=!x.passed&&x.error_message?'<div class="tn-status-sub" title="'+esc(String(x.error_message).slice(0,600))+'">'+esc(failReason(x.error_message))+'</div>':'';
+  const att=(runPage.group?.attempts||[]).find(a=>a.id===x.run_id);
+  const name=att?attemptLabel(att.attempt):'Run #'+x.run_number,label=(runPage.group?'Run #'+runPage.group.run.run_number+' · ':'')+name,ev=i<0?null:runPage.caseShots[i];
+  const pic=!ev?'<span class="tn-muted">Not available</span>':'<span class="tn-icon-actions">'+(ev.shot?actionIcon('image','data-case-shot="'+i+'"','Screenshot of '+name):'')+(ev.video?actionIcon('video','data-case-video="'+i+'"','Video of '+name):'')+'</span>';
+  const reports='<span class="tn-icon-actions">'+actionIcon('report','data-run-report="'+esc(x.run_id)+'" data-report-label="'+esc(label)+'"','Report of '+name)+(att&&!att.has_ai_report?actionIcon('ai','aria-disabled="true" data-no-ai','No AI report was generated for '+name):actionIcon('ai','data-run-ai="'+esc(x.run_id)+'" data-report-label="'+esc(label)+'"','AI report of '+name))+'</span>';
+  return '<tr><td data-sort="'+esc(x.completed_at||'')+'"><strong>'+esc(name)+'</strong></td><td>'+display(x.environment)+'</td><td>'+resultTag(x.passed)+why+'</td><td>'+pic+'</td><td>'+reports+'</td>'+createdCell(x.executed_by_name,x.completed_at)+'</tr>';
+ }).join('')||'<tr><td colspan="6" class="tn-empty">This test case has not run yet.</td></tr>';
+ showCaseTab('Details');
+ if(!$('caseViewer').open)$('caseViewer').showModal();
+}
+document.addEventListener('click',e=>{
+ const c=e.target.closest('[data-open-case]');if(c){openCase(c.dataset.openCase).catch(err=>notice(err.message));return;}
+ const t=e.target.closest('[data-case-tab]');if(t){showCaseTab(t.dataset.caseTab);return;}
+ const s=e.target.closest('[data-case-shot]');if(s){runPage.viewList=runPage.caseShots;openShot(Number(s.dataset.caseShot));return;}
+ const cv=e.target.closest('[data-case-video]');if(cv){runPage.viewList=runPage.caseShots;openShot(Number(cv.dataset.caseVideo)).then(()=>$('shotViewerVideo')?.click());return;}
+ const v=$('caseViewer');if(v?.open&&(e.target.closest('[data-close-case]')||e.target===v))v.close();
+});
+// Reports open in a new browser tab (full size). The tab is opened at once on the click, so the browser allows it;
+// the report is put in it when ready. If the browser blocks new tabs, the report opens in the viewer popup instead.
+function reportTab(){const w=window.open('','_blank');if(w){try{w.document.title='Preparing report…';w.document.body.innerHTML='<p style="font:15px system-ui,sans-serif;padding:32px;color:#475569">Preparing the report…</p>';}catch{}}return w;}
+// AI report: opens in its own tab (scripts off, Download button at the top); falls back to the viewer popup.
+const aiReport={blob:null,name:''};
+async function viewAiReport(runId,label,tab=null){
+ const r=await fetch('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(runId)+'/ai-report',{headers:{Authorization:'Bearer '+token()}});
+ if(!r.ok)throw Error('No AI report was generated for this run. Use "Generate AI Analysis Report" on the testing page after a run to create one.');
+ const html=await r.text();
+ aiReport.blob=new Blob([html],{type:'text/html'});aiReport.name='AI-report-'+String(label||'run').replace(/[^\w]+/g,'-')+'-'+String(state.context?.project?.reference_no||'project').replace(/[^\w-]+/g,'_')+'.html';
+ if(tab&&!tab.closed){
+  const data='data:text/html;charset=utf-8;base64,'+btoa(unescape(encodeURIComponent(html)));
+  const bar='<a href="'+data+'" download="'+esc(aiReport.name)+'" style="position:fixed;bottom:18px;right:18px;z-index:99;padding:8px 14px;border-radius:9px;background:#0f1f5c;color:#fff;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(15,23,42,.25)">Download</a>';
+  const page=html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="script-src \'none\'"><title>'+esc('AI report · '+(label||''))+'</title>').replace('</head>','<style>#exportAnalysisExcel{display:none!important}</style></head>').replace(/<body([^>]*)>/,'<body$1>'+bar);
+  tab.location.href=URL.createObjectURL(new Blob([page],{type:'text/html'}));
+  return;
+ }
+ $('pdfViewerTitle').textContent='AI report · '+(label||'');
+ $('pdfViewerMeta').textContent=state.context?.project?.name||'';
+ const f=document.createElement('iframe');f.title='AI report';f.setAttribute('sandbox','');f.srcdoc=html.replace('</head>','<style>#exportAnalysisExcel{display:none!important}</style></head>');$('pdfViewerBody').replaceChildren(f);
+ $('pdfViewer').dataset.mode='ai';$('pdfViewerDownload').textContent='Download';$('pdfViewerDownload').disabled=false;
+ if(!$('pdfViewer').open)$('pdfViewer').showModal();
+}
+function downloadAiReport(){const href=URL.createObjectURL(aiReport.blob),a=document.createElement('a');a.href=href;a.download=aiReport.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),1000);}
+// ---- Re-run: a whole run (Runs list ↻ / Re-run this run) or one case (case popup). ----
+// Runs again in the original session with the existing runner, so the result is saved as a new run (Run #N+1)
+// with its own screenshots and reports; earlier runs are never changed.
+let rerunBusy=false;
+// Re-run progress: the floating progress popup (same one as the testing page, run-progress.js).
+function rerunProgress(title,done,total,result){
+ if(!window.TNRunPopup)return;
+ window.TNRunPopup.show({title,total,completed:done,passed:Number(result?.passed||0),failed:Number(result?.failed||0),finished:!!result,
+  note:result?'Saved as a new attempt.':'You can keep working while the tests run.'});
+}
+async function rerun(runId,caseId='',runLabel=''){
+ if(rerunBusy){notice('A re-run is already in progress. Wait for it to finish.','warning');return;}
+ const plan=await api('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(runId)+'/rerun-plan',{method:'POST',body:JSON.stringify(caseId?{caseId}:{})});
+ const skipped=plan.blocked.map(x=>x.caseId+' ('+x.reason+')').join(', ');
+ if(!plan.caseIds.length){notice('Nothing can be re-run'+(skipped?': '+skipped:'')+'. Review the test cases on the testing page first.','warning');return;}
+ const n=plan.caseIds.length,shown=runLabel||('Run #'+plan.runNumber);
+ if(!await confirmDanger({title:caseId?'Re-run '+caseId+'?':'Re-run '+shown+'?',message:'This runs '+(caseId?'this test case':n+' test case'+(n===1?'':'s'))+' again'+(plan.environment?' in '+plan.environment:'')+'. The result is saved as a new attempt of '+shown+'. Earlier attempts stay as they are.',note:skipped?'Skipped: '+skipped:'',confirmLabel:'Re-run',tone:'warning'}))return;
+ rerunBusy=true;if($('caseViewer').open)$('caseViewer').close();
+ try{
+  const started=await api('/api/test-runs/start',{method:'POST',body:JSON.stringify({sessionId:plan.sessionId,approvedIds:plan.caseIds})});
+  const label='The re-run of '+shown;
+  if(started.runNumber)api('/api/projects/'+encodeURIComponent(requireProject())+'/runs/'+encodeURIComponent(runId)+'/rerun-link',{method:'POST',body:JSON.stringify({runNumber:started.runNumber,caseIds:plan.caseIds})}).catch(()=>{});
+  rerunProgress(label+' is running',0,n);
+  let done=false;
+  for(let i=0;i<240&&!done;i++){
+   await new Promise(r=>setTimeout(r,2500));
+   const pr=await api('/api/test-runs/progress/'+encodeURIComponent(plan.sessionId));
+   done=!!pr.progress?.complete;
+   if(!done&&window.TNRunPopup)window.TNRunPopup.show({title:label+' is running',total:Number(pr.progress?.total||n),completed:Number(pr.progress?.completed||0),passed:Number(pr.progress?.passed||0),failed:Number(pr.progress?.failed||0)});
+   else rerunProgress(label+(Number(pr.progress?.failed)?' completed with failures':' completed'),Number(pr.progress?.completed||n),Number(pr.progress?.total||n),pr.progress||{passed:0,failed:0});
+  }
+  if(!done){notice(label+' is still running. Refresh this page later to see its result.','warning');return;}
+  await loadWorkspace();
+  const fresh=(state.context?.runs||[]).find(r=>r.session_id===plan.sessionId&&String(r.run_number)===String(started.runNumber));
+  if(!fresh)notice(label+' finished. It is saved as a new attempt.','success');
+  if(state.view==='run'||document.getElementById('view-run')?.classList.contains('active'))loadRunPage().catch(()=>{});
+ }finally{rerunBusy=false;}
+}
+document.addEventListener('click',e=>{
+ const r=e.target.closest('[data-rerun-run]');if(r){rerun(r.dataset.rerunRun,'',r.dataset.runLabel).catch(err=>{rerunBusy=false;notice(err.message);});return;}
+ const rc=e.target.closest('[data-rerun-case]');if(rc){rerun(state.runId,rc.dataset.rerunCase,runPage.group?'Run #'+runPage.group.run.run_number:'').catch(err=>{rerunBusy=false;notice(err.message);});return;}
+});
+// Runs list → Actions: report (PDF viewer with download) and AI report.
+document.addEventListener('click',async e=>{
+ const rep=e.target.closest('[data-run-report]');
+ if(rep){const tab=reportTab();try{await loadRunData(rep.dataset.runReport,rep.dataset.reportLabel);if(tab&&!tab.closed){await buildRunPdf();tab.location.href=runPdf.url;}else await viewRunPdf();}catch(err){if(tab)tab.close();notice(err.message);}return;}
+ const ai=e.target.closest('[data-run-ai]');
+ if(ai){const tab=reportTab();viewAiReport(ai.dataset.runAi,ai.dataset.reportLabel,tab).catch(err=>{if(tab)tab.close();notice(err.message);});}
+});
 // Evidence viewer: large screenshot with Previous / Next (arrow keys), case details, download, video.
 async function openShot(i){
- const shots=runPage.shots;if(!shots.length)return;
+ const shots=runPage.viewList||[];if(!shots.length)return;
  runPage.shotIndex=(i+shots.length)%shots.length;const x=shots[runPage.shotIndex],r=x.r;
  $('shotViewerTitle').textContent=(r.external_case_id||'')+' · '+caseTitle(r.title);
- $('shotViewerMeta').innerHTML='<span class="tn-result '+(r.passed?'pass':'fail')+'">'+(r.passed?'Passed':'Failed')+'</span> '+esc([r.priority?String(r.priority).charAt(0).toUpperCase()+String(r.priority).slice(1)+' priority':'',secs(r.duration_ms)].filter(Boolean).join(' · '));
+ $('shotViewerMeta').innerHTML='<span class="tn-result '+(r.passed?'pass':'fail')+'">'+(r.passed?'Passed':'Failed')+'</span> '+esc(x.meta||'');
  $('shotViewerCount').textContent=(runPage.shotIndex+1)+' of '+shots.length;
  $('shotPrev').hidden=$('shotNext').hidden=shots.length<2;
  $('shotViewerVideo').hidden=!x.video;$('shotViewerVideo').onclick=async()=>{try{const u=await authedUrl(x.video);const v=document.createElement('video');v.src=u;v.controls=true;v.autoplay=true;$('shotViewerBody').replaceChildren(v);}catch{notice('The video is no longer available.');}};
@@ -1191,11 +1303,11 @@ async function openShot(i){
  const err=$('shotViewerError');err.hidden=r.passed||!r.error_message;err.textContent=r.error_message?String(r.error_message).slice(0,1500):'';
  const body=$('shotViewerBody');body.innerHTML='<span class="tn-muted">Loading…</span>';
  if(!$('shotViewer').open)$('shotViewer').showModal();
+ if(!x.shot){body.innerHTML='';$('shotViewerVideo').click();return;}
  try{const u=x.url||await authedUrl(x.shot);x.url=u;const img=new Image();img.src=u;img.alt='Screenshot of '+(r.external_case_id||'');body.replaceChildren(img);}
  catch{body.innerHTML='<div class="tn-evidence-missing"><strong>This screenshot is no longer available.</strong><span>Re-run the test to capture a new one.</span></div>';}
 }
 document.addEventListener('click',e=>{
- const s=e.target.closest('[data-run-shot]');if(s){openShot(Number(s.dataset.runShot));return;}
  const v=$('shotViewer');if(!v?.open)return;
  if(e.target.closest('[data-close-shot]')||e.target===v)v.close();
  else if(e.target.closest('#shotPrev'))openShot(runPage.shotIndex-1);
@@ -1204,22 +1316,18 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(!$('shotViewer')?.open)return;if(e.key==='ArrowLeft'){e.preventDefault();openShot(runPage.shotIndex-1);}if(e.key==='ArrowRight'){e.preventDefault();openShot(runPage.shotIndex+1);}});
 // Report tab: an execution report built from the stored results (and the saved execution snapshot).
 function runReportHtml(forPrint){
- const d=runPage.data;if(!d)return '';const run=d.run,project=state.context?.project||{};
+ const d=reportRun.data;if(!d)return '';const run=d.run,project=state.context?.project||{};
  const passed=Number(run.passed||0),failed=Number(run.failed||0),total=Number(run.total||passed+failed),rate=total?Math.round(passed/total*100):0;
  const row=(k,v)=>v?'<tr><th>'+esc(k)+'</th><td>'+esc(v)+'</td></tr>':'';
  const failedList=d.results.filter(r=>!r.passed);
  return '<div class="tn-report-doc">'
-  +'<div class="tn-report-title"><div><div class="tn-report-eyebrow">Execution report</div><h3>'+esc(project.name||'Project')+' · Run #'+esc(run.run_number)+'</h3></div><span class="tn-result '+(failed?'fail':'pass')+'">'+(failed?'Failed':'Passed')+'</span></div>'
-  +'<table class="tn-report-facts">'+row('Completed',dateTime(run.completed_at))+row('Environment',[run.environment,run.target_url].filter(Boolean).join(' · '))+row('Story',run.story_ref?run.story_ref+' · '+(run.story_title||''):'Whole project')+row('Executed by',run.executed_by_name||'')+row('Browser',run.browser||'')+row('Duration',run.duration_ms?secs(run.duration_ms):'')+row('Session',run.session_id||'')+'</table>'
+  +'<div class="tn-report-title"><div><div class="tn-report-eyebrow">Execution report</div><h3>'+esc(project.name||'Project')+' · '+esc(reportRun.label||('Run #'+run.run_number))+'</h3></div><span class="tn-result '+(failed?'fail':'pass')+'">'+(failed?'Failed':'Passed')+'</span></div>'
+  +'<table class="tn-report-facts">'+row('Completed',dateTime(run.completed_at))+row('Environment',[run.environment,run.target_url].filter(Boolean).join(' · '))+row('Story',run.story_ref?run.story_ref+' · '+(run.story_title||''):'Whole project')+row('Executed by',run.executed_by_name||'')+row('Browser',run.browser||'')+row('Session',run.session_id||'')+'</table>'
   +'<div class="tn-report-stats"><div><b>'+total+'</b><span>Total</span></div><div class="ok"><b>'+passed+'</b><span>Passed</span></div><div class="bad"><b>'+failed+'</b><span>Failed</span></div><div><b>'+(total?rate+'%':'—')+'</b><span>Pass rate</span></div></div>'
-  +'<h4>Results</h4><table class="tn-report-table"><thead><tr><th>ID</th><th>Test case</th><th>Priority</th><th>Result</th><th>Duration</th></tr></thead><tbody>'+d.results.map(r=>'<tr><td>'+esc(r.external_case_id||'')+'</td><td>'+esc(caseTitle(r.title))+'</td><td>'+esc(r.priority?String(r.priority).charAt(0).toUpperCase()+String(r.priority).slice(1):'—')+'</td><td class="'+(r.passed?'ok':'bad')+'">'+(r.passed?'Passed':'Failed')+'</td><td>'+secs(r.duration_ms)+'</td></tr>').join('')+'</tbody></table>'
-  +(failedList.length?'<h4>Failures</h4>'+failedList.map(r=>{const x=runPage.shots.find(s=>s.r===r);return '<div class="tn-report-failure"><div><strong>'+esc(r.external_case_id||'')+' · '+esc(caseTitle(r.title))+'</strong>'+(r.error_message?'<pre>'+esc(String(r.error_message).slice(0,2500))+'</pre>':'<p>No error message was recorded.</p>')+'</div>'+(x?.url?'<img src="'+x.url+'" alt="Screenshot of '+esc(r.external_case_id||'')+'">':'')+'</div>';}).join(''):'<h4>Failures</h4><p>No failures in this run.</p>')
+  +'<h4>Results</h4><table class="tn-report-table"><thead><tr><th>ID</th><th>Test case</th><th>Priority</th><th>Result</th></tr></thead><tbody>'+d.results.map(r=>'<tr><td>'+esc(r.external_case_id||'')+'</td><td>'+esc(caseTitle(r.title))+'</td><td>'+esc(r.priority?String(r.priority).charAt(0).toUpperCase()+String(r.priority).slice(1):'—')+'</td><td class="'+(r.passed?'ok':'bad')+'">'+(r.passed?'Passed':'Failed')+'</td></tr>').join('')+'</tbody></table>'
+  +(failedList.length?'<h4>Failures</h4>'+failedList.map(r=>{const x=reportRun.shots.find(s=>s.r===r);return '<div class="tn-report-failure"><div><strong>'+esc(r.external_case_id||'')+' · '+esc(caseTitle(r.title))+'</strong>'+(r.error_message?'<pre>'+esc(String(r.error_message).slice(0,2500))+'</pre>':'<p>No error message was recorded.</p>')+'</div>'+(x?.url?'<img src="'+x.url+'" alt="Screenshot of '+esc(r.external_case_id||'')+'">':'')+'</div>';}).join(''):'<h4>Failures</h4><p>No failures in this run.</p>')
   +'<p class="tn-report-foot">'+(d.report?'Saved execution record by '+esc(d.report.recorded_by_name||'the system')+' on '+esc(dateTime(d.report.created_at))+'.':'Built from the stored run results.')+' Generated by TestNexus on '+esc(dateTime(new Date()))+'.</p>'
   +'</div>';
-}
-function renderRunReport(){
- const d=runPage.data;
- $('runReportBody').innerHTML='<div class="tn-report-actions"><button type="button" class="btn btn-outline-primary tn-btn" data-run-pdf>View PDF</button><button type="button" class="btn btn-outline-primary tn-btn" data-run-pdf-download>Download PDF</button>'+(d?.report?.has_html?'<button type="button" class="btn btn-outline-primary tn-btn" data-run-html>Open saved HTML report</button>':'')+'<button type="button" class="btn btn-outline-primary tn-btn" data-run-ai>AI analysis report</button></div><div class="tn-muted small" id="runReportNote"></div>'+runReportHtml();
 }
 // Report as a real PDF: built in the browser, shown in the PDF viewer popup (zoom, pages, print) and downloadable.
 let html2pdfReady=null,runPdf={url:'',blob:null,runId:''};
@@ -1228,23 +1336,23 @@ function loadHtml2pdf(){
  return html2pdfReady||(html2pdfReady=new Promise((ok,bad)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';s.onload=ok;s.onerror=()=>{html2pdfReady=null;bad(Error('The PDF tool could not be loaded. Check the internet connection and try again.'));};document.head.appendChild(s);}));
 }
 async function buildRunPdf(){
- if(runPdf.blob&&runPdf.runId===state.runId)return runPdf.blob;
+ if(runPdf.blob&&runPdf.runId===reportRun.runId)return runPdf.blob;
  await loadHtml2pdf();
- for(const x of runPage.shots.filter(s=>!s.r.passed&&!s.url)){try{x.url=await authedUrl(x.shot);}catch{}}
+ for(const x of reportRun.shots.filter(s=>!s.r.passed&&!s.url)){try{x.url=await authedUrl(x.shot);}catch{}}
  const box=document.createElement('div');box.className='tn-pdf-render';box.innerHTML=runReportHtml(true);box.firstElementChild.classList.add('tn-pdf');document.body.appendChild(box);
  try{
   const blob=await window.html2pdf().set({margin:[10,10,12,10],image:{type:'jpeg',quality:0.95},html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},pagebreak:{mode:['css','legacy'],avoid:['.tn-report-failure','.tn-report-stats','tr']}}).from(box.firstElementChild).outputPdf('blob');
   if(runPdf.url)URL.revokeObjectURL(runPdf.url);
-  runPdf={blob,url:URL.createObjectURL(blob),runId:state.runId};
+  runPdf={blob,url:URL.createObjectURL(blob),runId:reportRun.runId};
   return blob;
  }finally{box.remove();}
 }
-const runPdfName=()=>'Run-'+(runPage.data?.run?.run_number||'')+'-'+String(state.context?.project?.reference_no||'report').replace(/[^\w-]+/g,'_')+'.pdf';
+const runPdfName=()=>String(reportRun.label||('Run '+(reportRun.data?.run?.run_number||''))).replace(/[^\w]+/g,'-')+'-'+String(state.context?.project?.reference_no||'report').replace(/[^\w-]+/g,'_')+'.pdf';
 async function viewRunPdf(){
- const run=runPage.data?.run;if(!run)return;
- $('pdfViewerTitle').textContent='Execution report · Run #'+run.run_number;
+ const run=reportRun.data?.run;if(!run)return;
+ $('pdfViewerTitle').textContent='Execution report · '+(reportRun.label||'Run #'+run.run_number);
  $('pdfViewerMeta').textContent=[state.context?.project?.name,dateTime(run.completed_at)].filter(Boolean).join(' · ');
- $('pdfViewerDownload').disabled=true;$('pdfViewerBody').innerHTML='<span>Preparing the PDF…</span>';
+ $('pdfViewer').dataset.mode='pdf';$('pdfViewerDownload').textContent='Download PDF';$('pdfViewerDownload').disabled=true;$('pdfViewerBody').innerHTML='<span>Preparing the PDF…</span>';
  if(!$('pdfViewer').open)$('pdfViewer').showModal();
  try{await buildRunPdf();}catch(err){$('pdfViewerBody').innerHTML='<span>'+esc(err.message)+'</span>';return;}
  const f=document.createElement('iframe');f.title='Execution report PDF';f.src=runPdf.url;$('pdfViewerBody').replaceChildren(f);
@@ -1255,14 +1363,8 @@ async function downloadRunPdf(){
  const a=document.createElement('a');a.href=runPdf.url;a.download=runPdfName();document.body.appendChild(a);a.click();a.remove();
 }
 document.addEventListener('click',e=>{
- if(e.target.closest('#pdfViewerDownload')){downloadRunPdf().catch(err=>notice(err.message));return;}
+ if(e.target.closest('#pdfViewerDownload')){if($('pdfViewer').dataset.mode==='ai')downloadAiReport();else downloadRunPdf().catch(err=>notice(err.message));return;}
  const d=$('pdfViewer');if(d?.open&&(e.target.closest('[data-close-pdf]')||e.target===d))d.close();
-});
-document.addEventListener('click',async e=>{
- if(e.target.closest('[data-run-pdf]')){viewRunPdf().catch(err=>notice(err.message));return;}
- if(e.target.closest('[data-run-pdf-download]')){downloadRunPdf().catch(err=>notice(err.message));return;}
- if(e.target.closest('[data-run-ai]')){try{await download('/api/reports/'+encodeURIComponent(runPage.data.run.session_id));}catch{$('runReportNote').textContent='No AI analysis report was generated for this run. Use "Generate AI Analysis Report" on the testing page after a run to create one.';}return;}
- if(e.target.closest('[data-run-html]')){try{const r=await fetch('/api/projects/'+encodeURIComponent(requireProject())+'/report-snapshots/'+encodeURIComponent(runPage.data.report.id)+'?format=html',{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error();const f=document.createElement('iframe');f.setAttribute('sandbox','');f.className='tn-doc-frame';f.srcdoc=await r.text();$('runReportBody').append(f);}catch{$('runReportNote').textContent='The saved HTML report is not available.';}}
 });
 // ---- Teams page: company-wide teams ----
 // List like Stories (+ Create, Created, Last updated). Each row: Add members, Assign project, Edit, Delete.
@@ -1277,7 +1379,8 @@ function renderCompanyTeams(){
  $('ctCount').textContent=ct.teams.length;
  $('ctRows').innerHTML=ct.teams.map(t=>{
   const faces=t.members.slice(0,4).map((m,i)=>'<span class="tn-avatar tn-avatar-'+(i%4)+'" title="'+esc(m.display_name)+'">'+esc(initialsOf(m.display_name||m.email))+'</span>').join('');
-  const projects=t.projects.map(p=>'<span class="tn-team-chip">'+esc(p.name)+'</span>').join(' ')||'<span class="tn-muted">Not assigned</span>';
+  // Only active assignments are listed here; inactive ones are under Assign project → Inactive.
+  const projects=t.projects.filter(p=>p.is_active!==false).map(p=>'<span class="tn-team-chip">'+esc(p.name)+'</span>').join(' ')||'<span class="tn-muted">Not assigned</span>';
   return '<tr><td><strong>'+esc(t.name)+'</strong>'+(t.description?'<div class="tn-muted small">'+esc(t.description)+'</div>':'')+'</td><td>'+(t.members.length?'<span class="tn-ct-faces">'+faces+'</span>':'')+'<span class="tn-muted">'+(t.members.length?t.members.length+' member'+(t.members.length===1?'':'s'):'No members yet')+'</span></td><td>'+projects+'</td>'+createdCell(t.created_by_name,t.created_at)+updatedCell(t.updated_by_name,t.updated_at||t.created_at,t.created_by_name,t.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('userPlus','data-ct-members="'+esc(t.id)+'"','Add members to '+t.name)+actionIcon('assign','data-ct-projects="'+esc(t.id)+'"','Assign '+t.name+' to a project')+actionIcon('edit','data-ct-edit="'+esc(t.id)+'"','Edit team '+t.name)+actionIcon('remove','data-ct-delete="'+esc(t.id)+'"','Delete team '+t.name)+'</span></td></tr>';
  }).join('')||'<tr><td colspan="6" class="tn-empty">No teams yet. Use + Create to add one.</td></tr>';
 }
@@ -1312,7 +1415,14 @@ function renderTeamProjects(){
  const open=(state.projects||[]).filter(p=>!assigned.has(String(p.id)));
  $('ctAssignSelect').innerHTML='<option value="">Choose a project…</option>'+open.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+(p.reference_no?' · '+esc(p.reference_no):'')+'</option>').join('');
  $('ctAssignForm').hidden=!open.length;
- $('ctProjectsBody').innerHTML=t.projects.map(p=>'<tr data-search="'+esc(((p.name||'')+' '+(p.reference_no||'')).toLowerCase())+'"><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.reference_no||'—')+'</td>'+createdCell(p.assigned_by_name,p.assigned_at)+'<td><span class="tn-icon-actions">'+actionIcon('remove','data-ct-unassign="'+esc(p.id)+'"','Unassign '+t.name+' from '+p.name)+'</span></td></tr>').join('')||'<tr><td colspan="4" class="tn-empty">Not assigned to any project yet. Choose a project above and click + Add.</td></tr>';
+ // Active · All · Inactive: an inactive assignment stays listed but its members get no access through this team.
+ const f=ct.assignFilter||'active',inactive=t.projects.filter(p=>p.is_active===false);
+ $('ctCountActive').textContent=t.projects.length-inactive.length;$('ctCountAll').textContent=t.projects.length;$('ctCountInactive').textContent=inactive.length;
+ for(const b of document.querySelectorAll('[data-assign-filter]'))b.setAttribute('aria-checked',String(b.dataset.assignFilter===f));
+ const shown=f==='all'?t.projects:f==='inactive'?inactive:t.projects.filter(p=>p.is_active!==false);
+ $('ctProjectsBody').innerHTML=shown.map(p=>'<tr data-search="'+esc(((p.name||'')+' '+(p.reference_no||'')).toLowerCase())+'"><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.reference_no||'—')+'</td><td>'+(p.is_active===false?'<span class="tn-tag">Inactive</span>':'<span class="tn-tag success">Active</span>')+'</td>'+createdCell(p.assigned_by_name,p.assigned_at)+updatedCell(p.status_updated_by_name||p.assigned_by_name,p.status_updated_at||p.assigned_at,p.assigned_by_name,p.assigned_at)
+  +'<td><span class="tn-icon-actions">'+(p.is_active===false?actionIcon('restore','data-ct-status="activate" data-project-id="'+esc(p.id)+'"','Activate '+t.name+' on '+p.name):actionIcon('pause','data-ct-status="deactivate" data-project-id="'+esc(p.id)+'"','Deactivate '+t.name+' on '+p.name))+'</span></td></tr>').join('')
+  ||'<tr><td colspan="6" class="tn-empty">'+(t.projects.length?(f==='inactive'?'No inactive assignments.':'No active assignments.'):'Not assigned to any project yet. Choose a project above and press + Add.')+'</td></tr>';
 }
 async function saveTeamLists(t,memberIds,projectIds,message){
  await api('/api/company-teams/'+encodeURIComponent(t.id),{method:'PUT',body:JSON.stringify({name:t.name,description:t.description||'',memberIds,projectIds})});
@@ -1362,6 +1472,14 @@ document.addEventListener('submit',async e=>{
  }catch(err){notice(err.message);}
 });
 // Searchable dropdown: one box; type to filter, pick from the list. The hidden select keeps the chosen value.
+document.addEventListener('click',async e=>{
+ const f=e.target.closest('[data-assign-filter]');if(f){ct.assignFilter=f.dataset.assignFilter;renderTeamProjects();return;}
+ const b=e.target.closest('[data-ct-status]');if(!b)return;
+ const t=detailTeam(),p=t?.projects.find(x=>String(x.id)===String(b.dataset.projectId));if(!t||!p)return;
+ const activate=b.dataset.ctStatus==='activate';
+ if(!await confirmDanger({title:(activate?'Activate ':'Deactivate ')+t.name+' on '+p.name+'?',message:activate?'Team members get access to '+p.name+' again through this team.':'The assignment stays listed under Inactive. Members who joined '+p.name+' only through this team lose access until it is activated again.',confirmLabel:activate?'Activate':'Deactivate',tone:'warning'}))return;
+ try{await api('/api/company-teams/'+encodeURIComponent(t.id)+'/projects/'+encodeURIComponent(p.id)+'/status',{method:'PATCH',body:JSON.stringify({active:activate})});notice('Assignment '+(activate?'activated':'deactivated')+'.','success');await loadCompanyTeams();renderTeamProjects();}catch(err){notice(err.message);}
+});
 function makeCombo(selectId,placeholder){
  const sel=$(selectId);if(!sel||sel.dataset.combo)return;sel.dataset.combo='1';sel.hidden=true;sel.removeAttribute('required');
  const wrap=document.createElement('div');wrap.className='tn-combo';

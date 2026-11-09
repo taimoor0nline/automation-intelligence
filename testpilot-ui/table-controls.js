@@ -13,8 +13,8 @@ const TABLE_CONFIG={
  projectTeams:{search:'Search teams'},
  projectTeamMembers:{search:'Search team members'},
  runsBody:{search:'Search test runs'},
- evidenceBody:{search:'Search evidence'},
- savedReportsBody:{search:'Search saved reports'},
+ runResultsBody:{search:'Search test cases'},
+ caseHistoryBody:{search:'Search attempts'},
  inventoryCases:{search:'Search test cases'},
  inventoryStories:{search:'Search story statistics'},
  inventoryAudit:{search:'Search audit events'},
@@ -63,7 +63,9 @@ function initTable(table){
  const searchWrap=document.createElement('label');searchWrap.className='tn-search';
  searchWrap.innerHTML='<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
  searchWrap.append(search);
- const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(searchWrap,filter);
+ // Column dropdown and search input as one box: [ Column ▾ | 🔍 Search… ] (same size on every table).
+ const searchBar=document.createElement('div');searchBar.className='tn-searchbar';searchBar.append(filter,searchWrap);
+ const textFilters=document.createElement('div');textFilters.className='tn-table-filters-main';textFilters.append(searchBar);
  if(key==='tasksBody'){
   const status=document.getElementById('taskStatusFilter'),hierarchy=document.getElementById('taskHierarchy')?.closest('label');
   if(status){status.classList.add('tn-table-status');textFilters.append(status);}

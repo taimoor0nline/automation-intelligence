@@ -13,7 +13,7 @@
   const n=$('notice');if(!n)return;
   n.textContent=message;n.className='alert alert-danger';n.scrollIntoView({block:'nearest'});
  }
- async function start(projectId,sourceType,recordId,environmentId){
+ async function start(projectId,sourceType,recordId,environmentId,existing=false){
   if(!projectId)throw Error('Open a project before starting tests.');
   const detail=await api('/api/projects/'+encodeURIComponent(projectId)+'/workspace');
   if(!['PROJECT_MANAGER','QA'].includes(detail.projectRole))throw Error('QA or project manager access is required to start testing.');
@@ -40,7 +40,8 @@
   sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify(handoff));
   sessionStorage.setItem('testnexus:runnerOrigin','project');
   sessionStorage.removeItem('testnexus:runnerSelection');
-  window.location.assign('/runner');
+  // "Run existing tests": the testing page lists the saved cases instead of generating (existing-tests.js).
+  window.location.assign('/runner?mode='+(existing?'existing':'new')+'&projectId='+encodeURIComponent(projectId)+(handoff.storyId?'&storyId='+encodeURIComponent(handoff.storyId):''));
  }
  const post=async(path,body)=>{
   const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json',...(token()?{Authorization:'Bearer '+token()}:{})},body:JSON.stringify(body||{})});
@@ -60,31 +61,6 @@
   document.body.appendChild(d);
   return d;
  }
- async function runExisting(projectId,plan){
-  const d=$('runChoiceDialog'),box=$('runChoiceProgress');
-  d.querySelectorAll('[data-choice]').forEach(b=>{b.disabled=true;});
-  box.hidden=false;box.replaceChildren();
-  let passed=0,failed=0;
-  for(const group of plan.groups){
-   const line=document.createElement('div');line.className='tn-choice-line';line.textContent='Starting '+group.caseIds.length+' approved test(s)…';box.appendChild(line);
-   const run=await post('/api/test-runs/start',{sessionId:group.sessionId,approvedIds:group.caseIds});
-   let done=false;
-   for(let i=0;i<240&&!done;i++){
-    await new Promise(r=>setTimeout(r,2500));
-    const p=(await api('/api/test-runs/progress/'+encodeURIComponent(group.sessionId))).progress||{};
-    line.textContent='Run #'+run.runNumber+' · '+(p.completed||0)+' / '+(p.total||group.caseIds.length)+' complete';
-    if(p.complete){done=true;passed+=Number(p.passed||0);failed+=Number(p.failed||0);line.textContent+=' ✓';}
-   }
-   if(!done){line.textContent+=' · still running — results will appear in Runs & reports.';break;}
-  }
-  const end=document.createElement('div');end.className='tn-choice-done';
-  end.innerHTML='<strong>Finished.</strong> Results are saved in Runs &amp; reports.';
-  box.appendChild(end);
-  const foot=d.querySelector('.tn-dialog-foot');
-  foot.innerHTML='<span></span><div class="d-flex gap-2"><button type="button" class="btn btn-outline-secondary tn-btn" data-choice="close">Close</button><button type="button" class="btn btn-primary tn-btn" data-choice="results">View results</button></div>';
-  foot.querySelector('[data-choice="close"]').onclick=()=>{d.close();d.remove();location.reload();};
-  foot.querySelector('[data-choice="results"]').onclick=()=>{location.assign('/workspace.html?projectId='+encodeURIComponent(projectId)+'#executions');location.reload();};
- }
  // Ask first when approved tests exist; otherwise go straight to generation (as before).
  async function chooseAndStart(projectId,sourceType,recordId,environmentId,label){
   if(sourceType==='task')return start(projectId,sourceType,recordId,environmentId);
@@ -100,7 +76,7 @@
     const choice=e.target.closest('[data-choice]')?.dataset.choice||(e.target===d?'cancel':null);if(!choice)return;
     if(choice==='cancel'){d.close();resolve();return;}
     if(choice==='generate'){d.close();resolve(start(projectId,sourceType,recordId,environmentId));return;}
-    if(choice==='run'){try{await runExisting(projectId,plan);}catch(err){$('runChoiceProgress').hidden=false;$('runChoiceProgress').insertAdjacentHTML('beforeend','<div class="tn-choice-error">'+esc(err.message)+'</div>');d.querySelectorAll('[data-choice]').forEach(b=>{b.disabled=false;});}resolve();}
+    if(choice==='run'){d.close();resolve(start(projectId,sourceType,recordId,environmentId,true));return;}
    };
    d.oncancel=e=>{if(d.querySelector('[data-choice="run"]')?.disabled)e.preventDefault();else resolve();};
    d.showModal();

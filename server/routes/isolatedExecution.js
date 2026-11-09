@@ -9,7 +9,7 @@ const { getSession } = require('../data/sessionStore');
 const { READY } = require('../services/testCaseFeasibility');
 const { validateGroundedScript } = require('../services/scriptValidator');
 const { executeIsolatedSuite } = require('../services/isolatedSuiteRunner');
-const { buildAnalyticsReport } = require('../services/reportGenerator');
+const { buildAnalyticsReport, requestReportGeneration } = require('../services/reportGenerator');
 const { publishExecutionEvent, subscribeExecutionEvents } = require('../services/executionEventBus');
 const { assessRestTestCases, generateRestAutomation, readinessSummary: restReadinessSummary } = require('../services/restAutomationService');
 const persistence = require('../services/persistenceService');
@@ -201,6 +201,8 @@ async function persistCompletedRun(sessionId, session, userId) {
       approvedIds: session.approvedIds || [],
       userId: userId || session.createdBy || null,
     });
+    // The AI report was built when the run finished, before the run was stored; keep it with this run now.
+    if (session.reportHtml) { try { await persistence.saveAiReportForRun(sessionId, session.reportHtml); } catch (reportError) { console.error('[report] could not store the AI report for its run', reportError.message); } }
     try { await retainExecutionEvidence({projectId:session.projectId,runId:persistedRunId,sessionArtifacts:session.artifacts}); }
     catch (evidenceError) { console.error('[evidence-retention] retention failed',evidenceError); }
     try { await applyProjectWorkflow({sessionId,projectId:session.projectId,runNumber:session.lastResults?.runNumber,executedBy:userId||session.createdBy||null}); }
@@ -445,6 +447,8 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
           runNumber,
           deterministicFindings: findings,
         };
+        // Every run gets its AI report automatically (before, it was made only after "Generate AI Analysis Report").
+        requestReportGeneration(sessionId, summary, Array.isArray(session.testCases) ? session.testCases : []);
         session.reportHtml = buildAnalyticsReport({
           sessionId,
           story: session.story,
@@ -454,6 +458,8 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
           analyses: [],
           model: session.aiModelTier || 'strong',
         });
+        session.reportGeneratedAt = session.reportHtml ? new Date().toISOString() : null;
+        session.reportGeneratedForRun = session.reportHtml ? runNumber : null;
         session.state = 'DONE';
         session.executionProgress = {
           ...(session.executionProgress || {}),
