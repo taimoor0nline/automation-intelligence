@@ -971,3 +971,39 @@ h1.tn-title{margin:0 0 12px;line-height:1.2}
 .tn-src{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11.5px;font-weight:600;white-space:nowrap}
 .tn-src-ai{background:#ede9fe;color:#6d28d9}
 .tn-src-manual{background:#e0f2fe;color:#0369a1}
+
+/* Failed tests as tasks */
+.tn-task-chip{display:table;margin-top:5px;padding:1px 9px;border:1px solid #fecaca;border-radius:99px;background:#fef2f2;color:#b91c1c;font-size:11.5px;font-weight:600;white-space:nowrap;cursor:pointer}
+.tn-task-chip:hover,.tn-task-chip:focus-visible{background:#fee2e2;outline:0}
+#caseViewerMeta .tn-task-chip{display:inline-block;margin-top:0}
+.tn-fail-count{display:inline-block;min-width:28px;padding:1px 8px;border-radius:99px;background:#fef2f2;color:#b91c1c;font-weight:700;font-size:12px;text-align:center}
+.tn-progress{width:90px;height:6px;border-radius:99px;background:#e2e8f0;overflow:hidden}
+.tn-progress span{display:block;height:100%;background:#2563eb;border-radius:99px}
+.tn-task-section{margin-top:14px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+.tn-task-section h3{margin:0 0 8px;font-size:13px;font-weight:800;color:#0f172a;text-transform:uppercase;letter-spacing:.03em}
+.tn-task-section h4{margin:10px 0 4px;font-size:12.5px;font-weight:700;color:#334155}
+.tn-task-failure{border-color:#fecaca;background:#fffafa}
+.tn-task-case-title{margin-bottom:8px;font-weight:600;color:#0f172a}
+.tn-task-grid{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:13px}
+.tn-task-grid>span:nth-child(odd){color:#64748b}
+.tn-task-steps{margin-top:10px;font-size:13px}
+.tn-task-steps summary{cursor:pointer;font-weight:600;color:#2563eb}
+.tn-handles{width:auto;min-width:135px}
+
+/* Task popup: 👁 view is read-only; ✏ edit shows the controls */
+#taskDrawer.tn-task-viewonly :is(.tn-task-edit,#taskStartTest,#taskLifecycleForm,#testLinkForm,#subtaskForm,#taskDrop,#commentForm,#retestOne,#retestWithChildren,[data-unlink-test],[data-delete-attachment]){display:none!important}
+#taskDrawer:not(.tn-task-viewonly) .tn-task-viewrow{display:none}
+/* ✏ Edit shows only what can be changed: no task, case or failure details, and no read-only lists */
+#taskDrawer:not(.tn-task-viewonly) :is(#drawerInfo>.tn-kv,#drawerInfo>p,#drawerInfo>.tn-muted,#drawerInfo>h3,#drawerInfo>.tn-sub,#taskFailureBox,#drawerSubtasks,#drawerAttachments,#drawerComments,#drawerHistory,h3:has(+#drawerHistory),.tn-divider:has(+h3+#drawerHistory)){display:none!important}
+/* 👁 View: no "how to link" help text */
+#taskDrawer.tn-task-viewonly h3+.tn-muted:has(+#drawerTestLinks){display:none}
+/* ✏ Edit: one Save at the bottom of the edit fields */
+.tn-task-savebar{display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0}
+/* Start test / Retest live in the task list (▶ and Retest selected), not in the popup */
+#taskDrawer :is(#taskStartTest,#retestOne){display:none!important}
+/* The comment box is in the edit fields; the old one under More is not needed */
+#taskDrawer #commentForm,#taskDrawer:not(.tn-task-viewonly) h3:has(+#drawerComments){display:none!important}
+/* Failed-test tasks are linked to their test case automatically: no manual linking */
+#taskDrawer.tn-task-failed :is(#testLinkForm,#drawerTestLinks,h3:has(+.tn-muted+#drawerTestLinks),.tn-muted:has(+#drawerTestLinks),.tn-divider:has(+h3+.tn-muted+#drawerTestLinks)){display:none!important}
+.tn-activity{margin-bottom:8px;color:#475569}
+.tn-activity strong{color:#0f172a;font-weight:600}

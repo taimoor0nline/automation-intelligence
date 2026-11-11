@@ -67,7 +67,7 @@ router.get('/api/company-teams', requireAuth, requireRole('MANAGER'), async (req
          from team_members tm join users u on u.id = tm.user_id left join users ab on ab.id = tm.added_by
         join teams t on t.id = tm.team_id where t.project_id is null order by u.display_name`);
     const projects = await db.query(
-      `select pt.team_id, p.id, p.name, p.reference_no, pt.created_at assigned_at, ab.display_name assigned_by_name, pt.is_active, pt.status_updated_at, su.display_name status_updated_by_name
+      `select pt.team_id, p.id, p.name, p.reference_no, pt.created_at assigned_at, ab.display_name assigned_by_name, pt.is_active, pt.status_updated_at, su.display_name status_updated_by_name, coalesce(pt.handles, '{}') handles
          from project_teams pt join projects p on p.id = pt.project_id left join users ab on ab.id = pt.added_by left join users su on su.id = pt.status_updated_by
         join teams t on t.id = pt.team_id where t.project_id is null order by p.name`);
     res.json({
@@ -147,6 +147,23 @@ router.patch('/api/company-teams/:teamId/projects/:projectId/status', requireAut
       await syncProject(client, req.params.projectId, req.user.sub);
     });
     res.json({ ok: true });
+  } catch (e) { respond(res, e); }
+});
+
+// Which failed tests this team handles on a project (empty = all categories). Used when a project has several teams.
+const HANDLE_CATEGORIES = ['FUNCTIONAL', 'UI', 'API', 'SECURITY', 'ACCESSIBILITY', 'PERFORMANCE', 'INTEGRATION'];
+router.patch('/api/company-teams/:teamId/projects/:projectId/handles', requireAuth, requireRole('MANAGER'), async (req, res) => {
+  try {
+    if (!isId(req.params.teamId) || !isId(req.params.projectId)) throw fail(400, 'Invalid team or project.');
+    const handles = [...new Set((Array.isArray(req.body?.handles) ? req.body.handles : []).map((v) => String(v || '').toUpperCase()).filter(Boolean))];
+    if (handles.some((v) => !HANDLE_CATEGORIES.includes(v))) throw fail(400, 'Unknown test category.');
+    await db.withTransaction(async (client) => {
+      const team = await loadTeam(client, req.params.teamId);
+      const r = await client.query('update project_teams set handles=$3, status_updated_at=now(), status_updated_by=$4 where team_id=$1 and project_id=$2 returning project_id', [team.id, req.params.projectId, handles, req.user.sub]);
+      if (!r.rowCount) throw fail(404, 'This team is not assigned to that project.');
+      await audit(client, req.params.projectId, req.user.sub, 'TEAM_FAILURE_SCOPE_UPDATED', { teamId: team.id, teamName: team.name, handles: handles.length ? handles : ['ALL'] });
+    });
+    res.json({ ok: true, handles });
   } catch (e) { respond(res, e); }
 });
 

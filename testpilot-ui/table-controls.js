@@ -4,7 +4,8 @@
 const PAGE_SIZES=[5,10,25,50],DEFAULT_PAGE_SIZE=5;
 const TABLE_CONFIG={
  projectsBody:{create:'/project-create.html',createLabel:'Create project',search:'Search projects'},
- tasksBody:{create:'/task-create.html',createLabel:'Create task',search:'Search tasks'},
+ // No Create button: failed tests become tasks and the system assigns them.
+ tasksBody:{search:'Search tasks'},
  workItemsBody:{create:'/task-create.html',createLabel:'Create task',search:'Search work items'},
  legacyTeamBody:{search:'Search team members'},
  storyList:{createButton:'storyCreate',createLabel:'Create story',search:'Search stories'},

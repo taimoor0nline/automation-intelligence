@@ -1011,4 +1011,63 @@ router.post('/api/projects/:projectId/repair-memory/:memoryId/events',requireAut
  const result=await require('../services/repairMemoryService').recordReuse({projectId:req.params.projectId,memoryId:req.params.memoryId,sessionId,runId,eventType,userId:req.user.sub});
  res.json({ok:true,...result});
 }catch(e){respond(res,e);}});
+// ---- Failed tests as tasks: the failed test case and its failure, and the assignee's progress ----
+const {REASON_LABELS,ROLE_LABELS}=require('../services/failureAssignment');
+router.get('/api/work-items/:id/failure',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await task(req),w=ctx.item;
+ if(!w.session_id||!w.external_case_id)return res.json({ok:true,testCase:null,failure:null});
+ const c=(await db.query(`select c.external_case_id,c.title,c.type,c.priority,c.source,c.test_category,c.case_json,c.created_at,c.updated_at,
+   cu.display_name created_by_name,uu.display_name updated_by_name,ps.reference_no story_ref,ps.title story_title
+   from test_cases c left join users cu on cu.id=c.created_by left join users uu on uu.id=c.updated_by
+   left join test_sessions ts on ts.id=c.session_id left join project_stories ps on ps.id=ts.project_story_id
+   where c.session_id=$1 and c.external_case_id=$2`,[w.session_id,w.external_case_id])).rows[0]||null;
+ const j=c?.case_json||{};
+ const runNo=async rid=>rid?(await db.query('select id,coalesce(project_run_number,run_number) as number from test_runs where id=$1',[rid])).rows[0]||null:null;
+ const [first,last]=await Promise.all([runNo(w.first_failed_run_id),runNo(w.last_failed_run_id||w.run_id)]);
+ const result=w.test_result_id?(await db.query('select error_message from test_results where id=$1',[w.test_result_id])).rows[0]||null:null;
+ // Latest result of this case in the project: does it still fail?
+ const latest=(await db.query(`select r.passed,coalesce(tr.project_run_number,tr.run_number) as number from test_results r join test_runs tr on tr.id=r.run_id
+   where tr.session_id=$1 and r.external_case_id=$2 order by tr.completed_at desc nulls last limit 1`,[w.session_id,w.external_case_id])).rows[0]||null;
+ const ai=w.defect_analysis_id?(await db.query('select classification,confidence,summary from defect_analyses where id=$1',[w.defect_analysis_id])).rows[0]||null:null;
+ const env=(await db.query("select session_json->>'environment' as env from test_sessions where id=$1",[w.session_id])).rows[0]?.env||null;
+ const team=w.team_id?(await db.query('select name from teams where id=$1',[w.team_id])).rows[0]?.name||null:null;
+ const reason=w.metadata?.aiReason||null;
+ res.json({ok:true,
+  testCase:c?{id:c.external_case_id,title:c.title,source:c.source,category:c.test_category,type:c.type,priority:c.priority,
+   story:c.story_ref?{ref:c.story_ref,title:c.story_title}:null,page:j.pageUrl||j.page||j.targetPath||null,
+   steps:Array.isArray(j.steps)?j.steps:[],expected:Array.isArray(j.expectedResults)?j.expectedResults:[],
+   createdAt:c.created_at,createdBy:c.created_by_name,updatedAt:c.updated_at,updatedBy:c.updated_by_name}:null,
+  failure:w.origin==='FAILED_TEST'?{count:w.failure_count||0,firstRun:first,lastRun:last,runId:(w.last_failed_run_id||w.run_id)||null,environment:env,
+   error:result?.error_message||null,latest:latest?{passed:latest.passed,run:latest.number}:null,
+   aiReason:reason,aiReasonLabel:REASON_LABELS[reason]||null,ai:ai?{confidence:ai.confidence,summary:ai.summary}:null,
+   team,role:w.assigned_role||null,roleLabel:ROLE_LABELS[w.assigned_role]||null,bySystem:Boolean(w.assigned_by_system)}:null});
+ }catch(e){respond(res,e);}
+});
+// The assignee (or QA / Project Manager) reports progress and adds time spent.
+router.patch('/api/work-items/:id/progress',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await task(req),item=ctx.item;
+ const isAssignee=String(item.assigned_to||'')===String(req.user.sub);
+ if(!isAssignee&&!['PROJECT_MANAGER','QA'].includes(ctx.role))throw fail(403,'Only the assignee, QA or the project manager can update progress.');
+ const notes=[],sets=[],params=[req.params.id];
+ const put=(col,val)=>{params.push(val);sets.push(col+'=$'+params.length);};
+ if(req.body?.progress!=null&&req.body.progress!==''){
+  const p=Math.round(Number(req.body.progress));if(!Number.isFinite(p)||p<0||p>100)throw fail(400,'Progress must be between 0 and 100.');
+  if(p!==Number(item.progress_percent||0)){put('progress_percent',p);notes.push('Progress '+Number(item.progress_percent||0)+'% → '+p+'%');}
+ }
+ const add=Math.round(Number(req.body?.addMinutes||0));
+ if(add){if(!Number.isFinite(add)||add<0||add>24*60)throw fail(400,'Time spent must be between 0 and 24 hours at a time.');
+  sets.push('time_spent_minutes=time_spent_minutes+'+add);notes.push('Added '+(add>=60?Math.floor(add/60)+' h'+(add%60?' '+add%60+' min':''):add+' min')+' of work');}
+ if(!sets.length)throw fail(400,'Nothing to save.');
+ put('updated_by',req.user.sub);
+ const r=await db.withTransaction(async client=>{
+  const u=await client.query('update work_items set '+sets.join(',')+',updated_at=now() where id=$1 returning *',params);
+  await client.query("insert into work_item_history(work_item_id,event_type,old_status,new_status,performed_by,comment) values($1,'PROGRESS_UPDATED',$2,$2,$3,$4)",[item.id,item.status,req.user.sub,notes.join(' · ')+'.']);
+  return u.rows[0];
+ });
+ res.json({ok:true,task:r});
+ }catch(e){respond(res,e);}
+});
+
 module.exports=router;

@@ -184,6 +184,15 @@ function sendEvidence(kind) {
 
 const { applyProjectWorkflow } = require('../services/projectWorkflowAutomation');
 const { retainExecutionEvidence } = require('../services/retainedExecutionEvidence');
+// Failed tests as tasks: when the project creates tasks for failed tests, the AI analysis starts by itself after the run,
+// so each task gets its AI reason and is routed to the role that fits (it used to start only from the report or a button).
+async function startFailureAnalysisForTasks(sessionId, projectId) {
+  if (!persistence.enabled() || !projectId) return;
+  const db = require('../db');
+  const on = (await db.query('select auto_create_failed_tasks from project_workflow_settings where project_id=$1', [projectId])).rows[0]?.auto_create_failed_tasks;
+  if (!on) return;
+  require('./failureAnalysisStream').startAnalysisForSession(sessionId);
+}
 async function persistCompletedRun(sessionId, session, userId) {
   if (!persistence.enabled()) return;
   try {
@@ -479,6 +488,7 @@ router.post('/api/test-runs/start', qaManagerOnly, async (req, res) => {
 
         await persistCompletedRun(sessionId, session, userId);
         publishExecutionEvent(sessionId, 'RUN_COMPLETED', session.executionProgress);
+        if (Number(summary.failed || 0) > 0) startFailureAnalysisForTasks(sessionId, session.projectId).catch((e) => console.warn('[analysis] automatic start failed:', e.message));
         console.log(`[isolated-execution] ${targetType} run #${runNumber} completed: ${summary.passed} passed, ${summary.failed} failed; owned Chromium cleanup=${result.finalCleanup?.verifiedGone ? 'verified' : 'warning'}.`);
       } catch (err) {
         session.state = 'AWAITING_APPROVAL';

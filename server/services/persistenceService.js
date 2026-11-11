@@ -257,6 +257,9 @@ async function persistAnalyses(runId, analyses = []) {
       );
     }
   });
+  // Failed-test tasks of this run: record the AI reason and route each to the role that fits (team -> role -> member).
+  await require('./failureAssignment').applyAnalyses(runId)
+    .catch((e) => console.warn('[tasks] could not route failed-test tasks:', e.message));
 }
 
 async function latestRunId(sessionId, runNumber) {

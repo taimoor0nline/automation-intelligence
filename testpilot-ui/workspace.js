@@ -263,6 +263,16 @@ function updatedCell(name,at,creatorName,createdAt){
 }
 // Small person line: avatar circle + name (used for Created by / Last updated).
 // How a test case was made: AI (generated, AI one-case, or AI then edited) or Manual (written by a person).
+// Failed tests as tasks: labels used in the Tasks tab, the task popup and the Teams page.
+const WORK_TYPE_LABELS={DEFECT_FIX:'Defect fix',TEST_REVIEW:'Test review',INVESTIGATION:'Investigation',RETEST:'Retest',SECURITY_REMEDIATION:'Security fix',MANUAL_TEST:'Manual test',GENERAL:'General'};
+const workTypeLabel=v=>WORK_TYPE_LABELS[String(v||'').toUpperCase()]||String(v||'—');
+const catLabel=x=>/^(ui|api)$/i.test(String(x||''))?String(x).toUpperCase():x?String(x).charAt(0).toUpperCase()+String(x).slice(1).toLowerCase():'—';
+const ROLE_NAMES={DEVELOPER:'Developer',QA:'QA',PROJECT_MANAGER:'Project Manager',VIEWER:'Viewer'};
+const TASK_STATUS_LABELS={PENDING:'Pending',IN_PROGRESS:'In progress',ON_HOLD:'On hold',READY_FOR_RETEST:'Ready for retest',COMPLETED:'Completed',CANCELLED:'Cancelled'};
+const hoursText=m=>{m=Number(m||0);if(!m)return '—';const h=Math.floor(m/60),r=m%60;return (h?h+' h':'')+(h&&r?' ':'')+(r?r+' min':'');};
+// The open task made from this failed test case (if any).
+function failureTaskFor(sessionId,caseId){return (state.tasks||[]).find(t=>t.origin==='FAILED_TEST'&&!t.deleted_at&&t.session_id===sessionId&&t.external_case_id===caseId&&!['COMPLETED','CANCELLED'].includes(t.status))||null;}
+function taskChip(t){return t?'<button type="button" class="tn-task-chip" data-task="'+esc(t.id)+'" title="Open the task for this failure · '+esc((t.team_name||'No team')+' · '+(t.assigned_to_name||'Not assigned'))+'">Task · '+esc(TASK_STATUS_LABELS[t.status]||t.status)+'</button>':'';}
 function sourceTag(src){const v=String(src||'');if(!v)return '<span class="tn-muted">—</span>';return /^ai/i.test(v)?'<span class="tn-src tn-src-ai" title="'+esc(v)+'">🤖 AI</span>':'<span class="tn-src tn-src-manual" title="'+esc(v)+'">✍ Manual</span>';}
 function personCell(name,when){
  return '<span class="tn-who">'+(name?esc(name):'<span class="tn-muted">Not recorded</span>')+'</span><div class="tn-when">'+esc(dateTime(when))+'</div>';
@@ -478,12 +488,14 @@ function renderTasks(){
  const q=$('taskSearch').value.trim().toLowerCase();
  if(status==='DELETED'){
  const deleted=(state.deletedTasks||[]).filter(x=>!q||String(x.title||'').toLowerCase().includes(q));
- $('tasksBody').innerHTML=deleted.map(x=>'<tr><td></td><td><strong>'+esc(x.title)+'</strong></td><td>—</td><td>'+display(x.deleted_by_name)+'</td><td>'+dateTime(x.deleted_at)+'</td><td>'+statusTag('CANCELLED')+'</td><td>—</td><td>—</td><td><span class="tn-icon-actions">'+actionIcon('restore','data-restore="'+esc(x.id)+'"','Restore task '+x.title)+'</span></td></tr>').join('')||'<tr><td colspan="7" class="tn-empty">No deleted tasks match your search.</td></tr>';
+ $('tasksBody').innerHTML=deleted.map(x=>'<tr><td></td><td>—</td><td><strong>'+esc(x.title)+'</strong></td><td>—</td><td>—</td><td>—</td><td>'+display(x.deleted_by_name)+'</td><td>'+statusTag('CANCELLED')+'</td><td>—</td><td>'+dateTime(x.deleted_at)+'</td><td><span class="tn-icon-actions">'+actionIcon('restore','data-restore="'+esc(x.id)+'"','Restore task '+x.title)+'</span></td></tr>').join('')||'<tr><td colspan="11" class="tn-empty">No deleted tasks match your search.</td></tr>';
  $('taskVisibleCount').textContent=deleted.length;updateTaskSelection();return;
  }
  if(status)tasks=tasks.filter(t=>t.status===status);
- if(q)tasks=tasks.filter(t=>[t.title,t.work_type,t.external_case_id,t.assigned_to_name].some(v=>String(v||'').toLowerCase().includes(q)));
- if($('taskHierarchy').checked){
+ // Tasks come from failed tests (the system assigns them); their subtasks stay listed under them.
+ {const byId=new Map(state.tasks.map(t=>[t.id,t]));const fromFailure=t=>{let x=t,n=0;while(x&&n<10){if(x.origin==='FAILED_TEST')return true;x=byId.get(x.parent_work_item_id);n++;}return false;};tasks=tasks.filter(fromFailure);}
+ if(q)tasks=tasks.filter(t=>[t.title,t.work_type,workTypeLabel(t.work_type),t.external_case_id,t.assigned_to_name,t.team_name,t.case_category].some(v=>String(v||'').toLowerCase().includes(q)));
+ {
   const all=new Map(state.tasks.map(t=>[t.id,t]));
   const depth=t=>{let n=0,p=t.parent_work_item_id,seen=new Set([t.id]);while(p&&all.has(p)&&!seen.has(p)&&n<8){seen.add(p);n++;p=all.get(p).parent_work_item_id;}return n;};
   const order=[];const byParent=new Map();for(const t of tasks){const key=t.parent_work_item_id||'';if(!byParent.has(key))byParent.set(key,[]);byParent.get(key).push(t);}
@@ -491,7 +503,7 @@ function renderTasks(){
   for(const t of tasks)if(!t.parent_work_item_id||!tasks.some(x=>x.id===t.parent_work_item_id))walk(t);
   for(const t of tasks)walk(t);tasks=order;
  }
- $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(x.work_type)+'</div></div></div></td><td>'+display(x.external_case_id)+'</td><td>'+display(x.assigned_to_name)+'</td><td>'+dateTime(x.eta_at||x.due_at)+'</td><td>'+statusTag(x.status)+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('edit','data-edit-task="'+esc(x.id)+'"','View / edit task '+x.title)+actionIcon('play','data-start-task="'+esc(x.id)+'"','Start testing task '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-task="'+esc(x.id)+'"','Delete task '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="9" class="tn-empty">No tasks match your filters. Clear the search or select another status.</td></tr>';
+ $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td>'+(x.external_case_id?'<span class="tn-case-id">'+esc(x.external_case_id)+'</span>':'—')+'</td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(workTypeLabel(x.work_type))+(x.origin==='FAILED_TEST'?' · from a failed test':'')+'</div></div></div></td><td>'+(x.case_category?esc(catLabel(x.case_category)):'—')+'</td><td data-sort="'+Number(x.failure_count||0)+'">'+(x.failure_count?'<span class="tn-fail-count" title="Failed '+Number(x.failure_count)+' time(s)'+(x.last_failed_run_number?', last in Run #'+esc(x.last_failed_run_number):'')+'">'+Number(x.failure_count)+'×</span>':'—')+'</td><td>'+display(x.team_name)+'</td><td>'+(x.assigned_to_name?'<strong>'+esc(x.assigned_to_name)+'</strong>'+(x.assigned_role?'<div class="tn-muted">'+esc(ROLE_NAMES[x.assigned_role]||x.assigned_role)+(x.assigned_by_system?' · by system':'')+'</div>':''):'<span class="tn-muted">Not assigned</span>')+'</td><td>'+statusTag(x.status)+'</td><td data-sort="'+Number(x.progress_percent||0)+'"><div class="tn-progress" title="'+Number(x.progress_percent||0)+'% · time spent '+esc(hoursText(x.time_spent_minutes))+'"><span style="width:'+Number(x.progress_percent||0)+'%"></span></div><div class="tn-muted">'+Number(x.progress_percent||0)+'%'+(x.time_spent_minutes?' · '+esc(hoursText(x.time_spent_minutes)):'')+'</div></td>'+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-task="'+esc(x.id)+'"','Open task '+x.title)+actionIcon('edit','data-edit-task="'+esc(x.id)+'"','Edit task '+x.title)+actionIcon('play','data-start-task="'+esc(x.id)+'"','Start testing task '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-task="'+esc(x.id)+'"','Delete task '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="11" class="tn-empty">'+(!state.tasks.some(t=>t.origin==='FAILED_TEST'&&!t.deleted_at)?'No failed tests yet. Turn on “Auto-create tasks for failed tests” in Context &amp; scope, then run tests.':'No tasks match your filters. Clear the search or change the filters.')+'</td></tr>';
  $('taskVisibleCount').textContent=tasks.length;updateTaskSelection();
 }
 const canRerun=()=>['QA','PROJECT_MANAGER'].includes(state.context?.projectRole);
@@ -756,7 +768,7 @@ function arrangeTaskPopup(){
  const linkForm=$('testLinkForm'),keep=new Set([$('drawerInfo'),$('taskStartTest')?.parentElement]);
  if(linkedHead){let n=linkedHead.previousElementSibling?.classList.contains('tn-divider')?linkedHead.previousElementSibling:linkedHead;for(;n;n=n.nextElementSibling){keep.add(n);if(n===linkForm)break;}}
  const more=document.createElement('details');more.className='tn-task-more';
- more.innerHTML='<summary>More<span>Dates &amp; status actions · subtasks · attachments · comments · history</span></summary><div class="tn-task-more-body"></div>';
+ more.innerHTML='<summary>More<span>Dates &amp; status actions · subtasks · attachments</span></summary><div class="tn-task-more-body"></div>';
  const moreBody=more.querySelector('.tn-task-more-body');
  for(const k of kids)if(!keep.has(k))moreBody.appendChild(k);
  body.appendChild(more);
@@ -765,10 +777,15 @@ function arrangeTaskPopup(){
  const eyebrow=drawer.querySelector('.tn-card-head .tn-eyebrow');if(eyebrow)eyebrow.remove();
  const close=$('closeTask');if(close){close.textContent='×';close.className='tn-dialog-close';close.setAttribute('aria-label','Close task');}
 }
-async function openTask(id){
+async function openTask(id,mode){
+ // 👁 opens the task read-only; ✏ opens it with the edit controls. Reloading the same task (after a save) keeps its mode.
+ {const dr=$('taskDrawer');mode=mode||(dr&&String(state.taskId)===String(id)&&dr.classList.contains('open')!==false&&dr.dataset.mode)||'view';if(dr){dr.classList.toggle('tn-task-viewonly',mode!=='edit');dr.dataset.mode=mode;}}
  arrangeTaskPopup();
+ // View shows everything, so the More section is open; Edit keeps it folded.
+ {const more=document.querySelector('#taskDrawer .tn-task-more');if(more)more.open=mode!=='edit';}
  const serial=++taskOpenSerial;
  const d=await api('/api/work-items/'+encodeURIComponent(id)+'/details');if(serial!==taskOpenSerial)return;state.taskId=id;state.taskRole=d.projectRole;const t=d.task;
+ $('taskDrawer').classList.toggle('tn-task-failed',t.origin==='FAILED_TEST');
  const canReview=['PROJECT_MANAGER','QA'].includes(d.projectRole),isManager=d.projectRole==='PROJECT_MANAGER',isDeveloper=d.projectRole==='DEVELOPER';
  $('taskStartTest').disabled=!canReview;
  $('retestOne').disabled=!canReview;$('retestWithChildren').disabled=!canReview;
@@ -778,7 +795,10 @@ async function openTask(id){
  $('taskFiles').disabled=d.projectRole==='VIEWER';
  for(const btn of document.querySelectorAll('[data-task-action]'))btn.disabled=!(canReview||(btn.dataset.taskAction==='ETA'&&isDeveloper))||(btn.dataset.taskAction==='DELETE'&&!isManager);
  $('drawerTitle').textContent=t.title;
- $('drawerInfo').innerHTML=(d.parent?'<div class="tn-kv"><span>Parent task</span><button class="tn-link" data-task="'+esc(d.parent.id)+'">'+esc(d.parent.title)+'</button></div>':'')+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(t.work_type)+' / '+priorityTag(t.priority)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div>'+(t.closed_at?'<div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+(t.closed_by_name?' · by '+esc(t.closed_by_name):'')+'</span></div>':'')+'<p class="tn-info mt-3">'+display(t.description)+'</p><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select><button class="btn btn-outline-secondary tn-btn" id="saveTaskStatus">Save</button></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
+ $('drawerInfo').innerHTML=(d.parent?'<div class="tn-kv"><span>Parent task</span><button class="tn-link" data-task="'+esc(d.parent.id)+'">'+esc(d.parent.title)+'</button></div>':'')+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(workTypeLabel(t.work_type))+' / '+priorityTag(t.priority)+'</span></div>'+(t.origin==='FAILED_TEST'?'<div class="tn-kv"><span>Team / Role</span><span>'+display((state.tasks||[]).find(x=>x.id===t.id)?.team_name)+(t.assigned_role?' · '+esc(ROLE_NAMES[t.assigned_role]||t.assigned_role):'')+(t.assigned_by_system?' <span class="tn-muted">(assigned by system)</span>':'')+'</span></div>':'')+'<div class="tn-kv"><span>Assigned to</span><span>'+display((state.tasks||[]).find(x=>x.id===t.id)?.assigned_to_name)+(t.assigned_role?' · '+esc(ROLE_NAMES[t.assigned_role]||t.assigned_role):'')+'</span></div><div class="tn-kv"><span>ETA</span><span>'+dateTime(t.eta_at)+'</span></div><div class="tn-kv"><span>Test case</span><span>'+display(t.external_case_id)+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Due date</span><span>'+dateTime(t.due_at)+'</span></div>'+(t.closed_at?'<div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+(t.closed_by_name?' · by '+esc(t.closed_by_name):'')+'</span></div>':'')+'<div id="taskFailureBox"></div><p class="tn-info mt-3">'+display(t.description)+'</p><div class="tn-kv tn-task-viewrow"><span>Progress</span><span>'+Number(t.progress_percent||0)+'%'+(t.time_spent_minutes?' · time spent '+esc(hoursText(t.time_spent_minutes)):'')+'</span></div><div class="tn-task-edit"><label class="form-label" for="taskAssignee">Assigned to</label><div class="d-flex gap-2 mb-3"><select id="taskAssignee" class="form-select"><option value="">Not assigned</option>'+(state.context?.members||[]).filter(m=>m.project_role&&m.project_role!=='VIEWER').map(m=>'<option value="'+esc(m.user_id)+'"'+(String(m.user_id)===String(t.assigned_to||'')?' selected':'')+'>'+esc(m.display_name)+' · '+esc(ROLE_NAMES[m.project_role]||m.project_role)+'</option>').join('')+'</select></div><label class="form-label" for="taskStatusChange">Update status</label><div class="d-flex gap-2 mb-3"><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option '+(v===t.status?'selected':'')+'>'+v+'</option>').join('')+'</select></div>'+'<label class="form-label" for="taskProgress">Progress and time spent</label><div class="d-flex gap-2 align-items-center"><select id="taskProgress" class="form-select" style="max-width:120px" aria-label="Progress">'+[0,10,20,30,40,50,60,70,80,90,100].map(v=>'<option value="'+v+'"'+(v===Math.round(Number(t.progress_percent||0)/10)*10?' selected':'')+'>'+v+'%</option>').join('')+'</select>'+'<input id="taskAddHours" class="form-control" type="number" min="0" max="24" step="0.25" placeholder="Add hours" aria-label="Add hours of work" style="max-width:130px"></div>'+'<div class="tn-muted mt-1" id="taskTimeSpent">Time spent: '+esc(hoursText(t.time_spent_minutes))+'</div><label class="form-label mt-3" for="taskEditComment">Comment</label><textarea id="taskEditComment" class="form-control" rows="3" placeholder="What was done, or what is next (optional)"></textarea><div class="tn-task-savebar"><button type="button" class="btn btn-primary tn-btn" id="saveTaskEdit" data-orig-assignee="'+esc(t.assigned_to||'')+'" data-orig-status="'+esc(t.status)+'" data-orig-progress="'+Math.round(Number(t.progress_percent||0)/10)*10+'">Save</button></div></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
+ if($('taskAssignee'))$('taskAssignee').disabled=d.projectRole!=='PROJECT_MANAGER';
+ {const canProgress=['PROJECT_MANAGER','QA'].includes(d.projectRole)||String(t.assigned_to||'')===String(state.user?.id||state.user?.sub||'');['taskProgress','taskAddHours'].forEach(x=>{if($(x))$(x).disabled=!canProgress;});}
+ loadTaskFailure(t).catch(err=>{if($('taskFailureBox'))$('taskFailureBox').innerHTML='<p class="tn-muted">Failure details are not available: '+esc(err.message)+'</p>';});
  $('linkSession').value=t.session_id||'';$('linkCase').value=t.external_case_id||'';
  let availableCases=[];try{availableCases=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/test-cases')).cases||[];}catch(err){console.warn('Case catalog unavailable:',err.message);}
  const choices=[...new Set([t.session_id,...availableCases.map(x=>x.session_id)].filter(Boolean))];
@@ -786,18 +806,23 @@ async function openTask(id){
  function populateCases(){const sid=$('linkSession').value;const filtered=availableCases.filter(x=>x.session_id===sid);$('caseChoices').innerHTML=filtered.map(x=>'<option value="'+esc(x.external_case_id)+'" label="'+esc(x.title||x.external_case_id)+'"></option>').join('');}
  $('linkSession').oninput=populateCases;populateCases();
  const canLink=['PROJECT_MANAGER','QA'].includes(d.projectRole);$('testLinkForm').querySelectorAll('input,button').forEach(el=>el.disabled=!canLink);await loadTaskLinks(id);
- $('saveTaskStatus').disabled=d.projectRole==='VIEWER';if(isDeveloper){const complete=$('taskStatusChange').querySelector('option[value="COMPLETED"]');if(complete)complete.disabled=true;}
+ if($('saveTaskEdit'))$('saveTaskEdit').disabled=d.projectRole==='VIEWER';if(isDeveloper){const complete=$('taskStatusChange').querySelector('option[value="COMPLETED"]');if(complete)complete.disabled=true;}
  $('taskEta').value=t.eta_at?new Date(t.eta_at).toISOString().slice(0,16):'';
  $('taskDeferDate').value=t.deferred_until?new Date(t.deferred_until).toISOString().slice(0,16):'';
  $('taskReason').value='';
  $('drawerSubtasks').innerHTML=d.subtasks.map(x=>'<div class="tn-sub"><button class="tn-link" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div>'+statusTag(x.status)+'</div></div>').join('')||'<p class="tn-muted">No subtasks yet.</p>';
  $('drawerAttachments').innerHTML=d.attachments.map(x=>'<div class="tn-kv"><span>'+date(x.created_at)+'</span><button class="tn-link" data-task-file="'+esc(x.id)+'">'+esc(x.filename)+'</button></div>').join('')||'<p class="tn-muted">No attachments yet.</p>';
  $('drawerComments').innerHTML=d.comments.map(x=>'<div class="tn-comment"><strong>'+esc(x.user_name||'User')+'</strong> <span class="tn-muted">'+dateTime(x.created_at)+'</span><p>'+esc(x.comment)+'</p></div>').join('')||'<p class="tn-muted mt-2">No comments.</p>';
- const history=await api('/api/projects/'+encodeURIComponent(requireProject())+'/task-test-history?taskId='+encodeURIComponent(id));if(serial!==taskOpenSerial)return;
- $('drawerInfo').innerHTML+='<h3 class="mt-3">Task test history</h3>'+(history.results.length?history.results.map(r=>'<div class="tn-sub">Run #'+esc(r.run_number)+' · '+esc(r.tester||'Unknown tester')+' · '+dateTime(r.completed_at)+' · '+(r.passed?'Passed':'Failed')+'<div>'+evidenceButtons(r.evidence_json)+'</div></div>').join(''):'<p class="tn-muted">No linked execution history yet.</p>');
- $('drawerHistory').innerHTML=d.history.map(h=>'<div class="mb-2">'+esc(h.event_type)+' · '+dateTime(h.created_at)+' · '+esc(h.by_name||'')+(h.comment?' — '+esc(h.comment):'')+'</div>').join('')||'No activity';
+ // Failed-test tasks show their runs, screenshots, video and reports through the Failure section's button, so these two lists are only for other tasks.
+ const failedTask=t.origin==='FAILED_TEST';
+ const history=failedTask?{results:[]}:await api('/api/projects/'+encodeURIComponent(requireProject())+'/task-test-history?taskId='+encodeURIComponent(id));if(serial!==taskOpenSerial)return;
+ if(!failedTask)$('drawerInfo').innerHTML+='<h3 class="mt-3">Task test history</h3>'+(history.results.length?history.results.map(r=>'<div class="tn-sub">Run #'+esc(r.run_number)+' · '+esc(r.tester||'Unknown tester')+' · '+dateTime(r.completed_at)+' · '+(r.passed?'Passed':'Failed')+'<div>'+evidenceButtons(r.evidence_json)+'</div></div>').join(''):'<p class="tn-muted">No linked execution history yet.</p>');
+ // Activity history in plain words, one line each (comments too). Only the latest AI line is kept, so repeated AI checks do not fill the list.
+ {const labels={WORK_ITEM_CREATED:'Task created',WORKFLOW_FAILED_TEST:'Created from failed test',TEST_FAILED_AGAIN:'Failed again',TEST_PASSED:'Passed',AI_ROUTED:'AI check',AI_ANALYSED:'AI check',ROUTING_CHANGED:'Team or type changed',PROGRESS_UPDATED:'Progress',COMMENT_ADDED:'Comment',STATUS_CHANGED:'Status changed',WORK_ITEM_ASSIGNED:'Assigned',ASSIGNED:'Assigned',SUBTASK_CREATED:'Subtask added',VERIFIED_RETEST_PASSED:'Closed after passing retest',TASK_DELETE:'Deleted',TASK_RESTORE:'Restored'};
+  let aiSeen=false;const rows=d.history.filter(h=>{if(!/^AI_/.test(h.event_type))return true;if(aiSeen)return false;aiSeen=true;return true;});
+  $('drawerHistory').innerHTML=rows.map(h=>'<div class="tn-activity"><strong>'+esc(labels[h.event_type]||titleCase(h.event_type))+'</strong> · '+dateTime(h.created_at)+(h.by_name?' · '+esc(h.by_name):' · System')+(h.comment?' — '+esc(h.comment):'')+'</div>').join('')||'No activity';}
  const related=state.evidence.filter(x=>String(x.session_id)===String(t.session_id)&&String(x.external_case_id)===String(t.external_case_id)).slice(0,2);
- if(related.length)$('drawerInfo').innerHTML+='<h3 class="mt-3">Run evidence</h3>'+related.map(x=>'<div class="tn-sub">'+(x.passed?'Passed':'Failed')+' · '+dateTime(x.completed_at)+'<div>'+evidenceButtons(x.evidence_json)+'</div></div>').join('');
+ if(related.length&&!failedTask)$('drawerInfo').innerHTML+='<h3 class="mt-3">Run evidence</h3>'+related.map(x=>'<div class="tn-sub">'+(x.passed?'Passed':'Failed')+' · '+dateTime(x.completed_at)+'<div>'+evidenceButtons(x.evidence_json)+'</div></div>').join('');
  $('taskShade').classList.add('open');$('taskDrawer').classList.add('open');$('taskDrawer').setAttribute('aria-hidden','false');$('closeTask').focus();
 }
 function closeTask(){taskOpenSerial++;$('taskDrawer').classList.remove('open');$('taskDrawer').setAttribute('aria-hidden','true');$('taskShade').classList.remove('open');state.taskId=null;if(lastTaskTrigger?.isConnected)lastTaskTrigger.focus();}
@@ -982,7 +1007,7 @@ function bind(){
  $('allTasks').onchange=e=>{document.querySelectorAll('.task-select').forEach(x=>x.checked=e.target.checked);updateTaskSelection();};
  $('tasksBody').addEventListener('change',e=>{if(e.target.matches('.task-select'))updateTaskSelection();});
  $('taskSearch').addEventListener('input',renderTasks);
- $('taskHierarchy').addEventListener('change',renderTasks);
+ 
  $('projectRunAll').onclick=async()=>{try{await runProjectTests();}catch(e){notice(e.message);}};
  $('batchRetest').onclick=async()=>{const ids=[...document.querySelectorAll('.task-select:checked')].map(x=>x.value);if(!ids.length){notice('Select one or more tasks to retest.','warning');return;}try{await retest(ids);}catch(e){notice(e.message);}};
  $('taskStartTest').onclick=()=>launchTaskTest().catch(e=>notice(e.message));
@@ -1011,7 +1036,7 @@ function bind(){
   try{await openProject(editProject.dataset.editProject);if($('editProfile').disabled)throw Error('Project manager permission required to edit this project.');$('editProfile').click();}catch(err){notice(err.message);}
   return;
  }
- const editTask=e.target.closest('[data-edit-task]');if(editTask){lastTaskTrigger=editTask;try{await openTask(editTask.dataset.editTask);}catch(err){notice(err.message);}return;}
+ const editTask=e.target.closest('[data-edit-task]');if(editTask){lastTaskTrigger=editTask;try{await openTask(editTask.dataset.editTask,'edit');}catch(err){notice(err.message);}return;}
  const deleteTask=e.target.closest('[data-delete-task]');if(deleteTask){
   if(!await confirmDanger({title:'Delete task?',message:'Do you want to delete '+(nameFrom(deleteTask,'Delete task ')||'this task')+'?',note:'It moves to deleted items and can be restored. Linked history is kept.',confirmLabel:'Delete task'}))return;
   try{await api('/api/work-items/'+encodeURIComponent(deleteTask.dataset.deleteTask)+'/lifecycle',{method:'PATCH',body:JSON.stringify({action:'DELETE',reason:'Deleted from task table'})});await loadWorkspace();notice('Task moved to deleted items.','success');}catch(err){notice(err.message);}
@@ -1164,7 +1189,7 @@ const attemptLabel=n=>'Attempt '+n;
 // Test cases: latest result across all attempts.
 function renderRunResults(){
  const g=runPage.group;$('runCasesCount').textContent=g.cases.length;
- $('runResultsBody').innerHTML=g.cases.map(r=>'<tr><td><span class="tn-case-id">'+esc(r.external_case_id||'—')+'</span> '+esc(caseTitle(r.title))+'</td><td data-sort="'+(/^ai/i.test(r.source||'')?'AI':'Manual')+'">'+sourceTag(r.source)+'</td><td>'+esc((x=>/^(ui|api)$/i.test(String(x||''))?String(x).toUpperCase():x?String(x).charAt(0).toUpperCase()+String(x).slice(1).toLowerCase():'—')(r.test_category))+'</td><td>'+esc((x=>x?String(x).charAt(0).toUpperCase()+String(x).slice(1).toLowerCase():'—')(r.scenario_type))+'</td><td>'+(r.priority?priorityTag(r.priority):'—')+'</td><td data-sort="'+(r.passed?1:0)+'">'+resultTag(r.passed)+'</td><td data-sort="'+Number(r.times_run||1)+'">'+Number(r.times_run||1)+'</td>'+createdCell(r.case_created_by_name,r.case_created_at)+updatedCell(r.latest_by_name,r.latest_completed_at,r.case_created_by_name,r.case_created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-open-case="'+esc(r.external_case_id||'')+'"','Details and run history of '+(r.external_case_id||'this test case'))+(canRerun()?actionIcon('play','data-rerun-case="'+esc(r.external_case_id||'')+'"','Re-run '+(r.external_case_id||'this test case')):'')+'</span></td></tr>').join('')||'<tr><td colspan="10" class="tn-empty">No test cases were recorded for this run.</td></tr>';
+ $('runResultsBody').innerHTML=g.cases.map(r=>'<tr><td><span class="tn-case-id">'+esc(r.external_case_id||'—')+'</span> '+esc(caseTitle(r.title))+'</td><td data-sort="'+(/^ai/i.test(r.source||'')?'AI':'Manual')+'">'+sourceTag(r.source)+'</td><td>'+esc((x=>/^(ui|api)$/i.test(String(x||''))?String(x).toUpperCase():x?String(x).charAt(0).toUpperCase()+String(x).slice(1).toLowerCase():'—')(r.test_category))+'</td><td>'+esc((x=>x?String(x).charAt(0).toUpperCase()+String(x).slice(1).toLowerCase():'—')(r.scenario_type))+'</td><td>'+(r.priority?priorityTag(r.priority):'—')+'</td><td data-sort="'+(r.passed?1:0)+'">'+resultTag(r.passed)+(r.passed?'':taskChip(failureTaskFor(g.run?.session_id,r.external_case_id)))+'</td><td data-sort="'+Number(r.times_run||1)+'">'+Number(r.times_run||1)+'</td>'+createdCell(r.case_created_by_name,r.case_created_at)+updatedCell(r.latest_by_name,r.latest_completed_at,r.case_created_by_name,r.case_created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-open-case="'+esc(r.external_case_id||'')+'"','Details and run history of '+(r.external_case_id||'this test case'))+(canRerun()?actionIcon('play','data-rerun-case="'+esc(r.external_case_id||'')+'"','Re-run '+(r.external_case_id||'this test case')):'')+'</span></td></tr>').join('')||'<tr><td colspan="10" class="tn-empty">No test cases were recorded for this run.</td></tr>';
 }
 // One attempt's results, for its PDF report (kept apart from the run page).
 const reportRun={data:null,shots:[],runId:'',label:''};
@@ -1190,6 +1215,7 @@ async function openCase(caseId){
  const title=caseTitle(tc?.title||last?.title||caseId);
  $('caseViewerTitle').innerHTML='<span class="tn-case-id">'+esc(caseId)+'</span> '+esc(title);
  $('caseViewerMeta').textContent=[tc?.source?(/^ai/i.test(tc.source)?'Created with AI':'Written manually'):'',tc?.category?titleCase(tc.category):'',tc?.type?titleCase(tc.type):'',tc?.priority?titleCase(tc.priority)+' priority':'',tc?.review?.status==='CONFIRMED'?'Approved'+(tc.review.confirmedAt?' on '+dateTime(tc.review.confirmedAt):''):tc?.review?.status?titleCase(tc.review.status):'',tc?.review?.revision?'Revision '+tc.review.revision:''].filter(Boolean).join(' · ');
+ {const ft=failureTaskFor(runPage.group?.run?.session_id,caseId);if(ft)$('caseViewerMeta').insertAdjacentHTML('beforeend',' · '+taskChip(ft));}
  const list=(items,ordered)=>items.length?'<'+(ordered?'ol':'ul')+'>'+items.map(x=>'<li>'+(ordered?stepText(x):esc(typeof x==='string'?x:JSON.stringify(x)))+'</li>').join('')+'</'+(ordered?'ol':'ul')+'>':'<p class="tn-muted">Not recorded</p>';
  const data=tc?Object.entries(tc.testData||{}):[];
  runPage.caseShots=h.map(x=>({r:{...x,external_case_id:caseId,title:x.title||title},meta:(((runPage.group?.attempts||[]).find(a=>a.id===x.run_id))?attemptLabel((runPage.group.attempts.find(a=>a.id===x.run_id)).attempt):'Run #'+x.run_number)+' · '+(x.executed_by_name||'Not recorded')+' · '+dateTime(x.completed_at),...evidenceOf(x)})).filter(x=>x.shot||x.video);
@@ -1422,7 +1448,7 @@ function renderTeamProjects(){
  $('ctCountActive').textContent=t.projects.length-inactive.length;$('ctCountAll').textContent=t.projects.length;$('ctCountInactive').textContent=inactive.length;
  for(const b of document.querySelectorAll('[data-assign-filter]'))b.setAttribute('aria-checked',String(b.dataset.assignFilter===f));
  const shown=f==='all'?t.projects:f==='inactive'?inactive:t.projects.filter(p=>p.is_active!==false);
- $('ctProjectsBody').innerHTML=shown.map(p=>'<tr data-search="'+esc(((p.name||'')+' '+(p.reference_no||'')).toLowerCase())+'"><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.reference_no||'—')+'</td><td>'+(p.is_active===false?'<span class="tn-tag">Inactive</span>':'<span class="tn-tag success">Active</span>')+'</td>'+createdCell(p.assigned_by_name,p.assigned_at)+updatedCell(p.status_updated_by_name||p.assigned_by_name,p.status_updated_at||p.assigned_at,p.assigned_by_name,p.assigned_at)
+ $('ctProjectsBody').innerHTML=shown.map(p=>'<tr data-search="'+esc(((p.name||'')+' '+(p.reference_no||'')).toLowerCase())+'"><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.reference_no||'—')+'</td><td>'+(p.is_active===false?'<span class="tn-tag">Inactive</span>':'<span class="tn-tag success">Active</span>')+'</td><td><select class="form-select tn-handles" data-handles-project="'+esc(p.id)+'" aria-label="Failed tests this team handles on '+esc(p.name)+'">'+HANDLE_OPTIONS.map(([v,l])=>'<option value="'+v+'"'+(v===((p.handles||[])[0]||'')?' selected':'')+'>'+l+'</option>').join('')+'</select></td>'+createdCell(p.assigned_by_name,p.assigned_at)+updatedCell(p.status_updated_by_name||p.assigned_by_name,p.status_updated_at||p.assigned_at,p.assigned_by_name,p.assigned_at)
   +'<td><span class="tn-icon-actions">'+(p.is_active===false?actionIcon('restore','data-ct-status="activate" data-project-id="'+esc(p.id)+'"','Activate '+t.name+' on '+p.name):actionIcon('pause','data-ct-status="deactivate" data-project-id="'+esc(p.id)+'"','Deactivate '+t.name+' on '+p.name))+'</span></td></tr>').join('')
   ||'<tr><td colspan="6" class="tn-empty">'+(t.projects.length?(f==='inactive'?'No inactive assignments.':'No active assignments.'):'Not assigned to any project yet. Choose a project above and press + Add.')+'</td></tr>';
 }
@@ -1515,5 +1541,75 @@ function makeCombo(selectId,placeholder){
 }
 makeCombo('ctAddMemberSelect','Search users by name or email');
 makeCombo('ctAssignSelect','Search projects');
+// ---- Failed tests as tasks ----
+// Task popup: the failed test case (same facts as the Test cases and Runs pages) and its failure.
+async function loadTaskFailure(t){
+ if(!$('taskFailureBox')||!t.session_id||!t.external_case_id)return;
+ const d=await api('/api/work-items/'+encodeURIComponent(t.id)+'/failure');
+ const box=$('taskFailureBox');if(!box||state.taskId!==t.id)return;
+ const c=d.testCase,f=d.failure;let html='';
+ if(c){
+  const steps=c.steps.length?'<ol>'+c.steps.map(x=>'<li>'+stepText(x)+'</li>').join('')+'</ol>':'<p class="tn-muted">Not recorded</p>';
+  const exp=c.expected.length?'<ul>'+c.expected.map(x=>'<li>'+esc(typeof x==='string'?x:JSON.stringify(x))+'</li>').join('')+'</ul>':'<p class="tn-muted">Not recorded</p>';
+  html+='<div class="tn-task-section"><h3>Test case</h3>'
+   +'<div class="tn-task-case-title"><span class="tn-case-id">'+esc(c.id)+'</span> '+esc(caseTitle(c.title))+'</div>'
+   +'<div class="tn-task-grid"><span>Source</span><span>'+sourceTag(c.source)+'</span><span>Category</span><span>'+esc(catLabel(c.category))+'</span>'
+   +'<span>Type</span><span>'+esc(c.type?titleCase(c.type):'—')+'</span><span>Priority</span><span>'+(c.priority?priorityTag(c.priority):'—')+'</span>'
+   +'<span>Story</span><span>'+(c.story?esc(c.story.ref+' · '+c.story.title):'—')+'</span><span>Page</span><span>'+display(c.page)+'</span>'
+   +'<span>Created</span><span>'+esc(c.createdBy||'Not recorded')+' · '+dateTime(c.createdAt)+'</span><span>Last updated</span><span>'+esc(c.updatedBy||c.createdBy||'Not recorded')+' · '+dateTime(c.updatedAt||c.createdAt)+'</span></div>'
+   +'<details class="tn-task-steps"><summary>Steps ('+c.steps.length+') and expected results</summary><h4>Steps</h4>'+steps+'<h4>Passing criteria (expected result)</h4>'+exp+'</details></div>';
+ }
+ if(f){
+  const runs=f.firstRun&&f.lastRun&&f.firstRun.id!==f.lastRun.id?' (first in Run #'+esc(f.firstRun.number)+', last in Run #'+esc(f.lastRun.number)+')':'';
+  html+='<div class="tn-task-section tn-task-failure"><h3>Failure</h3><div class="tn-task-grid">'
+   +'<span>Latest result</span><span>'+(f.latest?resultTag(f.latest.passed)+' <span class="tn-muted">Run #'+esc(f.latest.run)+'</span>':'—')+'</span>'
+   +'<span>Last failed</span><span>'+(f.lastRun?'Run #'+esc(f.lastRun.number):'—')+(f.environment?' · '+esc(f.environment):'')+'</span>'
+   +'<span>Times failed</span><span>'+Number(f.count||0)+runs+'</span>'
+   +'<span>Error</span><span>'+(f.error?'<span title="'+esc(String(f.error).slice(0,600))+'">'+esc(failReason(f.error))+'</span>':'—')+'</span>'
+   +'<span>AI reason</span><span>'+(f.ai?esc(f.aiReasonLabel||'—')+(f.ai.confidence!=null?' ('+Math.round(Number(f.ai.confidence)*(Number(f.ai.confidence)<=1?100:1))+'%)':'')+(f.ai.summary?'<div class="tn-muted">'+esc(f.ai.summary)+'</div>':''):'<span class="tn-muted">Not analysed yet</span>')+'</span>'
+   +'<span>Assigned</span><span>'+esc([f.team||'No team',f.roleLabel].filter(Boolean).join(' · '))+(f.bySystem?' <span class="tn-muted">(by system)</span>':'')+'</span></div>'
+   +(f.runId?'<button type="button" class="btn btn-outline-secondary tn-btn mt-2" data-task-case="'+esc(c?.id||t.external_case_id)+'" data-task-run="'+esc(f.runId)+'">Evidence, reports and run history ↗</button>':'')+'</div>';
+ }
+ box.innerHTML=html;
+}
+document.addEventListener('click',e=>{
+ const b=e.target.closest('[data-task-case]');if(!b)return;
+ state.runId=b.dataset.taskRun;
+ openCase(b.dataset.taskCase).then(()=>showCaseTab('History')).catch(err=>notice(err.message));
+});
+// A task chip inside the test case popup: close the popup so the task opens in front.
+document.addEventListener('click',e=>{if(e.target.closest('.tn-task-chip')&&$('caseViewer')?.open)$('caseViewer').close();},true);
+// ✏ Edit: one Save for assignee, status, progress / time spent and the comment. Only what changed is sent.
+document.addEventListener('click',async e=>{
+ const btn=e.target.closest('#saveTaskEdit');if(!btn)return;
+ const id=state.taskId,base='/api/work-items/'+encodeURIComponent(id);
+ const assignee=$('taskAssignee'),status=$('taskStatusChange').value,progress=Number($('taskProgress').value),hours=Number($('taskAddHours').value||0),comment=$('taskEditComment').value.trim();
+ if(hours<0||hours>24){notice('Add between 0 and 24 hours at a time.','warning');return;}
+ const steps=[];
+ if(assignee&&!assignee.disabled&&assignee.value!==btn.dataset.origAssignee)steps.push(()=>api(base+'/assign',{method:'PATCH',body:JSON.stringify({assignedTo:assignee.value||null})}));
+ if(status!==btn.dataset.origStatus)steps.push(()=>api(base+'/status',{method:'PATCH',body:JSON.stringify({status,comment})}));
+ if(progress!==Number(btn.dataset.origProgress)||hours>0)steps.push(()=>api(base+'/progress',{method:'PATCH',body:JSON.stringify({progress,addMinutes:Math.round(hours*60)})}));
+ if(comment)steps.push(()=>api(base+'/comments',{method:'POST',body:JSON.stringify({comment})}));
+ if(!steps.length){notice('Nothing changed.','warning');return;}
+ btn.disabled=true;
+ try{
+  for(const step of steps)await step();
+  notice('Task saved.','success');
+  try{state.tasks=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/work-items')).workItems||state.tasks;}catch{}
+  renderTasks();await openTask(id);
+ }catch(err){notice(err.message);btn.disabled=false;}
+});
+
+// Teams → Assign project: which failed tests this team handles on that project (when a project has several teams).
+const HANDLE_OPTIONS=[['','All'],['FUNCTIONAL','Functional'],['UI','UI'],['API','API'],['SECURITY','Security'],['ACCESSIBILITY','Accessibility'],['PERFORMANCE','Performance'],['INTEGRATION','Integration']];
+document.addEventListener('change',async e=>{
+ const s=e.target.closest('[data-handles-project]');if(!s)return;
+ const t=detailTeam();if(!t)return;
+ try{
+  await api('/api/company-teams/'+encodeURIComponent(t.id)+'/projects/'+encodeURIComponent(s.dataset.handlesProject)+'/handles',{method:'PATCH',body:JSON.stringify({handles:s.value?[s.value]:[]})});
+  const p=t.projects.find(x=>String(x.id)===String(s.dataset.handlesProject));if(p)p.handles=s.value?[s.value]:[];
+  notice(t.name+' now handles '+(s.value?catLabel(s.value)+' failed tests':'all failed tests')+' on this project.','success');
+ }catch(err){notice(err.message);}
+});
 initialize();
 })();

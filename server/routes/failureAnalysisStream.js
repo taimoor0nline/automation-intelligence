@@ -296,6 +296,13 @@ async function runJob(job, sessionId, session, failures) {
   }
 
   job.state = "COMPLETED";
+  // Keep the analyses with their run in the database (this also routes the run's failed-test tasks).
+  (async () => {
+    const persistence = require("../services/persistenceService");
+    if (!persistence.enabled()) return;
+    const runId = await persistence.latestRunId(sessionId, job.runNumber);
+    if (runId) await persistence.persistAnalyses(runId, (job.results || []).filter((a) => !isAnalysisError(a)));
+  })().catch((e) => console.warn("[analysis] could not save analyses for the run:", e.message));
   job.completedAt = new Date().toISOString();
   send(job, "ANALYSIS_COMPLETED", {
     runNumber: job.runNumber,
@@ -313,7 +320,7 @@ async function runJob(job, sessionId, session, failures) {
   scheduleExpiry(job);
 }
 
-router.post("/api/test-results/analyze/start", (req, res) => {
+function startAnalysisRequest(req, res) {
   const { sessionId = "default", retryErrorsOnly = false } = req.body || {};
   const session = getSession(sessionId);
   if (!session.lastResults?.summary) return res.status(409).json({ reply: "Run approved tests before requesting AI result analysis." });
@@ -418,7 +425,15 @@ router.post("/api/test-results/analyze/start", (req, res) => {
     retryErrorsOnly: job.retryErrorsOnly,
     eventsUrl: `/api/test-results/analyze/events/${encodeURIComponent(sessionId)}/${encodeURIComponent(jobId)}`,
   });
-});
+}
+router.post("/api/test-results/analyze/start", startAnalysisRequest);
+// The server starts the same analysis by itself after a run with failures (failed tests as tasks need the AI reason).
+router.startAnalysisForSession = (sessionId) => {
+  let reply = null;
+  const res = { status() { return res; }, json(body) { reply = body; return res; } };
+  startAnalysisRequest({ body: { sessionId } }, res);
+  return reply;
+};
 
 router.get("/api/test-results/analyze/current/:sessionId", (req, res) => {
   const sessionId = req.params.sessionId || "default";
