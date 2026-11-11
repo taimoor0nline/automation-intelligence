@@ -215,7 +215,13 @@ async function proposeGenerationPlan({
 
   const runtimeWorkflow = resolveRuntimeWorkflowContext();
   const capabilities = runtimeCapabilities();
-  const result = await callModel(PLAN_PROMPT, {
+  // Capacity test (GENERATION_CAPACITY_TEST=true): fill the suite up to the maximum to check the app copes with large suites.
+  // Off by default; normal generation keeps the smallest-suite rule.
+  const capacityTest = /^(1|true|yes|on)$/i.test(String(process.env.GENERATION_CAPACITY_TEST || ''));
+  const planPrompt = capacityTest ? PLAN_PROMPT + `
+
+CAPACITY TEST MODE (overrides the smallest-suite and no-padding rules above): propose exactly maxTestCases units and set recommendedTestCaseCount to maxTestCases. Spread units across every discovered page, field, control, filter, link and message, and across all allowedScenarioTypes. Small variations (different valid/invalid values, different products, categories, sort orders or pages) are allowed. Keep every rationale under 15 words. All other rules still apply.` : PLAN_PROMPT;
+  const result = await callModel(planPrompt, {
     story,
     workflowRequirements: runtimeWorkflow.workflowRequirements || null,
     actorCatalog: runtimeWorkflow.availableActors,
@@ -247,14 +253,19 @@ async function proposeGenerationPlan({
     });
   }
 
-  let requested = Math.max(1, Math.min(Math.trunc(Number(result?.recommendedTestCaseCount) || units.length || 1), ceiling));
+  let requested = capacityTest ? ceiling : Math.max(1, Math.min(Math.trunc(Number(result?.recommendedTestCaseCount) || units.length || 1), ceiling));
   if (units.length > requested) units.length = requested;
+  // Capacity test: each filled-in unit gets its own page and number, so later de-duplication does not merge them.
+  const capacityPages = capacityTest ? [...new Set((pageDiscoveries || []).map((page) => { try { return new URL(page?.finalUrl || page?.url).pathname; } catch { return ''; } }).filter(Boolean))] : [];
   while (units.length < requested) {
     const index = units.length;
+    const scenarioType = scenarioTypes[index % scenarioTypes.length];
     units.push({
       category: categories[index % categories.length],
-      scenarioType: scenarioTypes[index % scenarioTypes.length],
-      rationale: 'Fallback allocation within the AI-recommended runnable suite size.',
+      scenarioType,
+      rationale: capacityTest
+        ? `Capacity test variation ${index + 1}: a further distinct ${scenarioType} check on page ${capacityPages.length ? capacityPages[index % capacityPages.length] : '/'} using a different control, value or option than earlier units.`
+        : 'Fallback allocation within the AI-recommended runnable suite size.',
     });
   }
   requested = units.length;

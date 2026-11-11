@@ -966,3 +966,8 @@ h1.tn-title{margin:0 0 12px;line-height:1.2}
 .tn-ct-add .tn-combo{flex:0 1 560px!important;width:min(560px,100%);max-width:560px}
 .tn-ct-add .btn{flex:none}
 .tn-users-switch{margin:14px 16px 0}
+
+/* Test case source: AI or Manual */
+.tn-src{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.tn-src-ai{background:#ede9fe;color:#6d28d9}
+.tn-src-manual{background:#e0f2fe;color:#0369a1}

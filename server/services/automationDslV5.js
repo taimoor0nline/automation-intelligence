@@ -91,7 +91,8 @@ function normalizeExpectedResult(value) {
     "HTTP status is $2 for $1"
   );
   text = text.replace(
-    /^\s*text\s+in\s+(\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\[name=(?:"[^"]+"|'[^']+')\])\s+(contains?|includes?)\s+(["'`][\s\S]+["'`])\s*$/i,
+    /^\s*text\s+in\s+(\[data-testid=(?:"[^"]+"|'[^']+')\]|#[A-Za-z0-9_-]+|\[name=(?:"[^"]+"|'[^']+')\])\s+(contains?|includes?|equals?)\s+(["'`][\s\S]+["'`])\s*$/i,
+    // "equals" too (Cypress have.text), otherwise that check was silently dropped.
     (_all, selector, verb, expected) => `Text ${verb} ${expected} in ${selector}`
   );
   return text;

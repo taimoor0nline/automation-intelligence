@@ -47,6 +47,14 @@
     const h = $('editorHeading'); if (h) h.textContent = mode === 'ai' ? 'Add test case · With AI' : 'Add test case · Manually';
     collapseHelp();
     const t = $('tnHelpToggle'); if (t) t.hidden = mode === 'ai'; // the guide is for writing steps by hand
+    if (mode === 'manual') setTimeout(() => {
+      // Start empty: the starter example is shown only as faded hint text, so placeholder code is never saved by mistake.
+      const st = $('editSteps'), ex = $('editExpected'), pre = $('editPreconditions'), NL = String.fromCharCode(10);
+      if (st) { st.value = ''; st.placeholder = 'One command per line, e.g.' + NL + "cy.visit('/login')" + NL + "cy.get('[data-testid=\"password\"]').type('wrong123')" + NL + "cy.get('[data-testid=\"login-button\"]').click()"; }
+      if (ex) { ex.value = ''; ex.placeholder = 'What must be true afterwards, e.g.' + NL + "cy.get('[data-testid=\"login-error\"]').should('be.visible')"; }
+      if (pre) { pre.value = ''; pre.placeholder = 'Optional, in plain words, e.g. User admin exists'; }
+    }, 80);
+    setTimeout(tidyEditor, 60);
   }
   function choose() {
     let d = $('tnAddChoice');
@@ -107,4 +115,50 @@
     }, 150);
   });
 
+
+  // ---- Clear, minimal editor: Title, Steps, Expected result up front; the rest under "More options" (closed). ----
+  // Fields are only moved / tidied (the page's own logic still shows and hides them by mode); nothing is removed.
+  const tidyCss = document.createElement('style');
+  tidyCss.textContent = '.tn-hide{display:none!important}'
+    + '#editorModal input:focus,#editorModal textarea:focus,#editorModal select:focus,#editorModal input:focus-visible,#editorModal textarea:focus-visible,#editorModal select:focus-visible{outline:none!important;border-color:#2563eb!important;box-shadow:0 0 0 3px rgba(37,99,235,.14)!important}'
+    + '#editorModal .field textarea::placeholder{color:#94a3b8;font-size:12.5px}'
+    + '#editorModal .tn-help-toggle{display:block;margin:0 0 8px;font-size:12px}'
+    + '.tn-editor-more{margin:4px 0 14px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc}'
+    + '.tn-editor-more>summary{cursor:pointer;padding:10px 12px;font-size:12.5px;font-weight:700;color:#334155;list-style:none}'
+    + '.tn-editor-more>summary::-webkit-details-marker{display:none}.tn-editor-more>summary::before{content:"▸ ";color:#64748b}.tn-editor-more[open]>summary::before{content:"▾ "}'
+    + '.tn-editor-more>summary span{font-weight:500;color:#64748b}.tn-editor-more .tn-more-body{padding:0 12px 8px}';
+  document.head.appendChild(tidyCss);
+  function tidyEditor() {
+    const card = document.querySelector('#editorModal .modal-card'), actions = card?.querySelector('.modal-actions');
+    if (!card || !actions) return;
+    const isNew = String($('editIndex')?.value) === '-1';
+    // Short subtitle; status box and tabs only matter after validation, so hide them for a new case.
+    const sub = card.querySelector('.section-head .sub'); if (sub) sub.textContent = isNew ? 'Add one test case.' : 'Edit this test case.';
+    $('editorReadiness')?.classList.toggle('tn-hide', isNew);
+    $('editorViewTabs')?.classList.toggle('tn-hide', isNew);
+    // "More options": everything that has a sensible default.
+    let more = $('tnEditorMore');
+    if (!more) {
+      more = document.createElement('details'); more.id = 'tnEditorMore'; more.className = 'tn-editor-more';
+      more.innerHTML = '<summary>More options <span>· type, priority, category, preconditions, template</span></summary><div class="tn-more-body"></div>';
+    }
+    if (more.nextElementSibling !== actions) actions.before(more);
+    const body = more.querySelector('.tn-more-body');
+    [$('editId')?.closest('.field'), $('editType')?.closest('.two'), card.querySelector('.test-category-field'), $('securityClassificationRow'), $('editPreconditions')?.closest('.field'), $('templateSection')]
+      .forEach((n) => { if (n && n.parentElement !== body) body.appendChild(n); });
+    // Clear labels and one-line hints.
+    const title = $('editTitle'); if (title) { title.placeholder = 'What does this test check? e.g. Wrong password shows an error'; }
+    // The "How to write" link sits right above Steps.
+    const steps = $('editSteps')?.closest('.field'), t = $('tnHelpToggle'), help = $('manualCypressHelp');
+    const lab = steps?.querySelector('label');
+    if (lab && t && lab.nextElementSibling !== t) { lab.after(t); if (help) t.after(help); }
+    syncMore();
+  }
+  // "More options" is shown only when the fields are (Manually, or after AI has drafted the case).
+  function syncMore() { const more = $('tnEditorMore'), titleField = $('editTitle')?.closest('.field'); if (more && titleField) more.hidden = getComputedStyle(titleField).display === 'none'; }
+  const editorModal = $('editorModal');
+  if (editorModal) {
+    new MutationObserver(() => { if (editorModal.classList.contains('show')) setTimeout(tidyEditor, 150); }).observe(editorModal, { attributes: true, attributeFilter: ['class'] });
+    new MutationObserver(syncMore).observe(editorModal, { attributes: true, subtree: true, attributeFilter: ['style'] });
+  }
 })();

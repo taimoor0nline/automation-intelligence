@@ -638,6 +638,21 @@ router.post('/api/projects/:projectId/sessions/:sessionId/environment',requireAu
  }catch(e){respond(res,e);}
 });
 
+// Validation trusts only elements seen by a page scan. A manual session reuses the project's latest scan of the same
+// app address (and its element list), so selectors like [data-testid="username"] are verified without generating again.
+async function reuseLatestScan(session,sessionId,projectId,targetUrl){
+ if(session.pageDiscoveries?.length)return false;
+ const url=String(targetUrl||session.targetUrl||'').replace(/\/+$/,''); // stored with or without a trailing slash
+ const rows=(await db.query("select id from test_sessions where project_id=$1 and rtrim(target_url,'/')=$2 and id<>$3 and jsonb_array_length(coalesce(session_json->'pageDiscoveries','[]'::jsonb))>0 order by updated_at desc limit 5",[projectId,url,sessionId])).rows;
+ for(const row of rows){
+  const prev=await projectSession(row.id,projectId);
+  if(!prev?.pageDiscoveries?.length)continue;
+  session.pageDiscoveries=prev.pageDiscoveries;session.additionalPaths=prev.additionalPaths||[];session.discoveredFromSession=row.id;
+  try{const store=require('../services/canonicalArtifactStore'),art=await store.load(row.id);if(art?.registry){session.canonicalElementRegistry=art.registry;await store.persistRegistry(sessionId,art.registry);}}catch(e){console.warn('[manual-session] element list not copied:',e.message);}
+  return true;
+ }
+ return false;
+}
 // ---- Manual test cases (testing page ⊕ "Add Human Test Case") ----
 // A manual case is saved to the database as soon as it is saved in the editor (before, it lived only in the page until
 // a run). Without generated cases there is no session yet, so one is started for the project (story optional).
@@ -651,9 +666,10 @@ router.post('/api/projects/:projectId/manual-session',requireAuth,requireRole('Q
  const session=getSession(sessionId);
  Object.assign(session,{projectId:req.params.projectId,projectStoryId:storyId,contextSource:{type:storyId?'STORY':'PROJECT',storyId,taskId:null},createdBy:req.user.sub,
   story:s(req.body?.story,20000)||'Manual test cases',targetUrl,environment,state:'AWAITING_APPROVAL',testCases:[],manualOnly:true});
+ await reuseLatestScan(session,sessionId,req.params.projectId,targetUrl);
  await persistence.persistSession(sessionId,session,{projectId:req.params.projectId,userId:req.user.sub});
  if(storyId){await db.query('update test_sessions set project_story_id=$1 where id=$2',[storyId,sessionId]);await db.query('insert into story_test_sessions(story_id,session_id) values($1,$2) on conflict do nothing',[storyId,sessionId]);}
- res.status(201).json({ok:true,sessionId});
+ res.status(201).json({ok:true,sessionId,pagesScanned:(session.pageDiscoveries||[]).length,elementsKnown:session.canonicalElementRegistry?.elements?.length||0});
  }catch(e){respond(res,e);}
 });
 router.post('/api/projects/:projectId/sessions/:sessionId/manual-test-cases',requireAuth,requireRole('QA','MANAGER'),async(req,res)=>{
@@ -662,6 +678,7 @@ router.post('/api/projects/:projectId/sessions/:sessionId/manual-test-cases',req
  const session=await projectSession(s(req.params.sessionId,120),req.params.projectId);
  if(!session)throw fail(404,'This testing session is not part of the project.');
  if(session.state==='RUNNING')throw fail(409,'Wait for the current run to finish.');
+ await reuseLatestScan(session,s(req.params.sessionId,120),req.params.projectId,session.targetUrl); // older manual sessions had no scan
  const raw=req.body?.testCase||{},list=v=>(Array.isArray(v)?v:[]).map(x=>typeof x==='string'?s(x,2000):x).filter(Boolean).slice(0,100);
  const caseId=s(raw.id,40).toUpperCase();
  if(!/^TC-?[A-Z]?\d{1,4}$/.test(caseId))throw fail(400,'Invalid test case ID.');
@@ -672,7 +689,8 @@ router.post('/api/projects/:projectId/sessions/:sessionId/manual-test-cases',req
   preconditions:list(raw.preconditions),steps:list(raw.steps),expectedResults:list(raw.expectedResults),testData:raw.testData&&typeof raw.testData==='object'?raw.testData:(prev?.testData||{}),
   testCategory:s(raw.testCategory,40).toUpperCase()||prev?.testCategory||'FUNCTIONAL',testSubcategory:s(raw.testSubcategory,80)||prev?.testSubcategory||null,
   securitySubcategory:raw.securitySubcategory?s(raw.securitySubcategory,60):(prev?.securitySubcategory||null),
-  source:/^human/.test(String(raw.source||''))?s(raw.source,40):prev&&!/^human/.test(String(prev.source||''))?'ai-reviewed':'human',createdBy:prev?.createdBy||req.user.sub};
+  // Keep the page's own label: human (⊕ Manually), ai-on-demand (⊕ With AI), ai-reviewed (an AI case edited), ai-canonical (generated).
+  source:/^(human|ai)/.test(String(raw.source||''))?s(raw.source,40):prev?.source||'human',createdBy:prev?.createdBy||req.user.sub};
  // An edited case must be validated again before it can run (same rule as the testing page's own editor).
  if(prev&&JSON.stringify([prev.steps,prev.expectedResults,prev.preconditions])!==JSON.stringify([tc.steps,tc.expectedResults,tc.preconditions]))delete tc.automationReadiness;
  session.testCases=prev?(session.testCases||[]).map(x=>String(x.id).toUpperCase()===caseId?tc:x):[tc,...(session.testCases||[])];
@@ -841,7 +859,7 @@ router.get('/api/projects/:projectId/team-assignees',requireAuth,async(req,res)=
 router.get('/api/projects/:projectId/test-inventory',requireAuth,async(req,res)=>{try{
  await access(req,req.params.projectId);
  const [cases,runs,stories]=await Promise.all([
- db.query(`select tc.session_id,tc.external_case_id,tc.title,tc.priority,tc.created_at,tc.updated_at,cu.display_name as created_by_name,uu.display_name as updated_by_name,sts.story_id,ps.reference_no as story_reference from test_cases tc join test_sessions ts on ts.id=tc.session_id left join users cu on cu.id=tc.created_by left join users uu on uu.id=tc.updated_by left join story_test_sessions sts on sts.session_id=ts.id left join project_stories ps on ps.id=sts.story_id where ts.project_id=$1 order by tc.created_at desc limit 1000`,[req.params.projectId]),
+ db.query(`select tc.session_id,tc.external_case_id,tc.title,tc.priority,tc.source,tc.test_category,tc.type,tc.created_at,tc.updated_at,cu.display_name as created_by_name,uu.display_name as updated_by_name,sts.story_id,ps.reference_no as story_reference from test_cases tc join test_sessions ts on ts.id=tc.session_id left join users cu on cu.id=tc.created_by left join users uu on uu.id=tc.updated_by left join story_test_sessions sts on sts.session_id=ts.id left join project_stories ps on ps.id=sts.story_id where ts.project_id=$1 order by tc.created_at desc limit 1000`,[req.params.projectId]),
  db.query('select id,session_id,run_number,total,passed,failed,executed_by,completed_at from test_runs where project_id=$1 order by completed_at desc limit 500',[req.params.projectId]),
  db.query(`select ps.id,ps.reference_no,ps.title,count(distinct sts.session_id)::int as generation_count,count(distinct tc.id)::int as case_count,count(distinct tr.id)::int as execution_count from project_stories ps left join story_test_sessions sts on sts.story_id=ps.id left join test_cases tc on tc.session_id=sts.session_id left join test_runs tr on tr.session_id=sts.session_id where ps.project_id=$1 group by ps.id order by ps.created_at desc`,[req.params.projectId])
  ]);
@@ -887,11 +905,11 @@ router.get('/api/projects/:projectId/runs/:runId/group',requireAuth,async(req,re
  if(!byId.has(req.params.runId))throw fail(404,'Run not found.');
  const list=groups.get(rootOf(req.params.runId)),root=list[0],hasAi=await aiAvailability(req.params.projectId,[...groups.values()].flat());
  const state=await groupCaseState(list);
- const created=new Map((await db.query('select c.external_case_id,c.created_at,u.display_name created_by_name from test_cases c left join users u on u.id=c.created_by where c.session_id=$1',[root.session_id])).rows.map(c=>[c.external_case_id,c]));
+ const created=new Map((await db.query('select c.external_case_id,c.created_at,c.source,u.display_name created_by_name from test_cases c left join users u on u.id=c.created_by where c.session_id=$1',[root.session_id])).rows.map(c=>[c.external_case_id,c]));
  const cases=root.case_ids.map(c=>state.get(c)).filter(Boolean).sort((a,b)=>String(a.external_case_id).localeCompare(String(b.external_case_id),undefined,{numeric:true})).map(c=>({
   external_case_id:c.external_case_id,title:c.first.title,test_category:c.first.test_category,scenario_type:c.first.scenario_type,priority:c.first.priority,
   passed:c.passed,times_run:c.times_run,latest_attempt:c.latest_attempt,latest_by_name:c.latest_by_name,latest_completed_at:c.latest_completed_at,
-  case_created_at:created.get(c.external_case_id)?.created_at||null,case_created_by_name:created.get(c.external_case_id)?.created_by_name||null}));
+  case_created_at:created.get(c.external_case_id)?.created_at||null,case_created_by_name:created.get(c.external_case_id)?.created_by_name||null,source:created.get(c.external_case_id)?.source||null}));
  res.json({ok:true,run:{id:root.id,session_id:root.session_id,run_number:root.project_run_number??root.run_number,environment:root.environment,executed_by_name:root.executed_by_name,completed_at:root.completed_at},
   attempts:list.map((a,i)=>({id:a.id,attempt:i+1,run_number:a.run_number,passed:a.passed,failed:a.failed,total:a.total,completed_at:a.completed_at,executed_by_name:a.executed_by_name,has_ai_report:hasAi(a)})),cases});
 }catch(e){respond(res,e);}});
@@ -944,7 +962,7 @@ router.get('/api/projects/:projectId/runs/:runId/cases/:caseId',requireAuth,asyn
   x.evidence_json=out;
  }
  const c=tc.rows[0]||null,j=c?.case_json||{};
- res.json({ok:true,testCase:c?{id:c.external_case_id,title:c.title,type:c.type,priority:c.priority,category:j.testCategory||null,
+ res.json({ok:true,testCase:c?{id:c.external_case_id,title:c.title,type:c.type,priority:c.priority,category:j.testCategory||null,source:j.source||null,
    preconditions:Array.isArray(j.preconditions)?j.preconditions:[],steps:Array.isArray(j.steps)?j.steps:[],testData:j.testData&&typeof j.testData==='object'?j.testData:{},
    expectedResults:Array.isArray(j.expectedResults)?j.expectedResults:[],review:j.review||null,
    created_at:c.created_at,created_by_name:c.created_by_name,updated_at:c.updated_at,updated_by_name:c.updated_by_name}:null,history:history.rows});

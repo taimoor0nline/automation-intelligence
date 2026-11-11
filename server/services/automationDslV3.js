@@ -243,7 +243,10 @@ function compileSelectorAssertions(text, selector, discovery) {
   const assertions = [];
   if (!discovery.selectors.has(selector)) return { error: `Expected-result selector is not grounded by discovery: ${selector}` };
   const element = discovery.selectors.get(selector) || {};
-  const quoted = quotedValues(text).filter((value) => value !== selector);
+  // The value inside the selector (e.g. username-error in [data-testid="username-error"]) is never the expected text,
+  // even when the sentence was reordered to "Text contains \"…\" in [data-testid=\"…\"]".
+  const insideSelector = new Set(quotedValues(selector));
+  const quoted = quotedValues(text).filter((value) => value !== selector && !insideSelector.has(value));
   const expected = quoted.length ? quoted[quoted.length - 1] : "";
   const number = numberFrom(text);
 
