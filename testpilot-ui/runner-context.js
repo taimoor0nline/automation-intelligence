@@ -74,6 +74,8 @@
     if($('targetUrl'))$('targetUrl').value=url;
     if($('environment'))$('environment').value=env?.name||'Test';
     if($('additionalPaths'))$('additionalPaths').value=clean(story?.page_paths);
+    // Page scope comes from the story (set in the story form); without a story: Known pages + linked pages.
+    {const ps=$('pageScope');if(ps){ps.value=story?.page_scope==='STARTING_PAGE_ONLY'?'STARTING_PAGE_ONLY':'ALL_DISCOVERED_PAGES';ps.dispatchEvent(new Event('change'));}}
     if(env&&String(env.id)!==String(state.loginEnvironmentId)){state.loginEnvironmentId=env.id;applyEnvironmentLogin(env);}
     return url;
   }
@@ -318,7 +320,7 @@
     let last=storyField;
     for(const n of [env,ai])if(n){last.after(n);last=n;}
     const adv=document.createElement('details');adv.className='tn-advanced';
-    adv.innerHTML='<summary>Advanced options<span>Page scope, application login, fresh discovery, scenario types, test categories, security</span></summary><div class="tn-advanced-body"></div>';
+    adv.innerHTML='<summary>Advanced options<span>Application login, fresh discovery, scenario types, test categories, security</span></summary><div class="tn-advanced-body"></div>';
     const body=adv.querySelector('.tn-advanced-body');
     for(const n of [scope,login,actors,freshWrap,types,cats])if(n)body.appendChild(n);
     last.after(adv);last=adv;

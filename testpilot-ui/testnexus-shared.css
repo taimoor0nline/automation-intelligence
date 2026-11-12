@@ -23,3 +23,5 @@ button,.btn,input,select,textarea{border-radius:var(--testnexus-radius)}
 .grid>aside.panel{max-height:calc(100vh - 140px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent}
 .grid>aside.panel::-webkit-scrollbar{width:6px}
 .grid>aside.panel::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}
+/* Page scope is set per story (story form); the testing page uses the selected story's value */
+#pageScopeField{display:none!important}

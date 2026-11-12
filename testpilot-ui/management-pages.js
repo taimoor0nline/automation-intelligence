@@ -132,6 +132,8 @@ async function initTaskCreate(workspace){
    const v=Object.fromEntries(new FormData(e.currentTarget).entries());
    v.parentId=v.parentId||null;v.storyId=v.storyId||null;
    v.dueAt=v.dueAt?new Date(v.dueAt).toISOString():null;
+   v.startAt=v.startAt?new Date(v.startAt).toISOString():null;
+   if(v.startAt&&v.dueAt&&v.dueAt<v.startAt){feedback('The start date cannot be after the due date.');lock(null,false);return;}
    v.assignedTo=v.assignedTo||null;
    await api('/api/projects/'+encodeURIComponent(projectId)+'/work-items',{method:'POST',body:JSON.stringify(v)});
    if(!embedDone({changed:true,kind:'task'}))location.assign(projectWorkspaceUrl('tasks'));

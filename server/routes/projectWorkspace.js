@@ -237,6 +237,8 @@ router.delete('/api/projects/:projectId/environments/:environmentId',requireAuth
  }
 });
 // Story points (Scrum estimate): empty or a whole number from 1 to 10.
+// Page scope of a story: its Known pages and linked pages (default), or only the environment's starting page.
+function pageScope(v){return String(v||'').toUpperCase()==='STARTING_PAGE_ONLY'?'STARTING_PAGE_ONLY':'ALL_DISCOVERED_PAGES';}
 function storyPoints(v){if(v===undefined||v===null||v==='')return null;const n=Number(v);if(!Number.isInteger(n)||n<1||n>10)throw fail(400,'Story points must be a whole number from 1 to 10.');return n;}
 router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  try{
@@ -245,9 +247,9 @@ router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  if(!title || !story)throw fail(400,'Story title and business story are required.');
  const eid=req.body?.environmentId||null;
  if(eid){const env=await db.query('select 1 from project_environments where id=$1 and project_id=$2 and is_active=true',[eid,req.params.projectId]);if(!env.rowCount)throw fail(400,'Environment does not belong to project.');}
- const points=storyPoints(req.body?.storyPoints);
- const result=await db.query('insert into project_stories(project_id,environment_id,reference_no,title,story,acceptance_criteria,page_paths,priority,created_by,updated_by,story_points) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) returning *',
- [req.params.projectId,eid,'ST-'+require('crypto').randomUUID().slice(0,8).toUpperCase(),title,story,s(req.body?.acceptanceCriteria,8000)||null,s(req.body?.pagePaths,1500)||null,s(req.body?.priority,20)||'MEDIUM',req.user.sub,points]);
+ const points=storyPoints(req.body?.storyPoints),scope=pageScope(req.body?.pageScope);
+ const result=await db.query('insert into project_stories(project_id,environment_id,reference_no,title,story,acceptance_criteria,page_paths,priority,created_by,updated_by,story_points,page_scope) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11) returning *',
+ [req.params.projectId,eid,'ST-'+require('crypto').randomUUID().slice(0,8).toUpperCase(),title,story,s(req.body?.acceptanceCriteria,8000)||null,s(req.body?.pagePaths,1500)||null,s(req.body?.priority,20)||'MEDIUM',req.user.sub,points,scope]);
  await db.query('insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,$4,$5::jsonb)',[req.params.projectId,result.rows[0].id,req.user.sub,'STORY_CREATED',JSON.stringify({referenceNo:result.rows[0].reference_no})]);
  res.status(201).json({ok:true,story:result.rows[0]});
  }catch(e){respond(res,e);}
@@ -272,9 +274,9 @@ router.patch('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,r
  if(!existing.rowCount)throw fail(404,'Story not found.');
  const old=existing.rows[0],b=req.body||{};
  const updated=await db.withTransaction(async client=>{
- const points='storyPoints' in b?storyPoints(b.storyPoints):old.story_points;
- const updated=await client.query('update project_stories set title=$1,story=$2,acceptance_criteria=$3,page_paths=$4,priority=$5,updated_by=$6,updated_at=now(),story_points=$9 where id=$7 and project_id=$8 returning *',
- [s(b.title??old.title,250),s(b.story??old.story,12000),s(b.acceptanceCriteria??old.acceptance_criteria,8000),s(b.pagePaths??old.page_paths,1500),s(b.priority??old.priority,20),req.user.sub,req.params.storyId,req.params.projectId,points]);
+ const points='storyPoints' in b?storyPoints(b.storyPoints):old.story_points,scope='pageScope' in b?pageScope(b.pageScope):old.page_scope;
+ const updated=await client.query('update project_stories set title=$1,story=$2,acceptance_criteria=$3,page_paths=$4,priority=$5,updated_by=$6,updated_at=now(),story_points=$9,page_scope=$10 where id=$7 and project_id=$8 returning *',
+ [s(b.title??old.title,250),s(b.story??old.story,12000),s(b.acceptanceCriteria??old.acceptance_criteria,8000),s(b.pagePaths??old.page_paths,1500),s(b.priority??old.priority,20),req.user.sub,req.params.storyId,req.params.projectId,points,scope]);
  await client.query("insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,'STORY_UPDATED',$4::jsonb)",[req.params.projectId,req.params.storyId,req.user.sub,JSON.stringify({previousUpdatedAt:old.updated_at,newUpdatedAt:updated.rows[0].updated_at,fields:['title','story','acceptance_criteria','page_paths','priority'].filter(k=>String(old[k]??'')!==String(updated.rows[0][k]??''))})]);
  return updated.rows[0];
  });
@@ -350,7 +352,7 @@ router.get('/api/work-items/:id/details',requireAuth,async(req,res)=>{
  const ctx=await task(req);
  const closer=ctx.item.closed_by?await db.query('select display_name from users where id=$1',[ctx.item.closed_by]):null;
  const [children,attachments,history,comments]=await Promise.all([
- db.query('select w.id,w.title,w.status,w.priority,w.assigned_to,w.eta_at,w.completed_at,w.task_number,u.display_name assigned_to_name from work_items w left join users u on u.id=w.assigned_to where w.parent_work_item_id=$1 and w.deleted_at is null order by w.created_at',[req.params.id]),
+ db.query('select w.id,w.title,w.status,w.priority,w.assigned_to,w.assigned_role,w.eta_at,w.completed_at,w.task_number,w.progress_percent,w.time_spent_minutes,w.created_at,w.updated_at,u.display_name assigned_to_name,cb.display_name created_by_name,ub.display_name updated_by_name from work_items w left join users u on u.id=w.assigned_to left join users cb on cb.id=w.created_by left join users ub on ub.id=w.updated_by where w.parent_work_item_id=$1 and w.deleted_at is null order by w.task_number',[req.params.id]),
  db.query('select id,filename,mime_type,file_size,created_at from work_item_attachments where work_item_id=$1 order by created_at desc',[req.params.id]),
  db.query('select h.event_type,h.old_status,h.new_status,h.comment,h.created_at,u.display_name by_name from work_item_history h left join users u on u.id=h.performed_by where h.work_item_id=$1 order by h.created_at desc limit 100',[req.params.id]),
  db.query('select c.id,c.comment,c.created_at,u.display_name user_name from work_item_comments c left join users u on u.id=c.user_id where work_item_id=$1 order by c.created_at',[req.params.id])
@@ -1109,9 +1111,17 @@ router.patch('/api/work-items/:id/links',requireAuth,async(req,res)=>{
   if(n!==null&&(!Number.isInteger(n)||n<1||n>10))throw fail(400,'Story points must be a whole number from 1 to 10.');
   if(String(n??'')!==String(item.story_points??'')){put('story_points',n);notes.push(n?'Story points set to '+n:'Story points removed');}
  }
+ if('startAt' in (req.body||{})){
+  const st=req.body.startAt?new Date(req.body.startAt):null;
+  if(st&&isNaN(st))throw fail(400,'Invalid start date.');
+  const due='dueAt' in req.body?(req.body.dueAt?new Date(req.body.dueAt):null):(item.due_at?new Date(item.due_at):null);
+  if(st&&due&&due<st)throw fail(400,'The start date cannot be after the due date.');
+  if(String(st?st.toISOString():'')!==String(item.start_at?new Date(item.start_at).toISOString():'')){put('start_at',st);notes.push(st?'Start date set to '+st.toISOString().slice(0,10):'Start date removed');}
+ }
  if('dueAt' in (req.body||{})){
   const due=req.body.dueAt?new Date(req.body.dueAt):null;
   if(due&&isNaN(due))throw fail(400,'Invalid due date.');
+  {const st='startAt' in req.body?(req.body.startAt?new Date(req.body.startAt):null):(item.start_at?new Date(item.start_at):null);if(st&&due&&due<st)throw fail(400,'The due date cannot be before the start date.');}
   if(String(due?due.toISOString():'')!==String(item.due_at?new Date(item.due_at).toISOString():'')){put('due_at',due);notes.push(due?'Due date set to '+due.toISOString().slice(0,10):'Due date removed');}
  }
  if(!sets.length)return res.json({ok:true,unchanged:true});

@@ -1094,3 +1094,9 @@ h1.tn-title{margin:0 0 12px;line-height:1.2}
 #taskDrawer:not(.tn-task-viewonly) .tn-edit-field textarea.form-control{min-height:68px}
 #taskDrawer:not(.tn-task-viewonly) .tn-divider{margin:16px 0}
 #taskDrawer:not(.tn-task-viewonly) .tn-task-savebar{margin-top:16px;padding-top:14px}
+/* 👁 View: no Subtasks section when the task has none; no Attachments section when there are none */
+#taskDrawer.tn-task-viewonly.tn-no-subtasks :is(.tn-divider:has(+h3+#drawerSubtasks),h3:has(+#drawerSubtasks),#drawerSubtasks){display:none!important}
+#taskDrawer.tn-task-viewonly.tn-no-attachments :is(.tn-divider:has(+h3+#taskDrop),h3:has(+#taskDrop),#drawerAttachments){display:none!important}
+.tn-subtask-table td,.tn-subtask-table th{font-size:13px;vertical-align:top}
+.tn-subtask-table .tn-task-no{white-space:nowrap}
+.tn-subtask-table td .tn-link{text-align:left}
