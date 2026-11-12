@@ -284,8 +284,9 @@
     const sub = el('nav');
     sub.id = 'tnSubbar';
     sub.setAttribute('aria-label', 'Page tools');
-    // On the web testing page the strip is: breadcrumb · project name (centre) · Source code. Elsewhere: Start Testing switch.
-    if (canTest && page !== 'web') {
+    // Start Testing switch (Web UI ⇄ REST API) on both testing pages. On the web testing page the strip is:
+    // breadcrumb · project name (centre) · tools (Start Testing switch, Source code).
+    if (canTest) {
       sub.appendChild(dropdown('Start Testing', [
         { label: 'Web UI testing', current: page === 'web', onClick: () => go(TESTING_PAGE) },
         { label: 'REST API testing', current: page === 'rest', onClick: () => go('/rest.html') },

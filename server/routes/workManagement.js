@@ -124,10 +124,12 @@ router.get('/api/projects/:projectId/work-items', requireAuth, async (req,res) =
     if (req.query.workType) { values.push(clean(req.query.workType,50).toUpperCase()); conditions.push(`w.work_type=$${values.length}`); }
     // Failed tests as tasks: team, the failed case's category / type / source, and the latest failed run.
     const result=await db.query(`select w.*,u.display_name assigned_to_name,u.email assigned_to_email,ab.display_name assigned_by_name,cb.display_name created_by_name,ub.display_name updated_by_name,
-        tm.name team_name,tc.test_category case_category,tc.type case_type,tc.source case_source,coalesce(lr.project_run_number,lr.run_number) last_failed_run_number
+        tm.name team_name,tc.test_category case_category,tc.type case_type,tc.source case_source,coalesce(lr.project_run_number,lr.run_number) last_failed_run_number,
+        pw.task_number parent_task_number,pw.title parent_title,st.reference_no story_ref,st.title story_title,st.story_points story_story_points
       from work_items w left join users u on u.id=w.assigned_to left join users ab on ab.id=w.assigned_by left join users cb on cb.id=w.created_by left join users ub on ub.id=w.updated_by
       left join teams tm on tm.id=w.team_id left join test_cases tc on tc.session_id=w.session_id and tc.external_case_id=w.external_case_id
       left join test_runs lr on lr.id=coalesce(w.last_failed_run_id,w.run_id)
+      left join work_items pw on pw.id=w.parent_work_item_id left join project_stories st on st.id=w.story_id
       where ${conditions.join(' and ')} order by case w.status when 'IN_PROGRESS' then 1 when 'READY_FOR_RETEST' then 2 when 'PENDING' then 3 when 'ON_HOLD' then 4 else 5 end,w.updated_at desc limit 500`,values);
     res.json({ ok:true, workItems:result.rows });
   } catch(err) { res.status(err.statusCode||500).json({ reply:err.message }); }
@@ -135,7 +137,7 @@ router.get('/api/projects/:projectId/work-items', requireAuth, async (req,res) =
 
 router.get('/api/my-work-items', requireAuth, async (req,res) => {
   try {
-    const result=await db.query(`select w.*,p.name project_name from work_items w join projects p on p.id=w.project_id where w.assigned_to=$1 and w.deleted_at is null order by w.updated_at desc limit 500`,[req.user.sub]);
+    const result=await db.query(`select w.*,p.name project_name,pw.task_number parent_task_number,pw.title parent_title,st.reference_no story_ref,st.title story_title from work_items w join projects p on p.id=w.project_id left join work_items pw on pw.id=w.parent_work_item_id left join project_stories st on st.id=w.story_id where w.assigned_to=$1 and w.deleted_at is null order by w.updated_at desc limit 500`,[req.user.sub]);
     res.json({ ok:true, workItems:result.rows });
   } catch(err) { res.status(500).json({ reply:err.message }); }
 });
@@ -149,12 +151,19 @@ router.post('/api/projects/:projectId/work-items', requireAuth, async (req,res) 
     if (!WORK_TYPES.has(workType)) return res.status(400).json({ reply:'Invalid workType.' });
     if (!PRIORITIES.has(priority)) return res.status(400).json({ reply:'Invalid priority.' });
     const title=clean(req.body?.title,500); if(!title) return res.status(400).json({ reply:'Title is required.' });
-    const assignedTo=uuid(req.body?.assignedTo);
+    // Optional parent task (makes this a subtask) and story. A subtask takes its parent's team, and its assignee when none is chosen.
+    const parentId=uuid(req.body?.parentId),storyId=uuid(req.body?.storyId);
+    const pointsRaw=req.body?.storyPoints;const points=(pointsRaw===undefined||pointsRaw===null||pointsRaw==='')?null:Number(pointsRaw);
+    if(points!==null&&(!Number.isInteger(points)||points<1||points>10)) return res.status(400).json({ reply:'Story points must be a whole number from 1 to 10.' });
+    const parent=parentId?(await db.query('select id,team_id,assigned_to,story_id from work_items where id=$1 and project_id=$2 and deleted_at is null',[parentId,req.params.projectId])).rows[0]:null;
+    if(parentId&&!parent) return res.status(400).json({ reply:'The parent task was not found in this project.' });
+    if(storyId&&!(await db.query('select 1 from project_stories where id=$1 and project_id=$2',[storyId,req.params.projectId])).rowCount) return res.status(400).json({ reply:'The story was not found in this project.' });
+    const assignedTo=uuid(req.body?.assignedTo)||parent?.assigned_to||null;
     if (assignedTo && !(await membership(req.params.projectId,assignedTo))) return res.status(400).json({ reply:'Assigned user must be an active member of this project.' });
     if(assignedTo){const eligible=await db.query("select 1 from project_members pm where pm.project_id=$1 and pm.user_id=$2 and (not exists(select 1 from project_teams pt0 join team_members tm0 on tm0.team_id=pt0.team_id join project_members pm0 on pm0.project_id=pt0.project_id and pm0.user_id=tm0.user_id where pt0.project_id=$1) or exists(select 1 from project_teams pt join team_members tm on tm.team_id=pt.team_id where pt.project_id=$1 and tm.user_id=$2))",[req.params.projectId,assignedTo]);if(!eligible.rowCount)return res.status(400).json({reply:'Assignee must belong to an attached project team.'});}
     const item=await db.withTransaction(async client=>{
-      const inserted=await client.query(`insert into work_items(project_id,session_id,run_id,test_case_id,test_result_id,defect_analysis_id,external_case_id,work_type,title,description,status,priority,assigned_to,assigned_by,created_by,due_at,metadata)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING',$11,$12,$13,$13,$14,$15::jsonb) returning *`,[req.params.projectId,req.body?.sessionId||null,uuid(req.body?.runId),uuid(req.body?.testCaseId),uuid(req.body?.testResultId),uuid(req.body?.defectAnalysisId),clean(req.body?.externalCaseId,100)||null,workType,title,clean(req.body?.description,10000)||null,priority,assignedTo,req.user.sub,req.body?.dueAt||null,JSON.stringify(req.body?.metadata||{})]);
+      const inserted=await client.query(`insert into work_items(project_id,session_id,run_id,test_case_id,test_result_id,defect_analysis_id,external_case_id,work_type,title,description,status,priority,assigned_to,assigned_by,created_by,due_at,metadata,parent_work_item_id,story_id,team_id,assigned_role,story_points)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING',$11,$12,$13,$13,$14,$15::jsonb,$16,$17,$18,(select project_role from project_members where project_id=$1 and user_id=$12),$19) returning *`,[req.params.projectId,req.body?.sessionId||null,uuid(req.body?.runId),uuid(req.body?.testCaseId),uuid(req.body?.testResultId),uuid(req.body?.defectAnalysisId),clean(req.body?.externalCaseId,100)||null,workType,title,clean(req.body?.description,10000)||null,priority,assignedTo,req.user.sub,req.body?.dueAt||null,JSON.stringify(req.body?.metadata||{}),parent?.id||null,storyId||parent?.story_id||null,parent?.team_id||null,points]);
       const row=inserted.rows[0];
       await addHistory(client,row.id,'WORK_ITEM_CREATED',null,'PENDING',req.user.sub,'',{ workType,assignedTo });
       await client.query("insert into project_audit_events(project_id,work_item_id,actor_id,event_type,metadata) values($1,$2,$3,'TASK_CREATED',$4::jsonb)",[req.params.projectId,row.id,req.user.sub,JSON.stringify({workType,assignedTo})]);

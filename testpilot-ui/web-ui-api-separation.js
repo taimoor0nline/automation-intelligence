@@ -4,8 +4,9 @@
 
   const WEB_EXCLUDED_CATEGORIES = new Set(['API', 'CUSTOM']);
   const WEB_EXCLUDED_SECURITY_AREAS = new Set(['API_SECURITY', 'CUSTOM']);
-  // Not offered anywhere (generation, editor, filters).
-  const GENERATION_EXCLUDED_CATEGORIES = new Set([...WEB_EXCLUDED_CATEGORIES, 'SECURITY', 'ACCESSIBILITY', 'INTEGRATION']);
+  // Not offered on the web testing page (generation, editor, filters). API tests live on the REST API page.
+  // Security (with its sub-categories), Accessibility and Integration are offered again.
+  const GENERATION_EXCLUDED_CATEGORIES = new Set([...WEB_EXCLUDED_CATEGORIES]);
 
   function pretty(value) { return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
   function sanitizeStoredArray(key, excludedValues) {
@@ -31,7 +32,7 @@
     document.getElementById('generationCustomCategories')?.remove();
   }
 
-  // Security, Accessibility and Integration are not used any more: removed from every category dropdown
+  // Categories not offered on the web testing page (API / Custom): removed from every category dropdown
   // (generation, the test case editor and the review filters). Old cases keep their saved category in the database.
   function removeReviewExcludedOptions() {
     for (const value of GENERATION_EXCLUDED_CATEGORIES) {

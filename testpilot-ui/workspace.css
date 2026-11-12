@@ -1007,3 +1007,90 @@ h1.tn-title{margin:0 0 12px;line-height:1.2}
 #taskDrawer.tn-task-failed :is(#testLinkForm,#drawerTestLinks,h3:has(+.tn-muted+#drawerTestLinks),.tn-muted:has(+#drawerTestLinks),.tn-divider:has(+h3+.tn-muted+#drawerTestLinks)){display:none!important}
 .tn-activity{margin-bottom:8px;color:#475569}
 .tn-activity strong{color:#0f172a;font-weight:600}
+.tn-task-no{display:inline-block;font-size:11.5px;font-weight:700;color:#475569;background:#f1f5f9;border-radius:6px;padding:0 6px;margin-right:4px}
+/* Tasks table fits the screen: slightly tighter cells and a shorter progress bar */
+#view-tasks .tn-table th,#view-tasks .tn-table td{padding-left:10px;padding-right:10px}
+#view-tasks .tn-progress{width:70px}
+/* No manual "Linked test cases" box in the task popup: failed-test tasks carry their test case; other tasks do not need one */
+#taskDrawer :is(#testLinkForm,#drawerTestLinks,h3:has(+.tn-muted+#drawerTestLinks),.tn-muted:has(+#drawerTestLinks),.tn-divider:has(+h3+.tn-muted+#drawerTestLinks)){display:none!important}
+/* Task popup uses the screen: wider, details in two columns, Test case and Failure side by side; it scrolls only when content is longer than the screen */
+.tn-side{width:min(1100px,calc(100vw - 32px))!important;max-height:92vh}
+#taskDrawer.tn-task-viewonly #drawerInfo{display:grid;grid-template-columns:1fr 1fr;column-gap:32px}
+#taskDrawer.tn-task-viewonly #drawerInfo>:not(.tn-kv){grid-column:1/-1}
+#taskFailureBox{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+#taskFailureBox:empty{display:none}
+#taskFailureBox>.tn-task-section{margin-top:14px}
+#taskDrawer:not(.tn-task-viewonly) .tn-task-edit{max-width:760px}
+@media (max-width:900px){#taskDrawer.tn-task-viewonly #drawerInfo,#taskFailureBox{grid-template-columns:1fr}}
+/* Retesting is done from the task list (▶ / Retest selected), not from the popup */
+#taskDrawer #retestWithChildren{display:none!important}
+/* Failed-test tasks: the raw error text is already shown (short) under Failure > Error */
+#taskDrawer.tn-task-failed #drawerInfo>p.tn-info{display:none}
+#taskDrawer .tn-task-edit .d-flex>.tn-pick{flex:1}
+/* Create popups (Create task, …) grow to fit the form, up to the screen height */
+.tn-frame-dialog{height:min(900px,calc(100vh - 32px));max-height:calc(100vh - 32px)}
+/* ✏ Edit is a compact popup (only the edit fields); 👁 View stays wide for the details */
+#taskDrawer.tn-side:not(.tn-task-viewonly){width:min(680px,calc(100vw - 32px))!important}
+#taskDrawer:not(.tn-task-viewonly) .tn-task-edit{max-width:none}
+.tn-points{display:inline-block;padding:1px 8px;border-radius:99px;background:#ecfdf5;color:#047857;font-size:12px;font-weight:700;white-space:nowrap}
+
+/* ✏ Edit (v2): one grid of equal fields, no "More", Cancel / Save at the very end */
+#taskLifecycleForm{display:none!important}
+.tn-task-more{display:none!important}
+.tn-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}
+.tn-edit-field{min-width:0}
+.tn-edit-full{grid-column:1/-1}
+.tn-edit-field .form-label{margin-bottom:6px}
+.tn-edit-field .form-control,.tn-edit-field .form-select,.tn-edit-field .tn-pick{height:40px;min-height:40px;font-size:13.5px}
+.tn-edit-field textarea.form-control{height:auto;min-height:84px}
+.tn-edit-hint{font-size:12px;margin-top:4px}
+#taskDrawer .tn-task-edit .tn-pick{width:100%}
+@media (max-width:640px){.tn-edit-grid{grid-template-columns:1fr}}
+/* Edit: no subtask box (subtasks are made with Create task → Parent task), no comment list or history; attachments stay */
+#taskDrawer:not(.tn-task-viewonly) :is(#subtaskForm,h3:has(+#drawerSubtasks),.tn-divider:has(+h3+#drawerSubtasks),.tn-divider:has(+h3+#drawerComments),h3:has(+#drawerComments)){display:none!important}
+#taskDrawer:not(.tn-task-viewonly) #drawerAttachments{display:block!important}
+/* The Cancel / Save bar belongs to Edit only */
+.tn-task-savebar{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0}
+#taskDrawer.tn-task-viewonly .tn-task-savebar{display:none!important}
+/* ✏ Edit fits a laptop screen without scrolling: compact spacing, smaller comment and attachment areas */
+#taskDrawer.tn-side:not(.tn-task-viewonly){width:min(720px,calc(100vw - 32px))!important;max-height:calc(100vh - 24px)}
+#taskDrawer:not(.tn-task-viewonly)>.tn-card-head{padding:12px 20px!important}
+#taskDrawer:not(.tn-task-viewonly)>.p-4{padding:14px 20px!important}
+#taskDrawer:not(.tn-task-viewonly) .tn-edit-grid{gap:10px 14px}
+#taskDrawer:not(.tn-task-viewonly) .tn-edit-field .form-label{margin-bottom:4px;font-size:12px}
+#taskDrawer:not(.tn-task-viewonly) .tn-edit-field textarea.form-control{min-height:60px}
+#taskDrawer:not(.tn-task-viewonly) .tn-edit-hint{margin-top:2px}
+#taskDrawer:not(.tn-task-viewonly) .tn-divider{margin:12px 0}
+#taskDrawer:not(.tn-task-viewonly) h3:has(+#taskDrop){margin-bottom:6px}
+#taskDrawer:not(.tn-task-viewonly) #taskDrop{display:flex!important;flex-direction:row;align-items:center;justify-content:center;gap:10px;min-height:0;padding:10px 12px;margin:0!important}
+#taskDrawer:not(.tn-task-viewonly) #taskDrop strong{font-size:13px}
+#taskDrawer:not(.tn-task-viewonly) #taskDrop .tn-muted{font-size:12px}
+#taskDrawer:not(.tn-task-viewonly) .tn-task-savebar{margin-top:12px;padding-top:12px}
+/* Activity history is folded until its heading is clicked */
+#taskDrawer:not(.tn-history-open) #drawerHistory{display:none!important}
+#taskDrawer h3:has(+#drawerHistory){cursor:pointer;color:#2563eb;user-select:none}
+#taskDrawer h3:has(+#drawerHistory)::after{content:" ▸ Show";font-weight:500;font-size:12.5px}
+#taskDrawer.tn-history-open h3:has(+#drawerHistory)::after{content:" ▾ Hide"}
+/* A box hidden behind a newer popup (it comes back when that popup closes) */
+.tn-hidden-behind,.tn-hidden-behind::backdrop{visibility:hidden!important}
+/* 👁 View: a moderate width (two columns still fit) */
+#taskDrawer.tn-side.tn-task-viewonly{width:min(920px,calc(100vw - 32px))!important}
+/* Thin scrollbars everywhere (popups, tables, page) */
+*{scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent}
+*::-webkit-scrollbar{width:6px;height:6px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}
+*::-webkit-scrollbar-thumb:hover{background:#94a3b8}
+/* ✏ Edit grid: halves and thirds (Status · Due date · Story points share one row) */
+.tn-edit-grid{grid-template-columns:repeat(6,minmax(0,1fr))!important}
+.tn-edit-field{grid-column:span 3}
+.tn-edit-third{grid-column:span 2}
+.tn-edit-full{grid-column:1/-1}
+@media (max-width:640px){.tn-edit-field,.tn-edit-third{grid-column:1/-1}}
+/* ✏ Edit: a little more breathing room between fields */
+#taskDrawer:not(.tn-task-viewonly)>.p-4{padding:18px 22px!important}
+#taskDrawer:not(.tn-task-viewonly) .tn-edit-grid{gap:14px 16px}
+#taskDrawer:not(.tn-task-viewonly) .tn-edit-field .form-label{margin-bottom:6px;font-size:12.5px}
+#taskDrawer:not(.tn-task-viewonly) .tn-edit-field textarea.form-control{min-height:68px}
+#taskDrawer:not(.tn-task-viewonly) .tn-divider{margin:16px 0}
+#taskDrawer:not(.tn-task-viewonly) .tn-task-savebar{margin-top:16px;padding-top:14px}

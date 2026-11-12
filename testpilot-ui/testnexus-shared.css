@@ -14,3 +14,12 @@ button,.btn,input,select,textarea{border-radius:var(--testnexus-radius)}
 
 @media(max-width:800px){header{height:auto!important;min-height:68px;flex-wrap:wrap;padding:10px 14px!important;gap:9px}.platform-header-actions{gap:6px}.platform-header-actions .btn{font-size:12px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
+/* Testing page → Advanced options: the Categories and Security sub-categories menus open inside the panel
+   (they used to float and were cut off by the box), so every option can be seen and the list scrolls. */
+.tn-advanced{overflow:visible!important}
+.tn-advanced .generation-category-menu{position:static!important;margin-top:6px;max-height:260px;overflow:auto;box-shadow:none!important}
+/* Testing page: the pinned "What to test" panel scrolls by itself when its content (Advanced options, category menus)
+   is taller than the screen; before, the lower part could not be reached. */
+.grid>aside.panel{max-height:calc(100vh - 140px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent}
+.grid>aside.panel::-webkit-scrollbar{width:6px}
+.grid>aside.panel::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}

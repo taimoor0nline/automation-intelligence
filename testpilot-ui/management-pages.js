@@ -104,18 +104,33 @@ async function initProjectCreate(){
   }
  };
 }
+// Searchable dropdown: type in the box, pick from the list; the chosen record's id is kept in the hidden field.
+function searchable(inputId,listId,hiddenId,items){
+ const input=$(inputId),hidden=$(hiddenId);if(!input||!hidden)return;
+ window.TNPick.attach(input,items,{onChange:item=>{hidden.value=item?item.id:'';}});
+ input.addEventListener('input',()=>{hidden.value='';});
+}
+const ROLE_NAMES={PROJECT_MANAGER:'Project Manager',QA:'QA',DEVELOPER:'Developer'};
+const taskNo=n=>'T-'+String(n).padStart(4,'0');
 async function initTaskCreate(workspace){
- const assign=$('mgTaskAssignee');
- try{
-  const d=await api('/api/projects/'+encodeURIComponent(projectId)+'/team-assignees');
-  assign.innerHTML='<option value="">Unassigned</option>'+(d.users||[]).map(x=>'<option value="'+esc(x.id)+'">'+esc(x.display_name)+'</option>').join('');
- }catch{
-  assign.innerHTML='<option value="">Unassigned</option>'+(workspace.members||[]).filter(x=>x.project_role!=='VIEWER').map(x=>'<option value="'+esc(x.user_id)+'">'+esc(x.display_name)+'</option>').join('');
- }
+ // Assigned to: team members first (with their role); a subtask with no one chosen goes to the parent's assignee.
+ const roles=new Map((workspace.members||[]).map(m=>[String(m.user_id),m.project_role]));
+ let people=[];
+ try{people=((await api('/api/projects/'+encodeURIComponent(projectId)+'/team-assignees')).users||[]).map(x=>({id:x.id,name:x.display_name}));}
+ catch{people=(workspace.members||[]).filter(x=>x.project_role!=='VIEWER').map(x=>({id:x.user_id,name:x.display_name}));}
+ searchable('mgTaskAssigneeSearch','mgAssigneeList','mgTaskAssignee',people.map(p=>({id:p.id,label:p.name+(roles.get(String(p.id))?' · '+(ROLE_NAMES[roles.get(String(p.id))]||roles.get(String(p.id))):'')})));
+ // Parent task: search by task number or title.
+ let tasks=[];try{tasks=(await api('/api/projects/'+encodeURIComponent(projectId)+'/work-items')).workItems||[];}catch{}
+ searchable('mgTaskParentSearch','mgParentList','mgTaskParent',tasks.filter(t=>t.task_number).sort((a,b)=>a.task_number-b.task_number).map(t=>({id:t.id,label:taskNo(t.task_number)+' · '+t.title})));
+ // Story: search by story number or title.
+ searchable('mgTaskStorySearch','mgStoryList','mgTaskStory',(workspace.stories||[]).map(s=>({id:s.id,label:(s.reference_no?s.reference_no+' · ':'')+s.title})));
  $('mgTaskForm').onsubmit=async e=>{
-  e.preventDefault();clearFeedback();lock(null,true);
+  e.preventDefault();clearFeedback();
+  if(!e.currentTarget.reportValidity())return;
+  lock(null,true);
   try{
    const v=Object.fromEntries(new FormData(e.currentTarget).entries());
+   v.parentId=v.parentId||null;v.storyId=v.storyId||null;
    v.dueAt=v.dueAt?new Date(v.dueAt).toISOString():null;
    v.assignedTo=v.assignedTo||null;
    await api('/api/projects/'+encodeURIComponent(projectId)+'/work-items',{method:'POST',body:JSON.stringify(v)});
