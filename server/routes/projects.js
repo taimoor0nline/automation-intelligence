@@ -6,7 +6,8 @@ const { requireAuth, requireRole } = require('../services/authService');
 router.get('/api/projects', requireAuth, async (req, res) => {
   try {
     const role = String(req.user.role || '').toUpperCase();
-    const result = ['QA','MANAGER'].includes(role)
+    // Only managers (admins) see every project; QA, developers and viewers see the projects they are members of.
+    const result = role === 'MANAGER'
       ? await db.query(`select p.*, u.display_name as created_by_name from projects p left join users u on u.id=p.created_by order by p.created_at desc`)
       : await db.query(`select distinct p.* from projects p left join project_members pm on pm.project_id=p.id left join test_runs tr on tr.project_id=p.id left join defect_analyses da on da.run_id=tr.id where pm.user_id=$1 or da.assigned_to=$1 order by p.created_at desc`, [req.user.sub]);
     // List summary per project: manager, active environments, last run and recorded pass/fail totals.

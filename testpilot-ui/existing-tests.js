@@ -16,6 +16,8 @@
   const handoff = (() => { try { return JSON.parse(sessionStorage.getItem('testnexus:runnerHandoff') || (mode === 'existing' ? sessionStorage.getItem('testnexus:existingHandoff') : null) || 'null') || {}; } catch { return {}; } })();
   let projectId = params.get('projectId') || handoff.projectId || '';
   let storyId = params.get('storyId') || handoff.storyId || '';
+  // From a failed-test task (▶): only that test's session, with the failed case ticked.
+  const onlySession = params.get('sessionId') || '', onlyCase = String(params.get('caseId') || '').toUpperCase();
   if (mode === 'existing' && !projectId) return;
   const remember = () => { try { sessionStorage.setItem('testnexus:existingHandoff', JSON.stringify({ projectId, storyId })); } catch {} };
   const setUrl = (m) => history.replaceState(null, '', '/runner?mode=' + m + '&projectId=' + encodeURIComponent(projectId) + (storyId ? '&storyId=' + encodeURIComponent(storyId) : ''));
@@ -72,6 +74,8 @@ body.tn-existing-mode #runBtn{display:none!important}`;
   // One list of unique, runnable tests (the server removes repeats and cases that cannot run).
   function render() {
     const host = $('existingCases');
+    // From a task: list only that task's failed test case.
+    if (onlyCase && data.cases.some((tc) => String(tc.id).toUpperCase() === onlyCase)) data.cases = data.cases.filter((tc) => String(tc.id).toUpperCase() === onlyCase);
     if (!data.cases.length) { host.innerHTML = '<div class="ex-empty">No saved test cases are ready to run for this ' + (storyId ? 'story' : 'project') + '. Generate test cases from step 1.</div>'; summary(); return; }
     const envOptions = data.environments.map((e) => '<option value="' + esc(e.id) + '"' + (handoff.environmentId && String(handoff.environmentId) === String(e.id) || (!handoff.environmentId && e.is_default) ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('');
     host.innerHTML = '<div class="ex-bar"><span><b>Saved test cases</b> · ' + data.cases.length + ' unique test' + (data.cases.length === 1 ? '' : 's') + ', ready to run. No generation needed.</span>'
@@ -84,6 +88,14 @@ body.tn-existing-mode #runBtn{display:none!important}`;
           + '<div><div class="case-title">' + esc(tc.id) + ' — ' + esc(tc.title) + '</div><div class="case-meta"><span class="tag ' + typeClass + '">' + esc(type) + '</span><span class="tag">' + esc(tc.priority || 'medium') + '</span><span class="tag">' + (/^human/i.test(String(tc.source || '')) ? 'Manual' : 'AI / Reviewed') + '</span><span>' + tc.steps + ' steps</span>' + (tc.story ? '<span>' + esc(tc.story) + '</span>' : '') + '</div>'
           + (tc.expected ? '<div class="expected">Expected: ' + esc(tc.expected) + '</div>' : '') + '</div></div>';
       }).join('');
+    if (onlyCase) {
+      const i = data.cases.findIndex((tc) => String(tc.id).toUpperCase() === onlyCase);
+      const bar = host.querySelector('.ex-bar span');
+      if (i >= 0) {
+        const box = host.querySelector('.ex-check[value="' + i + '"]'); if (box) box.checked = true;
+        if (bar) bar.innerHTML = '<b>Re-run the failed test ' + esc(onlyCase) + '</b> · it is ticked below. Press Start Tests.';
+      } else if (bar) bar.innerHTML = '<b>' + esc(onlyCase) + ' cannot run as saved</b> (it is not Automation Ready). Generate it again or fix it with AI, then run.';
+    }
     filter();
   }
 
@@ -100,7 +112,7 @@ body.tn-existing-mode #runBtn{display:none!important}`;
       run.after(btn); document.body.classList.add('tn-existing-mode'); // the page's own button stays hidden in this mode
       btn.addEventListener('click', start);
     }
-    call('/api/projects/' + encodeURIComponent(projectId) + '/existing-tests' + (storyId ? '?storyId=' + encodeURIComponent(storyId) : ''))
+    call('/api/projects/' + encodeURIComponent(projectId) + '/existing-tests' + (onlySession ? '?sessionId=' + encodeURIComponent(onlySession) : storyId ? '?storyId=' + encodeURIComponent(storyId) : ''))
       .then((d) => { data = d; render(); })
       .catch((e) => { host.innerHTML = '<div class="ex-empty">' + esc(e.message) + '</div>'; });
   }

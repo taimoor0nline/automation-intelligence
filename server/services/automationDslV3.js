@@ -477,7 +477,8 @@ function compileExpected(expected, discovery) {
     return { assertions: [{ operation: "ASSERT_URL_INCLUDES", fragment: fullUrl }] };
   }
   const pathMatch = text.match(/\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)+(?:\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*)?/);
-  const path = pathMatch?.[0] || "";
+  // The root page "/" has no letters after the slash, so the pattern above misses it: accept a quoted "/" as the path.
+  const path = pathMatch?.[0] || (/(?:path|pathname|url)[^"'`]*["'`]\/["'`]/i.test(text) ? "/" : "");
   if (path) {
     const pathname = path.split("?")[0] || "/";
     const escapedPathname = pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -489,7 +490,7 @@ function compileExpected(expected, discovery) {
 
     const explicitlyExpectedPath =
       new RegExp(
-        `(?:path|pathname)\\s+(?:must\\s+)?(?:be\\s+)?(?:equal|exactly equal|exact)\\s+["']?${escapedPathname}["']?`,
+        `(?:path|pathname)\\s+(?:must\\s+)?(?:be\\s+)?(?:equals?|exactly equals?|exact)\\s+["']?${escapedPathname}["']?`,
         "i"
       ).test(lower);
 

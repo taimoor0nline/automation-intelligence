@@ -12,15 +12,16 @@
     const input = document.createElement('input');
     input.id = 'testContextRecordSearch';
     input.className = select.className || '';
-    input.placeholder = 'Search by story number or title';
+    input.placeholder = 'Select story';
     input.setAttribute('aria-label', 'Story');
     select.before(input);
     select.hidden = true;
 
-    const items = () => [...select.options].map((o) => ({ id: o.value || ALL, label: o.textContent.trim() }));
+    // No "All project requirements" item: an empty box (placeholder "Select story") means no story.
+    const items = () => [...select.options].filter((o) => o.value).map((o) => ({ id: o.value, label: o.textContent.trim() }));
     let shown = null;
     const attach = () => window.TNPick.attach(input, items(), {
-      value: select.value || ALL,
+      value: select.value || '',
       onChange: (item) => {
         const value = !item || item.id === ALL ? '' : item.id;
         if (select.value === value) return;

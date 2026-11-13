@@ -602,7 +602,11 @@ router.get('/api/projects/:projectId/existing-tests',requireAuth,requireRole('QA
  try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
  const storyId=id(req.query.storyId)?req.query.storyId:null;
- const rows=(storyId
+ // ?sessionId=…: only that testing session (▶ on a failed-test task re-runs its saved case).
+ const onlySession=s(req.query.sessionId,120)||null;
+ const rows=(onlySession
+  ?await db.query('select s.id session_id,s.updated_at,s.environment,ps.reference_no story_ref,ps.title story_title from test_sessions s left join project_stories ps on ps.id=s.project_story_id where s.project_id=$1 and s.id=$2',[req.params.projectId,onlySession])
+  :storyId
   ?await db.query('select distinct s.id session_id,s.updated_at,s.environment,ps.reference_no story_ref,ps.title story_title from test_sessions s left join story_test_sessions sts on sts.session_id=s.id left join project_stories ps on ps.id=coalesce(s.project_story_id,sts.story_id) where s.project_id=$1 and (sts.story_id=$2 or s.project_story_id=$2) order by s.updated_at desc limit 60',[req.params.projectId,storyId])
   :await db.query('select s.id session_id,s.updated_at,s.environment,ps.reference_no story_ref,ps.title story_title from test_sessions s left join project_stories ps on ps.id=s.project_story_id where s.project_id=$1 order by s.updated_at desc limit 60',[req.params.projectId])).rows;
  const {gateCheck}=require('../services/repairLearning');

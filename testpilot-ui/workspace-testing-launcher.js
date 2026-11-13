@@ -40,6 +40,11 @@
   sessionStorage.setItem('testnexus:runnerHandoff',JSON.stringify(handoff));
   sessionStorage.setItem('testnexus:runnerOrigin','project');
   sessionStorage.removeItem('testnexus:runnerSelection');
+  // A task made from a failed test: ▶ re-runs that same saved test case (no generation).
+  if(sourceType==='task'&&record.origin==='FAILED_TEST'&&record.session_id&&record.external_case_id){
+   window.location.assign('/runner?mode=existing&projectId='+encodeURIComponent(projectId)+'&sessionId='+encodeURIComponent(record.session_id)+'&caseId='+encodeURIComponent(record.external_case_id));
+   return;
+  }
   // "Run existing tests": the testing page lists the saved cases instead of generating (existing-tests.js).
   window.location.assign('/runner?mode='+(existing?'existing':'new')+'&projectId='+encodeURIComponent(projectId)+(handoff.storyId?'&storyId='+encodeURIComponent(handoff.storyId):''));
  }
