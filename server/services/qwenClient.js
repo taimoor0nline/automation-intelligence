@@ -466,4 +466,4 @@ async function analyzeFailure({ story, testCase, expected, actual, modelTier = "
   return validateFailure(result);
 }
 
-module.exports = { generateTestCases, generateAutomationCode, analyzeFailure, isConfigured, QWEN_MODEL, TEST_CASE_COUNT };
+module.exports = { generateTestCases, generateAutomationCode, analyzeFailure, isConfigured, QWEN_MODEL, TEST_CASE_COUNT, callQwen };

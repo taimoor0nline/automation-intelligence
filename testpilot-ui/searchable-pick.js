@@ -50,6 +50,8 @@
     const list = wrap.querySelector('.tn-pick-list'), clear = wrap.querySelector('.tn-pick-clear');
     let active = -1;
     input._pickItems = items;
+    // opts.showAllOnOpen: clicking a box that already shows the chosen item lists every item (filter starts when typing).
+    input._pickShowAll = !!opts.showAllOnOpen;
     function close() { list.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; }
     function mark() {
       const t = input.value.trim(); clear.hidden = !t || input.disabled;
@@ -61,7 +63,8 @@
     }
     function draw() {
       if (input.disabled) return;
-      const q = input.value.trim().toLowerCase();
+      const chosen = input._pickShowAll && input.dataset.value ? input._pickItems.find((x) => String(x.id) === String(input.dataset.value)) : null;
+      const q = chosen && input.value === chosen.label ? '' : input.value.trim().toLowerCase();
       const found = input._pickItems.filter((x) => !q || x.label.toLowerCase().includes(q)).slice(0, 200);
       list.innerHTML = found.map((x, i) => '<div class="tn-pick-item' + (i === active ? ' active' : '') + '" role="option" data-id="' + esc(x.id) + '">' + esc(x.label) + '</div>').join('') || '<div class="tn-pick-empty">No matches</div>';
       list.hidden = false; input.setAttribute('aria-expanded', 'true');

@@ -22,7 +22,8 @@ const TABLE_CONFIG={
  repairMemoryList:{search:'Search recommendations'},
  usersBody:{search:'Search users'},
  ctMembersBody:{search:'Search members'},
- ctProjectsBody:{search:'Search projects'}
+ ctProjectsBody:{search:'Search projects'},
+ scanFindingRows:{search:'Search findings'}
 };
 function initTable(table){
  if(table.dataset.paginationReady==='true')return;

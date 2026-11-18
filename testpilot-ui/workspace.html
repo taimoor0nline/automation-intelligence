@@ -93,6 +93,8 @@
   <button type="button" role="tab" data-view="team" aria-controls="view-team">Team</button>
   <button type="button" role="tab" data-view="attachments" aria-controls="view-attachments">Attachments</button>
   <button type="button" role="tab" data-view="environments" aria-controls="view-environments">Environments</button>
+  <button type="button" role="tab" data-view="source" aria-controls="view-source">Source code</button>
+  <button type="button" role="tab" data-view="scans" aria-controls="view-scans">Code scans</button>
  </div>
  <section id="view-overview" class="tn-view active">
   <div class="tn-kpis tn-kpis-5" id="homeKpis" aria-live="polite"></div>
@@ -130,7 +132,7 @@
    </div>
    <div class="tn-details-side">
     <div class="tn-card"><div class="tn-card-head"><h2>Project information</h2></div><div class="tn-card-body" id="profileMeta">—</div></div>
-    <div class="tn-card"><div class="tn-card-head"><h2>Environments</h2><a id="detailEnvManage" class="tn-card-link" href="/environment-config.html">Manage</a></div><div class="tn-card-body" id="detailEnvironments"><div class="tn-muted">—</div></div></div><div class="tn-card"><div class="tn-card-head"><h2>Source code</h2><span class="tn-muted">Optional · helps the AI</span></div><div class="tn-card-body"><div id="detailRepos" class="tn-repo-list"><div class="tn-muted">—</div></div><form id="repoForm" class="tn-inline-row mt-2"><input class="form-control" name="repoFullName" required pattern="[^/\s]+/[^/\s]+" placeholder="owner/repository" aria-label="GitHub repository (owner/repository)"><input class="form-control tn-repo-branch" name="defaultBranch" placeholder="main" aria-label="Branch"><button class="btn btn-outline-primary tn-btn" type="submit">Add</button></form><div class="tn-muted tn-repo-note">GitHub repository the AI reads to write better tests. Private repositories need GITHUB_SOURCE_TOKEN on the server.</div></div></div>
+    <div class="tn-card"><div class="tn-card-head"><h2>Environments</h2><a id="detailEnvManage" class="tn-card-link" href="/environment-config.html">Manage</a></div><div class="tn-card-body" id="detailEnvironments"><div class="tn-muted">—</div></div></div>
     <div class="tn-card"><div class="tn-card-head"><h2>Team</h2><button type="button" class="tn-card-link" data-view="team">Manage</button></div><div class="tn-card-body" id="detailTeam"><div class="tn-muted">—</div></div></div>
    </div>
   </div>
@@ -165,6 +167,30 @@
   <div class="tn-card"><div class="tn-card-head"><div><h2>Project environments <span id="envCount" class="tn-badge-counter">0</span></h2><div class="tn-muted mt-1">Application URLs and test users the tests run against</div></div><button type="button" id="envCreate" class="btn btn-outline-primary tn-btn">+ Create</button></div>
    <div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Environment</th><th>Stage</th><th>Application URL</th><th>Status</th><th>Usage</th><th>Default</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="envRows"></tbody></table></div>
   </div>
+ </section>
+ <section id="view-source" class="tn-view" role="tabpanel">
+  <div class="tn-card"><div class="tn-card-head"><div><h2>Project source code <span id="repoCount" class="tn-badge-counter">0</span></h2><div class="tn-muted mt-1">GitHub repositories of this project: the AI reads them to write better tests, and code scans check them</div></div><button type="button" id="repoCreate" class="btn btn-outline-primary tn-btn">+ Add repository</button></div>
+   <div class="tn-scroll"><table class="table tn-table tn-repo-table"><thead><tr><th>Repository</th><th>Default branch</th><th>Access</th><th>Last scan</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="detailRepos"></tbody></table></div>
+  </div>
+ 
+ </section>
+ <section id="view-scans" class="tn-view" role="tabpanel">
+  <div class="tn-card"><div class="tn-card-head"><div><h2>Code scans <span id="scanCount" class="tn-badge-counter">0</span></h2><div class="tn-muted mt-1">Each scan checks one exact commit for unsafe code, vulnerable packages, Docker / Kubernetes setup and secrets (values hidden)</div></div><button type="button" id="scanCreate" class="btn btn-outline-primary tn-btn">+ New scan</button></div>
+   <div class="tn-scroll"><table class="table tn-table tn-scan-table"><thead><tr><th>Scan</th><th>Repository</th><th>Scan by</th><th>Story</th><th>Status</th><th>Findings</th><th>Times scanned</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="scanRows"></tbody></table></div>
+  </div>
+ </section>
+ <!-- One scan, like a test run's page: every problem found in any attempt, each once, with its latest result. -->
+ <section id="view-scan" class="tn-view" role="tabpanel">
+  <div class="tn-card">
+   <div class="tn-card-head"><div><h2 id="scanPageTitle">Scan</h2><div class="tn-muted" id="scanPageMeta"></div></div><button type="button" id="scanPageBack" class="btn btn-outline-secondary tn-btn">Back to scans</button></div>
+  </div>
+  <div class="tn-card mt-3">
+   <div class="tn-card-head"><h2>Problems <span class="tn-badge-counter" id="scanProblemsCount">0</span></h2><span class="tn-muted">Latest result of each problem across all attempts.</span></div>
+   <div class="tn-scan-body"><div class="tn-scan-jobs" id="scanJobs"></div><div class="tn-muted small" id="scanPlacesNote"></div></div>
+   <div class="tn-scroll"><table class="table tn-table tn-findings-table"><thead><tr><th>Problem</th><th>Type</th><th>Severity</th><th>Priority</th><th>Status</th><th>Times found</th><th>Created</th><th>Last updated</th><th>AI</th><th>Actions</th></tr></thead><tbody id="scanFindingRows"></tbody></table></div>
+  </div>
+  <dialog id="rejectDialog" class="tn-reject-dialog" aria-labelledby="rejectDialogTitle"><div class="tn-reject-body"><h3 id="rejectDialogTitle">Reject problem</h3><p class="tn-muted small" id="rejectDialogProblem"></p><label class="form-label" for="rejectReason">Reason</label><textarea id="rejectReason" class="form-control" rows="3" maxlength="1000" placeholder="Why is this not a real problem? (required)"></textarea><div class="tn-reject-actions"><button type="button" class="btn btn-sm btn-outline-secondary" data-reject-cancel>Cancel</button><button type="button" class="btn btn-sm btn-danger" data-reject-confirm>Reject</button></div></div></dialog>
+  <dialog id="aiDialog" class="tn-ai-dialog" aria-labelledby="aiDialogTitle"><div class="tn-ai-dialog-body" id="scanAiPanel" aria-live="polite"></div></dialog>
  </section>
  <section id="view-stories" class="tn-view" role="tabpanel">
   <div class="tn-card"><div class="tn-card-head"><h2>Project stories</h2><span class="tn-muted">Business stories the AI uses to write test cases</span></div><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Story</th><th>Points</th><th>Priority</th><th>Created</th><th>Last updated</th><th>Actions</th></tr></thead><tbody id="storyList"></tbody></table></div></div>
@@ -209,6 +235,17 @@
 <dialog id="docPreviewDialog" class="tn-dialog tn-evidence-dialog tn-doc-preview" aria-labelledby="docPreviewTitle">
  <div class="tn-dialog-head"><div><h2 id="docPreviewTitle">Document</h2><div class="tn-muted" id="docPreviewMeta"></div></div><div class="d-flex gap-2 align-items-center"><button type="button" class="btn btn-outline-primary tn-btn" id="docPreviewDownload">Download</button><button type="button" class="tn-dialog-close" data-close-doc aria-label="Close">×</button></div></div>
  <div class="tn-dialog-body" id="docPreviewBody"></div>
+</dialog>
+<dialog id="problemViewer" class="tn-dialog tn-case-viewer" aria-labelledby="problemViewerTitle">
+ <div class="tn-dialog-head"><div><h2 id="problemViewerTitle">Problem</h2><div class="tn-muted" id="problemViewerMeta"></div></div><button type="button" class="tn-dialog-close" data-close-problem aria-label="Close">×</button></div>
+ <div class="tn-dialog-body">
+  <div class="tn-subtabs tn-case-tabs" role="tablist" aria-label="Problem">
+   <button type="button" role="tab" data-problem-tab="Details" aria-selected="true">Details</button>
+   <button type="button" role="tab" data-problem-tab="History" aria-selected="false" tabindex="-1">Scan history <span class="tn-subtab-count" id="problemHistoryCount">0</span></button>
+  </div>
+  <div id="problemPanelDetails" role="tabpanel"></div>
+  <div id="problemPanelHistory" role="tabpanel" hidden><div class="tn-card tn-popup-table"><div class="tn-scroll"><table class="table tn-table"><thead><tr><th>Attempt</th><th>Scan by</th><th>Result</th><th>Created</th></tr></thead><tbody id="problemHistoryBody"></tbody></table></div></div></div>
+ </div>
 </dialog>
 <dialog id="caseViewer" class="tn-dialog tn-case-viewer" aria-labelledby="caseViewerTitle">
  <div class="tn-dialog-head"><div><h2 id="caseViewerTitle">Test case</h2><div class="tn-muted" id="caseViewerMeta"></div></div><button type="button" class="tn-dialog-close" data-close-case aria-label="Close">×</button></div>
@@ -267,6 +304,39 @@
   <div class="col-md-6"><label class="form-label">Default application URL</label><input class="form-control" name="targetUrl" type="url" aria-label="Application URL"></div><div class="col-md-6"><label class="form-label">Technology stack</label><input class="form-control" name="technologyStack" aria-label="Technology stack"></div>
  </div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary tn-btn">Save project profile</button></div></form></div></div>
 </div>
+<div class="modal fade" id="newScanModal" tabindex="-1" aria-labelledby="newScanTitle" aria-hidden="true">
+ <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form id="newScanForm">
+  <div class="modal-header"><div><h2 id="newScanTitle">New scan</h2><div class="tn-muted">Scan one exact commit of a repository</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
+  <div class="modal-body">
+   <div id="newScanError" class="alert alert-danger d-none" role="alert"></div>
+   <div class="tn-field"><label class="form-label" for="newScanRepo">Repository *</label><select id="newScanRepo" class="form-select" required></select></div>
+   <div class="tn-field"><label class="form-label" for="newScanTarget">Scan by</label><div class="tn-branch-row"><select id="newScanType" class="form-select tn-target-type" aria-label="Scan by"><option value="BRANCH">Branch</option><option value="PULL_REQUEST">Pull request</option><option value="COMMIT">Commit</option></select><input id="newScanTarget" class="form-control" placeholder="Search branch" aria-describedby="newScanHint"></div><div class="tn-muted tn-edit-hint" id="newScanHint"></div></div>
+   <div class="tn-field"><span class="form-label d-block">Checks</span><div class="tn-scan-checks">
+    <label><input type="checkbox" name="newScanCheck" value="CODE_SAST" checked> SAST <span class="tn-muted">· unsafe code</span></label>
+    <label><input type="checkbox" name="newScanCheck" value="CODE_SECRETS" checked> Secrets <span class="tn-muted">· passwords/keys in code</span></label>
+    <label><input type="checkbox" name="newScanCheck" value="CODE_SCA" checked> SCA <span class="tn-muted">· old/vulnerable packages, Docker, Kubernetes</span></label>
+   </div></div>
+  </div>
+  <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button class="tn-icon-action tn-scan-start" type="submit" id="newScanStart" aria-label="Start scan" title="Start scan"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8 10V9a1 1 0 0 1 1-1h1M14 8h1a1 1 0 0 1 1 1v1M16 14v1a1 1 0 0 1-1 1h-1M10 16H9a1 1 0 0 1-1-1v-1"/></svg></button></div>
+ </form></div></div>
+</div>
+<div class="modal fade" id="repoModal" tabindex="-1" aria-labelledby="repoModalTitle" aria-hidden="true">
+ <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form id="repoEditForm">
+  <div class="modal-header"><div><h2 id="repoModalTitle">Add repository</h2><div class="tn-muted" id="repoModalSub">A GitHub repository of this project</div></div><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
+  <div class="modal-body">
+   <div id="repoFormError" class="alert alert-danger d-none" role="alert"></div>
+   <input type="hidden" id="repoId">
+   <div class="tn-field"><span class="form-label d-block" id="repoProviderLabel">Provider</span><div class="tn-provider-pick" role="radiogroup" aria-labelledby="repoProviderLabel"><label><input type="radio" name="repoProvider" value="github" checked> GitHub</label><label><input type="radio" name="repoProvider" value="gitlab"> GitLab</label></div></div>
+   <div class="tn-field" id="repoBaseUrlField" hidden><label class="form-label" for="repoBaseUrl">GitLab address</label><input id="repoBaseUrl" class="form-control" placeholder="https://gitlab.com" aria-describedby="repoBaseUrlHint"><div class="tn-muted tn-edit-hint" id="repoBaseUrlHint">https://gitlab.com, or your company's own GitLab address</div></div>
+   <div class="tn-field"><label class="form-label" for="repoFullName">Repository *</label><input id="repoFullName" class="form-control" required pattern="[^/\s]+(/[^/\s]+)+" placeholder="owner/repository" aria-describedby="repoNameHint"><div class="tn-muted tn-edit-hint" id="repoNameHint">As on GitHub, e.g. testsmith-io/practice-software-testing</div></div>
+   <div class="tn-field"><label class="form-label" for="repoDefaultBranch">Default branch</label><input id="repoDefaultBranch" class="form-control" placeholder="main"></div>
+   <div class="tn-field"><label class="form-label" for="repoToken">Access token</label><input id="repoToken" type="password" class="form-control" autocomplete="off" placeholder="Read-only GitHub token (only for private repositories)" aria-describedby="repoTokenHint"><div class="tn-muted tn-edit-hint" id="repoTokenHint">Public repository: leave empty. The token is checked with GitHub and saved encrypted; it is never shown again.</div>
+    <label class="tn-repo-remove-token" id="repoRemoveTokenWrap" hidden><input type="checkbox" id="repoRemoveToken"> Remove the saved token</label></div>
+   <div class="tn-repo-view" id="repoViewInfo" hidden></div>
+  </div>
+  <div class="modal-footer"><button type="button" class="btn btn-outline-secondary tn-btn" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary tn-btn" type="submit" id="repoSave">Save</button></div>
+ </form></div></div>
+</div>
 <div class="modal fade" id="storyModal" tabindex="-1" aria-labelledby="storyFormTitle" aria-hidden="true">
  <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><form id="storyForm">
   <div class="modal-header"><h2 id="storyFormTitle">Write business story</h2><span class="tn-tag ms-2">AI-first testing</span><button class="btn-close" data-bs-dismiss="modal" type="button" aria-label="Close"></button></div>
@@ -278,6 +348,8 @@
     <div class="col-md-7 tn-field"><label class="form-label">Title *</label><input class="form-control" name="title" required placeholder="Customer login validation" aria-label="Title"></div>
     <div class="col-md-5 tn-field"><label class="form-label">Story Reference No.</label><input class="form-control" name="referenceNo" placeholder="Generated after saving" aria-label="Reference number" readonly></div>
     <div class="col-md-6 tn-field"><label class="form-label">Environment</label><select name="environmentId" id="storyEnvironment" class="form-select" aria-label="Story environment"></select></div>
+    <div class="col-md-6 tn-field"><label class="form-label" id="storyTypeLabel">Story type</label><details class="tn-multi" id="storyTypePick"><summary class="form-select" id="storyTypeSummary" aria-labelledby="storyTypeLabel">Functional</summary><div class="tn-multi-menu" role="group" aria-labelledby="storyTypeLabel"><label><input type="radio" name="storyKind" value="FUNCTIONAL" checked> Functional <span class="tn-muted">· tests the website</span></label><label class="tn-multi-group"><input type="radio" name="storyKind" value="CODE"> Code Intelligence <span class="tn-muted">· scans the code (no website tests)</span></label><label class="tn-multi-sub"><input type="checkbox" name="storyTypes" value="CODE_SAST"> SAST <span class="tn-muted">· unsafe code</span></label><label class="tn-multi-sub"><input type="checkbox" name="storyTypes" value="CODE_SECRETS"> Secrets <span class="tn-muted">· passwords/keys in code</span></label><label class="tn-multi-sub"><input type="checkbox" name="storyTypes" value="CODE_SCA"> SCA <span class="tn-muted">· old/vulnerable packages</span></label><label class="tn-multi-sub"><input type="checkbox" name="storyTypes" value="CODE_AI_REVIEW"> AI code review <span class="tn-muted">· explain + suggest fixes</span></label><label class="tn-multi-sub"><input type="checkbox" name="storyTypes" value="CODE_QUALITY"> Code quality <span class="tn-muted">· messy/risky code</span></label></div></details></div>
+    <div class="col-12 tn-field" id="storyBranchField" hidden><label class="form-label" for="storyCodeBranch">Scan by</label><div class="tn-branch-row"><select id="storyRepo" class="form-select tn-target-repo" aria-label="Repository"></select><div class="tn-searchbar tn-target-bar"><select id="storyTargetType" class="form-select tn-target-type" aria-label="Scan by"><option value="PULL_REQUEST">Pull request</option><option value="BRANCH">Branch</option><option value="COMMIT">Commit</option></select><input id="storyCodeBranch" class="form-control" placeholder="Search" aria-describedby="storyBranchHint"></div><button type="button" class="tn-icon-action tn-scan-icon" id="storyScanCode" disabled aria-label="Scan this story" title="Scan this story (the chosen pull request, branch or commit, with its ticked code checks) · scanning engine not connected yet"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8 10V9a1 1 0 0 1 1-1h1M14 8h1a1 1 0 0 1 1 1v1M16 14v1a1 1 0 0 1-1 1h-1M10 16H9a1 1 0 0 1-1-1v-1"/></svg></button></div><div class="tn-muted tn-edit-hint" id="storyBranchHint"></div></div>
     <div class="col-md-3 tn-field"><label class="form-label">Story points</label><input name="storyPoints" type="text" inputmode="numeric" maxlength="2" pattern="(10|[1-9])" title="Enter a whole number from 1 to 10" class="form-control" placeholder="Add story points" aria-label="Story points (1 to 10)"></div>
     <div class="col-md-3 tn-field"><label class="form-label">Priority</label><select name="priority" class="form-select" aria-label="Priority"><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option><option>LOW</option></select></div>
    </div>

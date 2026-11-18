@@ -15,6 +15,7 @@ const liveBrowserRoutes = require("./routes/liveBrowser");
 const authRoutes = require("./routes/auth");
 const projectRoutes = require("./routes/projects");
 const projectWorkspaceRoutes = require("./routes/projectWorkspace");
+const codeIntelligenceRoutes = require("./routes/codeIntelligence");
 const companyTeamsRoutes = require("./routes/companyTeams");
 const sessionContextRoutes = require("./routes/sessionContext");
 const reportingRoutes = require("./routes/reporting");
@@ -111,6 +112,7 @@ app.get("/api/reports/:sessionId", (req, res, next) => {
 app.use(authRoutes);
 app.use(projectRoutes);
 app.use(projectWorkspaceRoutes);
+app.use(codeIntelligenceRoutes);
 app.use(companyTeamsRoutes);
 app.use(sessionContextRoutes);
 app.use(reportingRoutes);

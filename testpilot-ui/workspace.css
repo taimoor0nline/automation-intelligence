@@ -144,7 +144,7 @@ textarea.form-control{min-height:94px;resize:vertical}.form-select{appearance:au
 .tn-icon-action:hover{background:#eaf0ff;color:#2457b4;border-color:#cfdbf5}
 .tn-icon-action:focus-visible{outline:3px solid #94adff;outline-offset:2px}
 .tn-icon-action:disabled{opacity:.45;cursor:not-allowed}
-.tn-icon-action[data-start-project],.tn-icon-action[data-start-story],.tn-icon-action[data-start-task]{color:#2457b4}
+.tn-icon-action[data-start-project],.tn-icon-action[data-start-story],.tn-icon-action[data-start-task],.tn-icon-action[data-scan-story],.tn-icon-action[data-scan-task]{color:#2457b4}
 .tn-icon-action[data-detach-team],.tn-icon-action[data-remove-team-member]{color:#ac3142}
 .tn-icon-action[data-detach-team]:hover,.tn-icon-action[data-remove-team-member]:hover{background:#fff0f2}
 .tn-table th:last-child,.tn-table td:last-child{text-align:right}
@@ -430,7 +430,7 @@ body,.tn-container{background:#eef2f7}
 /* Table action buttons — solid dark navy with a white icon (same navy as the top bar); remove/delete actions solid red. */
 .tn-icon-action{width:34px;height:34px;padding:0;display:inline-grid;place-items:center;border:0;border-radius:8px;background:#0f1f5c;color:#fff}
 .tn-icon-action:hover,.tn-icon-action:focus-visible{background:#1e3a8a;color:#fff;border:0}
-.tn-icon-action[data-start-project],.tn-icon-action[data-start-story],.tn-icon-action[data-start-task]{color:#fff}
+.tn-icon-action[data-start-project],.tn-icon-action[data-start-story],.tn-icon-action[data-start-task],.tn-icon-action[data-scan-story],.tn-icon-action[data-scan-task]{color:#fff}
 .tn-icon-action[data-detach-team],.tn-icon-action[data-remove-team-member],.tn-icon-action[data-remove-project-member],.tn-icon-action[data-unlink-test]{background:#dc2626;color:#fff}
 .tn-icon-action[data-detach-team]:hover,.tn-icon-action[data-remove-team-member]:hover,.tn-icon-action[data-remove-project-member]:hover,.tn-icon-action[data-unlink-test]:hover{background:#b91c1c;color:#fff}
 .tn-icon-action:disabled{background:#94a3b8;opacity:1}
@@ -1100,3 +1100,197 @@ h1.tn-title{margin:0 0 12px;line-height:1.2}
 .tn-subtask-table td,.tn-subtask-table th{font-size:13px;vertical-align:top}
 .tn-subtask-table .tn-task-no{white-space:nowrap}
 .tn-subtask-table td .tn-link{text-align:left}
+
+/* Story form → Story type: a dropdown with checkboxes (one story can be Functional and Code Intelligence) */
+.tn-multi{position:relative}
+.tn-multi>summary{list-style:none;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tn-multi>summary::-webkit-details-marker{display:none}
+.tn-multi-menu{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);padding:6px;display:grid;gap:2px}
+.tn-multi-menu label{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;font-size:13.5px;cursor:pointer;margin:0}
+.tn-multi-menu label:hover{background:#eef2ff}
+.tn-multi-menu .tn-muted{font-size:12px}
+/* Stories list: story type tags under the title */
+.tn-story-types{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.tn-story-types .tn-tag{font-size:10px;padding:2px 8px}
+.tn-story-types .tn-tag-code{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9}
+/* Story type: "Code Intelligence" heading with its checks indented under it */
+.tn-multi-group{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;padding:8px 9px 2px;border-top:1px solid #e2e8f0;margin-top:2px}
+.tn-multi-menu label.tn-multi-sub{padding-left:22px}
+/* "Code Intelligence" is itself tickable (ticks all its checks) */
+.tn-multi-menu label.tn-multi-group{display:flex;text-transform:none;letter-spacing:0;font-size:13.5px;font-weight:600;color:#0f172a;padding:9px 9px 7px;border-radius:0}
+/* Source code card: each repository with token status, Token / Scan buttons and last scan */
+.tn-repo-item{padding:8px 0;border-bottom:1px solid #eef2f7}
+.tn-repo-item:last-child{border-bottom:0}
+.tn-repo-token{margin-left:auto;font-size:11px;font-weight:600;color:#64748b;background:#f1f5f9;border-radius:99px;padding:2px 9px;white-space:nowrap}
+.tn-repo-token.on{color:#047857;background:#ecfdf5}
+.tn-repo-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.tn-repo-scan{font-size:12px;margin-top:6px}
+.tn-repo-token-form{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.tn-repo-token-form .form-control{flex:1 1 220px;min-width:0}
+.tn-repo-token-form[hidden]{display:none}
+/* Source code card: branch box to choose what to scan (main = whole repository) */
+.tn-repo-actions{align-items:center}
+.tn-repo-actions .tn-pick{flex:1 1 200px;min-width:160px;height:34px}
+.tn-repo-actions .tn-pick>input{font-size:13px}
+/* Stories list: 🔍 code scan icon waits for the scanning engine */
+.tn-icon-action:disabled{opacity:.45;cursor:not-allowed}
+/* Story form: Code branch box with the story's own 🔍 Scan button (waits for the scanning engine) */
+.tn-branch-row{display:flex;gap:8px;align-items:center}
+.tn-branch-row .tn-pick{flex:1 1 auto;min-width:0}
+.tn-branch-row .btn{flex:0 0 auto;height:40px;white-space:nowrap}
+/* Source code card: delete icon sits at the end of the button row */
+.tn-repo-actions .tn-icon-actions{margin-left:auto}
+/* Source code card: delete repository icon is red like every other delete */
+.tn-icon-action[data-repo-remove]{background:#dc2626;color:#fff}
+.tn-icon-action[data-repo-remove]:hover{background:#b91c1c;color:#fff}
+/* Source code tab: link row on top, one table row per repository (same format as Environments) */
+.tn-repo-link{display:flex;gap:8px;flex-wrap:wrap;max-width:720px}
+.tn-repo-link .form-control{flex:1 1 280px;min-width:0}
+.tn-repo-link .tn-repo-branch{flex:0 0 140px}
+.tn-repo-hint{font-size:12px;margin-top:8px}
+.tn-repo-table .tn-repo-item{border-bottom:0;padding:0}
+.tn-repo-table td{vertical-align:middle}
+.tn-repo-table .tn-repo-token{margin-left:0}
+.tn-repo-scan-cell{display:flex;gap:8px;align-items:center;min-width:280px}
+.tn-repo-scan-cell .tn-pick{flex:1 1 200px;min-width:160px;height:34px}
+.tn-repo-scan-cell .tn-pick>input{font-size:13px}
+.tn-repo-table .tn-repo-actions{display:flex;gap:8px;align-items:center;margin-top:0;flex-wrap:nowrap}
+.tn-repo-table .tn-repo-actions .tn-icon-actions{margin-left:0}
+.tn-repo-token-row td{background:#f8fafc}
+.tn-repo-token-row .tn-repo-token-form{margin-top:0;max-width:720px}
+.tn-repo-token-forms{padding:0 20px}
+.tn-repo-token-forms .tn-repo-token-form{margin:0 0 16px;align-items:center;max-width:860px;padding:12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc}
+.tn-repo-token-for{font-size:13px;white-space:nowrap}
+/* Story form → Scan by: repository on the first line; then [ Pull request ▾ | 🔍 Search… ] as one box (same as the table
+   search bars) with the scan button. */
+#storyBranchField .tn-branch-row{flex-wrap:wrap;row-gap:8px}
+#storyBranchField .tn-target-repo{flex:1 1 100%;min-width:0}
+#storyBranchField .tn-target-bar{flex:1 1 0;width:auto;min-width:0;overflow:visible}
+#storyBranchField .tn-target-bar .tn-target-type{flex:0 0 auto;width:auto;max-width:200px;height:100%;margin:0;padding:0 30px 0 12px;border:0;border-right:1px solid #e2e8f0;border-radius:9px 0 0 9px;box-shadow:none;background-color:transparent}
+#storyBranchField .tn-target-bar .tn-target-type:focus{box-shadow:none;outline:0}
+#storyBranchField .tn-target-bar .tn-pick{flex:1 1 0;min-width:0;height:100%;border:0;border-radius:0 9px 9px 0;box-shadow:none}
+#storyBranchField .tn-target-bar .tn-pick:focus-within{box-shadow:none}
+.tn-branch-row .tn-scan-icon,.tn-repo-scan-cell .tn-icon-action{flex:0 0 auto}
+/* Scan by list: wider than the search box so pull request titles and commit messages fit */
+.tn-branch-row .tn-pick-list{min-width:380px}
+/* 🔍 scan icon (story form + Source code tab): clearly visible even while it waits for the scanning engine */
+.tn-scan-icon:disabled,.tn-repo-scan-cell .tn-icon-action:disabled{opacity:1;background:#fff;color:#3656c9;border:1.5px dashed #93a8e8;cursor:not-allowed}
+.tn-scan-icon{width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px}
+/* Scan icon (corner frame) replaces the magnifier: plain icon, no dashed box; dimmed until the scanning engine is connected */
+.tn-scan-icon:disabled,.tn-repo-scan-cell .tn-icon-action:disabled{opacity:.75;background:#fff;color:#13265e;border:1px solid #cbd5e1;cursor:not-allowed}
+.tn-scan-icon svg,.tn-repo-scan-cell .tn-icon-action svg{width:22px;height:22px;stroke-width:2}
+/* Scan button: blue with a white scan icon (still not clickable until the scanning engine is connected) */
+.tn-scan-icon,.tn-scan-icon:disabled,.tn-repo-scan-cell .tn-icon-action,.tn-repo-scan-cell .tn-icon-action:disabled{opacity:1;background:#2563eb;color:#fff;border:0;cursor:not-allowed}
+.tn-repo-scan-cell .tn-icon-action{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px}
+/* Source code tab (Environments layout): ⛶ scan icon in Actions is blue with a white icon; waits for the scanning engine */
+.tn-icon-action[data-repo-scan],.tn-icon-action[data-repo-scan]:disabled{opacity:1;background:#2563eb;color:#fff;border:0;cursor:not-allowed}
+.tn-repo-table .tn-repo-scan-cell{min-width:200px}
+.tn-repo-remove-token{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#b91c1c}
+/* Repository provider: GitHub / GitLab choice in the popup, and a small label in the Source code list */
+.tn-provider-pick{display:flex;gap:18px;font-size:13.5px}
+.tn-provider-pick label{display:flex;align-items:center;gap:7px;margin:0}
+.tn-provider{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:1px 8px;margin-top:3px}
+.tn-provider.gh{background:#f1f5f9;color:#24292f}
+.tn-provider.gl{background:#fff1ee;color:#c2410c}
+.tn-repo-view{display:grid;gap:6px;margin-top:4px}
+#repoModal input[readonly]{background:#f8fafc;color:#475569}
+.tn-repo-table td:first-child{min-width:280px}
+.tn-repo-table td:first-child .tn-repo a{white-space:nowrap}
+/* Code scans: status badges, risk chips, scanner chips and the findings popup */
+.tn-scan-status{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;border-radius:99px;padding:2px 9px;white-space:nowrap}
+.tn-scan-status.run{background:#eff6ff;color:#1d4ed8}
+.tn-scan-status.ok{background:#ecfdf5;color:#047857}
+.tn-scan-status.warn{background:#fffbeb;color:#b45309}
+.tn-scan-status.bad{background:#fef2f2;color:#b91c1c}
+.tn-scan-spin{width:10px;height:10px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:tnspin .8s linear infinite}
+@keyframes tnspin{to{transform:rotate(360deg)}}
+.tn-sev-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.tn-sev-row b{margin-right:4px}
+.tn-sev{display:inline-block;min-width:22px;text-align:center;font-size:11px;font-weight:700;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.tn-sev-critical{background:#7f1d1d;color:#fff}.tn-sev-high{background:#dc2626;color:#fff}.tn-sev-medium{background:#f59e0b;color:#fff}.tn-sev-low{background:#e2e8f0;color:#334155}.tn-sev-info{background:#f1f5f9;color:#64748b}
+/* Finding priority: same colours as story / task priority (Critical red, High orange, Medium blue, Low green) */
+.tn-pri-critical{background:#fef2f2;color:#b91c1c;border-color:#fecaca}.tn-pri-high{background:#fff7ed;color:#c2410c;border-color:#fed7aa}
+.tn-pri-medium{background:#eef2ff;color:#1d4ed8;border-color:#c7d2fe}.tn-pri-low{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}
+.tn-priority-pick{width:112px!important;min-width:112px!important;max-width:none!important;font-size:12px!important;font-weight:700;padding:2px 26px 2px 9px!important;height:30px!important;min-height:30px!important;border-width:1px;background-position:right 7px center!important}
+.tn-findings-table td:nth-child(2),.tn-findings-table th:nth-child(2){min-width:126px}
+/* AI on demand: "Explain with AI" button and the answer panel (advice only: "AI · unverified") */
+.tn-icon-action[data-finding-ai][aria-busy="true"],.tn-ai-ask[aria-busy="true"]{opacity:.6;cursor:wait}
+.tn-ai-ask{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;border:1px solid #0f1f5c;border-radius:8px;background:#fff;color:#0f1f5c;font-size:13px;font-weight:600;padding:5px 10px;line-height:1.2}
+.tn-ai-ask:hover,.tn-ai-ask:focus-visible{background:#eef2ff}
+.tn-ai-dialog{width:min(1100px,94vw);max-height:88vh;border:1px solid #c7d2fe;border-radius:14px;padding:0;background:#f5f8ff;box-shadow:0 24px 60px rgba(15,23,42,.3)}
+.tn-ai-dialog::backdrop{background:rgba(15,23,42,.45)}
+.tn-ai-dialog-body{padding:14px 18px;max-height:88vh;overflow:auto}
+.tn-ai-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}.tn-ai-head b{color:#0f1f5c}
+.tn-ai-badge{font-size:10.5px;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:99px;padding:1px 8px}
+.tn-ai-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;font-size:13px}
+@media(max-width:900px){.tn-ai-grid{grid-template-columns:1fr}}
+.tn-ai-k{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#64748b;margin:9px 0 3px}
+.tn-ai-risk{display:inline-block;font-size:11.5px;font-weight:700;border-radius:99px;padding:1px 9px;margin-right:4px}
+.tn-ai-risk.real{background:#fef2f2;color:#b91c1c}.tn-ai-risk.possible{background:#fffbeb;color:#b45309}.tn-ai-risk.false{background:#f0fdf4;color:#15803d}
+.tn-ai-code{font:12px/1.55 ui-monospace,Consolas,monospace;background:#0f172a;color:#e2e8f0;border-radius:9px;padding:9px 0;margin:0;white-space:pre;overflow-x:auto;max-height:260px}
+.tn-ai-code span{display:block;padding:0 12px}.tn-ai-code span.hl{background:#7f1d1d}
+.tn-ai-code.fix{padding:9px 12px;background:#14532d}
+.tn-scan-jobs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.tn-scan-job{border:1px solid #e2e8f0;border-radius:10px;padding:7px 10px;font-size:12.5px;background:#f8fafc;max-width:100%}
+.tn-scan-job.completed{border-color:#a7f3d0;background:#f0fdf4}
+/* Scan results: Accept (green) / Reject (red) icons, same shape as the other table action icons. A rejected row stays, greyed. */
+.tn-icon-action[data-accept-finding]{background:#15803d;color:#fff}.tn-icon-action[data-accept-finding]:hover,.tn-icon-action[data-accept-finding]:focus-visible{background:#166534;color:#fff}
+.tn-icon-action[data-reject-finding]{background:#dc2626;color:#fff}.tn-icon-action[data-reject-finding]:hover,.tn-icon-action[data-reject-finding]:focus-visible{background:#b91c1c;color:#fff}
+.tn-finding-actions{min-width:92px;max-width:150px}.tn-finding-actions .tn-icon-actions{display:inline-flex;gap:6px;align-items:center;flex-wrap:nowrap}
+.tn-decision-tag{margin-top:6px}.tn-reject-reason{margin-top:4px;white-space:normal;word-break:break-word}
+.tn-finding-rejected>td{background:#f8fafc;color:#64748b}.tn-finding-rejected>td:not(.tn-finding-actions){opacity:.7}
+.tn-reject-dialog{width:min(480px,94vw);border:1px solid #e2e8f0;border-radius:14px;padding:0;box-shadow:0 24px 60px rgba(15,23,42,.3)}
+.tn-reject-dialog::backdrop{background:rgba(15,23,42,.45)}
+.tn-reject-body{padding:16px 18px}.tn-reject-body h3{font-size:16px;margin:0 0 4px}
+.tn-reject-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+/* Code-problem task: "What to do" written by the AI (same badge, risk and code styles as the AI explanation) */
+.tn-code-todo-head{margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.tn-ai-badge.is-checked{color:#15803d;background:#f0fdf4;border-color:#bbf7d0}.tn-ai-check{padding:1px 10px;font-size:12px}.tn-code-todo-k{font-size:13px;font-weight:700;margin:12px 0 4px}
+.tn-code-steps{margin:0;padding-left:20px;font-size:13px}.tn-code-steps li{margin:3px 0}
+.tn-code-scanner-text{font-size:12.5px;margin:6px 0 0;white-space:pre-wrap;word-break:break-word;color:#475569}
+.tn-icon-action[data-accept-finding].is-busy{opacity:.6;cursor:progress}
+/* Scan history (attempts of one scan) */
+.tn-scan-history-box{margin:0 0 12px}.tn-scan-history-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;margin:4px 0 6px;color:#0f172a}
+.tn-scan-history tr.is-current>td{background:#f5f8ff}
+.tn-diff{font-weight:700}.tn-diff.new{color:#b91c1c}.tn-diff.fixed{color:#15803d}
+/* "Found in N places": opens the list of places inside the row */
+.tn-places summary{cursor:pointer;color:#0f1f5c;font-weight:600;white-space:nowrap}
+.tn-places summary:hover{text-decoration:underline}
+.tn-places ul{list-style:none;margin:6px 0 0;padding:0 0 0 2px;border-left:2px solid #c7d2fe}
+.tn-places li{padding:2px 0 2px 8px;font-size:12.5px;word-break:break-word}
+/* Problems found: yellow, not green (green only when the check found nothing) */
+.tn-scan-job.completed.has-findings{border-color:#facc15;background:#fefce8}.tn-scan-job.failed{border-color:#fecaca;background:#fef2f2}.tn-scan-job.skipped{border-style:dashed}
+.tn-scan-filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.tn-scan-filters .form-control{flex:1 1 280px;min-width:0}.tn-scan-filters .form-select{flex:0 0 170px}
+.tn-findings-table td{vertical-align:top;font-size:13px}
+.tn-finding-msg{max-width:520px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tn-finding-where{word-break:break-all;min-width:180px}
+#scanPageMeta .tn-scan-status{vertical-align:middle}
+/* New scan popup: checks list */
+.tn-scan-checks{display:grid;gap:6px;font-size:13.5px}
+.tn-scan-checks label{display:flex;align-items:center;gap:8px;margin:0}
+#newScanModal .tn-branch-row .tn-pick-list{min-width:360px}
+/* Scan buttons use the same dark blue as Edit / Play (consistency); dimmed only when they cannot be used */
+.tn-scan-icon,.tn-repo-scan-cell .tn-icon-action,.tn-icon-action[data-repo-scan]{opacity:1;background:#0f1f5c;color:#fff;border:0;cursor:pointer}
+.tn-scan-icon:hover,.tn-icon-action[data-repo-scan]:hover{background:#1e3a8a;color:#fff}
+.tn-scan-icon:disabled,.tn-repo-scan-cell .tn-icon-action:disabled,.tn-icon-action[data-repo-scan]:disabled{background:#0f1f5c;color:#fff;opacity:.45;cursor:not-allowed}
+/* Scan buttons are never dimmed: same dark blue as Edit / Play everywhere */
+.tn-scan-icon,.tn-scan-icon:disabled,.tn-icon-action[data-repo-scan],.tn-icon-action[data-repo-scan]:disabled{opacity:1;background:#0f1f5c;color:#fff;cursor:pointer}
+/* Scan buttons with the scan icon (Code scans tab: New scan, Start scan) — same dark blue as the scan icons */
+.tn-scan-btn{display:inline-flex;align-items:center;gap:8px;background:#0f1f5c;border-color:#0f1f5c;color:#fff}
+.tn-scan-btn:hover,.tn-scan-btn:focus-visible{background:#1e3a8a;border-color:#1e3a8a;color:#fff}
+/* New scan popup: the start button is only the scan icon, same dark blue as the other scan icons */
+.tn-scan-start{width:40px;height:40px;background:#0f1f5c;color:#fff;border:0;border-radius:9px;cursor:pointer}
+.tn-scan-start:hover,.tn-scan-start:focus-visible{background:#1e3a8a;color:#fff}
+.tn-scan-start svg{width:22px;height:22px}
+/* Story type: Functional is fixed (every story); "Also scan the code" adds the code checks */
+.tn-multi-fixed{display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:13.5px;color:#047857;font-weight:600}
+.tn-multi-fixed .tn-muted{font-weight:400}
+/* Findings popup a little wider so the AI explanation and its code box have more room */
+#aiDialog .tn-ai-grid{grid-template-columns:minmax(0,1fr) minmax(0,1.15fr)}
+/* Scan page: checks + note above the problems table; New (amber) and Fixed rows (greyed) */
+.tn-scan-body{padding:12px 16px 4px}.tn-scan-body .tn-scan-jobs{margin-bottom:8px}
+.tn-result.new{background:#fffbeb;color:#b45309;border:1px solid #fde68a}
+.tn-finding-fixed>td{background:#f8fafc}.tn-finding-fixed>td:not(.tn-finding-actions){opacity:.65}
+.tn-problem-grid{margin-top:12px}.tn-problem-places{margin:0;padding-left:18px;font-size:13px;max-height:220px;overflow:auto}.tn-problem-places li{margin:2px 0;word-break:break-word}
+.tn-hist-found{color:#b91c1c;font-weight:600}.tn-hist-not_found{color:#15803d;font-weight:600}.tn-hist-not_checked{color:#64748b}
+.tn-ai-title{display:inline-flex;align-items:center;gap:6px}

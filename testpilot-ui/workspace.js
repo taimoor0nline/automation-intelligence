@@ -5,6 +5,7 @@ const state={user:null,projects:[],projectId:'',context:null,tasks:[],deletedTas
 const token=()=>sessionStorage.getItem('aiTestPilotToken')||'';
 
 const iconPaths={
+ scan:'<rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8 10V9a1 1 0 0 1 1-1h1M14 8h1a1 1 0 0 1 1 1v1M16 14v1a1 1 0 0 1-1 1h-1M10 16H9a1 1 0 0 1-1-1v-1"/>',
  folder:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z"/><path d="M3 10h18"/>',
  play:'<path d="m8 5 11 7-11 7z"/>',
  eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
@@ -18,6 +19,8 @@ const iconPaths={
  userPlus:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
  assign:'<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M12 11v5M9.5 13.5h5"/>',
  report:'<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
+ accept:'<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9.5"/>',
+ reject:'<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
  ai:'<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'
 };
 function actionIcon(name,attributes,label){
@@ -214,18 +217,578 @@ document.addEventListener('click',async e=>{
  if(!await confirmDanger({title:(activate?'Activate ':'Deactivate ')+name+'?',message:activate?name+' can sign in again and can be added to teams and projects.':name+' can no longer sign in and is signed out at once. Their name stays on runs, tasks and the Audit. They are not offered when adding people to teams or projects.',confirmLabel:activate?'Activate':'Deactivate',tone:'warning'}))return;
  try{await api('/api/users/'+encodeURIComponent(u.id)+'/status',{method:'PATCH',body:JSON.stringify({active:activate})});notice((activate?'Activated ':'Deactivated ')+name+'.','success');await loadUsers();}catch(err){notice(err.message);}
 });
-// Source code card (project page): GitHub repositories linked to this project.
+// Source code tab: the project's GitHub repositories, laid out like Environments —
+// + Create, a table (search, paging), 👁 View · ✏ Edit · ⛶ Scan · 🗑 Delete, and one popup for create / edit / view.
+let repoList=[];
+const repoIcon='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"/></svg>';
+const repoAccess=r=>'<span class="tn-repo-token'+(r.has_token?' on':'')+'">'+(r.has_token?'🔒 Token saved':'Public · no token')+'</span>';
 async function loadRepos(){
- const d=await api('/api/projects/'+encodeURIComponent(state.projectId)+'/repositories');
- const list=d.repositories||[];
- $('detailRepos').innerHTML=list.map(r=>'<div class="tn-repo"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"/></svg><a href="'+esc(r.repository_url||'#')+'" target="_blank" rel="noopener">'+esc(r.repo_full_name)+'</a><span class="tn-muted">· '+esc(r.default_branch||'main')+'</span></div>').join('')||'<div class="tn-muted">No repository linked. Testing works without one.</div>';
- const canAdd=['PROJECT_MANAGER','QA'].includes(state.context?.projectRole);
- $('repoForm').hidden=!canAdd;
+ const [d]=await Promise.all([api('/api/projects/'+encodeURIComponent(state.projectId)+'/repositories'),loadCodeStatus(),fetchScans()]);
+ repoList=d.repositories||[];
+ const role=state.context?.projectRole,canEdit=['PROJECT_MANAGER','QA'].includes(role),isPm=role==='PROJECT_MANAGER';
+ $('repoCount').textContent=repoList.length;
+ $('repoCreate').hidden=!canEdit;
+ $('detailRepos').innerHTML=repoList.map(r=>{
+  const name=r.repo_full_name;
+  const actions=actionIcon('eye','data-repo-open="view" data-repo-id="'+esc(r.id)+'"','View repository '+name)
+   +(canEdit?actionIcon('edit','data-repo-open="edit" data-repo-id="'+esc(r.id)+'"','Edit repository '+name):'')
+   // ⛶ Scan the repository's default branch (the whole repository). Other branches, pull requests or commits are chosen per story (Scan by).
+   +(canEdit?actionIcon('scan','data-repo-scan="'+esc(r.id)+'"'+(ciEnabled?'':' data-blocked="Code scanning is not enabled on this server."'),'Scan '+name+' (default branch '+(r.default_branch||'main')+')'+(ciEnabled?'':' · code scanning is not enabled on this server')):'')
+   +(isPm?actionIcon('remove','data-repo-remove="'+esc(r.id)+'" data-repo-name="'+esc(name)+'"','Delete repository '+name):'');
+  return '<tr><td><div class="tn-repo">'+repoIcon+'<a href="'+esc(r.repository_url||'#')+'" target="_blank" rel="noopener"><strong>'+esc(name)+'</strong></a></div><div><span class="tn-provider '+(r.provider==='gitlab'?'gl':'gh')+'">'+providerName(r)+'</span>'+(r.provider==='gitlab'&&r.api_base_url&&r.api_base_url!=='https://gitlab.com'?' <span class="tn-muted small">'+esc(r.api_base_url.replace(/^https:\/\//,''))+'</span>':'')+'</div></td>'
+   +'<td>'+esc(r.default_branch||'main')+'</td><td>'+repoAccess(r)+'</td>'
+   +'<td>'+lastScanCell(r)+'</td>'
+   +createdCell(r.created_by_name,r.created_at)+updatedCell(r.updated_by_name,r.updated_at,r.created_by_name,r.created_at)
+   +'<td><span class="tn-icon-actions">'+actions+'</span></td></tr>';
+ }).join('')||'<tr><td colspan="7" class="tn-empty">No repository added yet.'+(canEdit?' Add the first one.':'')+' Testing works without one.</td></tr>';
 }
+function repoFormError(m){const el=$('repoFormError');el.textContent=m||'';el.classList.toggle('d-none',!m);}
+// One popup: Create (+ Create), Edit (✏) or View (👁). The repository name is fixed once linked.
+const providerName=r=>r?.provider==='gitlab'?'GitLab':'GitHub';
+// The popup's hints and placeholders follow the chosen provider.
+function syncRepoProvider(r){
+ const gl=(document.querySelector('input[name="repoProvider"]:checked')?.value||'github')==='gitlab';
+ $('repoBaseUrlField').hidden=!gl;
+ $('repoFullName').placeholder=gl?'group/project':'owner/repository';
+ $('repoNameHint').textContent=r?'The repository cannot be changed. Delete it and link another one instead.':gl?'As on GitLab, e.g. gitlab-examples/nodejs (subgroups allowed: group/subgroup/project)':'As on GitHub, e.g. testsmith-io/practice-software-testing';
+ $('repoToken').placeholder=r?.has_token?'Leave empty to keep the saved token':gl?'Read-only GitLab token (read_repository) · only for private projects':'Read-only GitHub token (only for private repositories)';
+ $('repoTokenHint').textContent='Public '+(gl?'project':'repository')+': leave empty. The token is checked with '+(gl?'GitLab':'GitHub')+' and saved encrypted; it is never shown again.';
+}
+document.addEventListener('change',e=>{if(e.target.name==='repoProvider')syncRepoProvider(null);});
+function openRepoModal(mode,r){
+ const view=mode==='view',edit=mode==='edit';
+ $('repoEditForm').reset();repoFormError('');
+ $('repoId').value=r?.id||'';
+ $('repoModalTitle').textContent=view?'Repository':edit?'Edit repository':'Add repository';
+ $('repoModalSub').textContent=r?r.repo_full_name+' · '+providerName(r):'A GitHub or GitLab repository of this project';
+ // Provider (GitHub / GitLab) and GitLab address: chosen when adding; fixed afterwards.
+ const prov=r?.provider==='gitlab'?'gitlab':'github';
+ for(const x of document.querySelectorAll('input[name="repoProvider"]')){x.checked=x.value===prov;x.disabled=!!r;}
+ $('repoBaseUrl').value=r?.api_base_url||'';$('repoBaseUrl').readOnly=!!r;
+ $('repoFullName').value=r?.repo_full_name||'';$('repoFullName').readOnly=!!r;
+ $('repoDefaultBranch').value=r?.default_branch||'';$('repoDefaultBranch').readOnly=view;
+ $('repoToken').closest('.tn-field').hidden=view;
+ syncRepoProvider(r);
+ $('repoRemoveTokenWrap').hidden=!(edit&&r?.has_token);
+ $('repoViewInfo').hidden=!view;
+ $('repoViewInfo').innerHTML=view?'<div class="tn-kv"><span>Provider</span><span>'+providerName(r)+(r.provider==='gitlab'?' · '+esc(r.api_base_url||'https://gitlab.com'):'')+'</span></div><div class="tn-kv"><span>Access</span><span>'+repoAccess(r)+'</span></div><div class="tn-kv"><span>Last scan</span><span>'+lastScanCell(r)+'</span></div>'
+  +'<div class="tn-kv"><span>Created</span><span>'+esc(r.created_by_name||'—')+' · '+dateTime(r.created_at)+'</span></div><div class="tn-kv"><span>Last updated</span><span>'+esc(r.updated_by_name||r.created_by_name||'—')+' · '+dateTime(r.updated_at||r.created_at)+'</span></div>':'';
+ $('repoSave').hidden=view;
+ bootstrap.Modal.getOrCreateInstance($('repoModal')).show();
+}
+document.addEventListener('click',async e=>{
+ if(e.target.closest('#repoCreate')){openRepoModal('create');return;}
+ const open=e.target.closest('[data-repo-open]');
+ if(open){const r=repoList.find(x=>String(x.id)===String(open.dataset.repoId));if(r)openRepoModal(open.dataset.repoOpen,r);return;}
+ const unlink=e.target.closest('[data-repo-remove]');
+ if(unlink){
+  const ok=await confirmDanger({title:'Delete this repository?',message:'Do you want to delete "'+unlink.dataset.repoName+'" from this project?',note:'Its saved token is deleted too. Stories keep their code branch name, and past test results are kept. You can link the repository again later.',confirmLabel:'Delete repository'});
+  if(!ok)return;
+  try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/repositories/'+encodeURIComponent(unlink.dataset.repoRemove),{method:'DELETE'});clearTargetCache();await loadRepos();notice('Repository deleted from this project.','success');}catch(err){notice(err.message);}
+  return;
+ }
+});
+// Save: link the repository (or change its default branch), then save / remove the token (GitHub checks a new token first).
 document.addEventListener('submit',async e=>{
- if(e.target.id!=='repoForm')return;e.preventDefault();
- try{const v=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/repositories',{method:'POST',body:JSON.stringify({repoFullName:v.repoFullName.trim(),defaultBranch:(v.defaultBranch||'main').trim()})});e.target.reset();await loadRepos();notice('Repository linked.','success');}
- catch(err){notice(err.message);}
+ if(e.target.id!=='repoEditForm')return;e.preventDefault();repoFormError('');
+ const project=requireProject(),btn=$('repoSave');
+ let id=$('repoId').value;
+ const name=$('repoFullName').value.trim(),branch=$('repoDefaultBranch').value.trim()||'main',token=$('repoToken').value.trim(),drop=$('repoRemoveToken').checked;
+ btn.disabled=true;btn.textContent=token?'Checking…':'Saving…';
+ try{
+  const provider=document.querySelector('input[name="repoProvider"]:checked')?.value||'github';
+  if(!id){const d=await api('/api/projects/'+encodeURIComponent(project)+'/repositories',{method:'POST',body:JSON.stringify({provider,apiBaseUrl:provider==='gitlab'?($('repoBaseUrl').value.trim()||'https://gitlab.com'):undefined,repoFullName:name,defaultBranch:branch})});id=d.repository.id;$('repoId').value=id;$('repoFullName').readOnly=true;}
+  else await api('/api/projects/'+encodeURIComponent(project)+'/repositories/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({defaultBranch:branch})});
+  if(token||drop)await api('/api/projects/'+encodeURIComponent(project)+'/repositories/'+encodeURIComponent(id)+'/token',{method:'PUT',body:JSON.stringify({token:token||''})});
+  clearTargetCache();await loadRepos();
+  bootstrap.Modal.getOrCreateInstance($('repoModal')).hide();
+  notice(token?'Repository saved; token checked with GitHub and saved.':'Repository saved.','success');
+ }catch(err){
+  // A new repository stays linked even when its token is refused: the popup stays open to correct the token.
+  if(id)await loadRepos().catch(()=>{});
+  repoFormError(err.message);
+ }finally{btn.disabled=false;btn.textContent='Save';}
+});
+// ---- Code scans (Code Intelligence): list, findings popup, and starting a scan ----
+let ciEnabled=false,ciAiEnabled=false,scanList=[],scanPoll=null,scanFindings=[],currentScanId=null,scanAttemptList=[];
+const SCAN_ACTIVE=['QUEUED','PREPARING','RUNNING','NORMALIZING'];
+const SCAN_STATUS={QUEUED:'Queued',PREPARING:'Getting the code',RUNNING:'Scanning',NORMALIZING:'Saving findings',COMPLETED:'Completed',PARTIAL:'Partly completed',FAILED:'Failed',CANCELLED:'Cancelled'};
+const SEV_ORDER=['CRITICAL','HIGH','MEDIUM','LOW','INFO'];
+const CAT_LABELS={SAST:'SAST',SCA:'SCA',SECRETS:'Secrets',CONTAINER:'Docker',IAC:'Kubernetes / IaC',AI_REVIEW:'AI code review',QUALITY:'Code quality'};
+async function loadCodeStatus(){try{const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/status');ciEnabled=!!d.enabled;ciAiEnabled=!!d.aiEnabled;}catch{ciEnabled=false;ciAiEnabled=false;}syncStoryScanButton();return ciEnabled;}
+async function fetchScans(){try{scanList=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/scans')).scans||[];}catch{scanList=[];}renderScans();}
+function scanStatusBadge(s){const k=SCAN_ACTIVE.includes(s.status)?'run':s.status==='COMPLETED'?'ok':s.status==='PARTIAL'?'warn':'bad';return '<span class="tn-scan-status '+k+'"'+(s.error?' title="'+esc(hideToolNames(s.error))+'"':'')+'>'+(SCAN_ACTIVE.includes(s.status)?'<span class="tn-scan-spin" aria-hidden="true"></span>':'')+esc(SCAN_STATUS[s.status]||s.status)+'</span>';}
+function sevChips(sum){const b=sum?.bySeverity;if(!b)return '<span class="tn-muted">—</span>';const parts=SEV_ORDER.filter(k=>b[k]).map(k=>'<span class="tn-sev tn-sev-'+k.toLowerCase()+'" title="'+k+'">'+b[k]+'</span>');return '<div class="tn-sev-row"><b>'+Number(sum.total||0)+'</b>'+parts.join('')+'</div>';}
+function scanTargetText(s){const v=s.target||'';return (s.target_type==='PULL_REQUEST'?(s.provider==='gitlab'?'Merge request !':'Pull request #')+v:s.target_type==='COMMIT'?'Commit '+v.slice(0,7):'Branch '+v)+(s.commit_sha?' · '+s.commit_sha.slice(0,7):'');}
+function lastScanCell(r){const s=scanList.find(x=>String(x.repository_id)===String(r.id));if(!s)return '<span class="tn-muted">None yet</span>';return '<div><b>#'+esc(s.scan_number)+'</b> '+scanStatusBadge(s)+'</div>'+(s.summary?.total!=null?'<div class="tn-muted small">'+Number(s.summary.total)+' findings · '+dateTime(s.completed_at||s.created_at)+'</div>':'');}
+function renderScans(){
+ if(!$('scanRows'))return;
+ $('scanCount').textContent=scanList.length;
+ $('scanRows').innerHTML=scanList.map(s=>'<tr><td><strong>#'+esc(s.scan_number)+'</strong></td><td>'+esc(s.repo_full_name)+'</td><td>'+esc(scanTargetText(s))+'</td>'
+  +'<td>'+(s.story_ref?'<span title="'+esc(s.story_title||'')+'">'+esc(s.story_ref)+'</span>':'<span class="tn-muted">—</span>')+'</td>'
+  +'<td>'+scanStatusBadge(s)+'</td><td>'+sevChips(s.summary)+'</td>'
+  // Times scanned: attempts of this scan (the same thing scanned again), like "Times run" of a test run.
+  +'<td data-sort="'+Number(s.times_scanned||1)+'">'+Number(s.times_scanned||1)+'</td>'
+  // Created: the first attempt. Last updated: the latest attempt (when it finished / started), by who started it.
+  +createdCell(s.first_created_by_name||s.created_by_name,s.first_created_at||s.created_at)
+  +updatedCell(s.created_by_name,s.completed_at||s.started_at||s.created_at,s.first_created_by_name||s.created_by_name,s.first_created_at||s.created_at)
+  +'<td><span class="tn-icon-actions">'+actionIcon('eye','data-scan-view="'+esc(s.id)+'"','View scan #'+s.scan_number)
+   +actionIcon('report','data-scan-report="'+esc(s.id)+'"','Report of scan #'+s.scan_number)
+   +(['PROJECT_MANAGER','QA'].includes(state.context?.projectRole)?actionIcon('scan','data-scan-again="'+esc(s.id)+'"','Scan again: scan #'+s.scan_number):'')+'</span></td></tr>').join('')
+  ||'<tr><td colspan="10" class="tn-empty">No code scans yet. Use + New scan, ⛶ on a repository (Source code tab), or ⛶ on a Code Intelligence story.</td></tr>';
+ // While a scan runs, refresh every few seconds (only while the Source code tab is open).
+ clearTimeout(scanPoll);
+ if(scanList.some(s=>SCAN_ACTIVE.includes(s.status))&&['source','scans'].includes(state.view))scanPoll=setTimeout(()=>{if(state.view==='source')loadRepos().catch(()=>{});else if(state.view==='scans')loadScansTab().catch(()=>{});},4000);
+}
+async function startScan(body,label){
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/scans',{method:'POST',body:JSON.stringify(body)});
+ notice('Scan #'+d.scan.scanNumber+(d.scan.attempt>1?' (attempt '+d.scan.attempt+')':'')+' started for '+label+'. Results appear in the Code scans tab.','success');
+ return d.scan;
+}
+// Story popup ⛶: scans the saved story (its Scan by and ticked checks). Needs the story to be saved first.
+function syncStoryScanButton(){
+ const b=$('storyScanCode');if(!b)return;
+ const saved=!!$('storyId')?.value;
+ // Always full colour like Edit / Play; when it cannot be used yet, clicking it says why.
+ b.disabled=false;
+ b.dataset.blocked=!ciEnabled?'Code scanning is not enabled on this server.':!saved?'Save the story first, then scan it.':'';
+ b.title=b.dataset.blocked||'Scan this story (its saved Scan by and ticked code checks)';
+}
+// A scan opens as its own page (like a test run): Projects › project › Code scans › Scan #N, with "Back to scans".
+async function openScan(id){state.scanId=id;show('scan');}
+async function loadScanPage(){
+ if(!state.scanId){show('scans','replace');return;}
+ $('scanFindingRows').innerHTML='<tr><td colspan="11" class="tn-empty">Loading scan…</td></tr>';
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/scans/'+encodeURIComponent(state.scanId));
+ const s=d.scan,atts=d.attempts||[];scanFindings=d.findings||[];currentScanId=s.id;scanAttemptList=atts;scanAttemptBase={target_type:s.target_type,target:s.target,provider:s.provider};
+ $('scanPageTitle').textContent='Scan #'+s.scan_number;
+ $('scanPageMeta').innerHTML=esc(s.repo_full_name)+' · '+esc(scanTargetText(s))+(s.story_ref?' · story '+esc(s.story_ref):'')+' · '+scanStatusBadge(s)+' · Times scanned: '+atts.length
+  +' · last by '+esc(s.created_by_name||'')+' · '+esc(dateTime(s.created_at))+(s.summary?.files?' · '+Number(s.summary.files)+' files':'');
+ const project=state.context?.project||{};
+ $('breadcrumb').innerHTML='<a href="/workspace.html#projects">Projects</a><span aria-hidden="true">›</span><a href="'+esc(projectRoute(state.projectId,'details'))+'">'+esc(project.name||'Project')+'</a><span aria-hidden="true">›</span><a href="'+esc(projectRoute(state.projectId,'scans'))+'">Code scans</a><span aria-hidden="true">›</span><span aria-current="page">Scan #'+esc(s.scan_number)+'</span>';
+ // One chip per check of the latest attempt: what was checked and how many found. Tool names are not shown.
+ $('scanJobs').innerHTML=(d.jobs||[]).map(j=>'<div class="tn-scan-job '+j.status.toLowerCase()+(j.status==='COMPLETED'&&Number(j.findings_count)>0?' has-findings':'')+'"><b>'+esc(CAT_LABELS[j.category]||j.category)+'</b> · '+esc(j.status==='COMPLETED'?j.findings_count+' found':j.status.toLowerCase())+(j.error?'<div class="tn-muted small">'+esc(hideToolNames(j.error))+'</div>':'')+'</div>').join('')
+  +(s.error?'<div class="tn-scan-job failed"><b>Note</b> '+esc(hideToolNames(s.error))+'</div>':'');
+ const q=document.querySelector('#view-scan .tn-table-query');if(q)q.value='';
+ closeAiDialog();
+ renderFindings();
+}
+// All findings go into the table; its standard search bar (column ▾ + 🔍) and paging filter them, like every other list.
+// Scanner names stay internal: any message that mentions them is shown with a neutral word instead.
+function hideToolNames(text){return String(text||'').replace(/\b(OpenGrep|Opengrep|opengrep|Trivy|trivy|Gitleaks|gitleaks|Betterleaks)\b/g,'The scanner');}
+// Priority (how soon to fix): starts equal to severity; QA / project manager can change it.
+// The options carry their text in "label" so the cell's text stays the chosen priority only (the table search reads it).
+const PRIORITIES=['CRITICAL','HIGH','MEDIUM','LOW'];
+const titleCaseWord=v=>String(v||'').charAt(0)+String(v||'').slice(1).toLowerCase();
+function priorityCell(f){
+ const canEdit=['PROJECT_MANAGER','QA'].includes(state.context?.projectRole);
+ const label='<span class="tn-sev tn-pri-'+f.priority.toLowerCase()+'">'+esc(titleCaseWord(f.priority))+'</span>';
+ const changed=f.priority_manual?'<div class="tn-muted small">changed</div>':'';
+ if(!canEdit)return label+changed;
+ const group=f.ids&&f.ids.length>1?' data-finding-group="'+esc(f.ids.join(','))+'"':'';
+ return '<span class="visually-hidden">'+esc(titleCaseWord(f.priority))+'</span><select class="form-select form-select-sm tn-priority-pick tn-pri-'+f.priority.toLowerCase()+'" data-finding-priority="'+esc(f.id)+'"'+group+' aria-label="Priority of '+esc(f.title)+'">'
+  +PRIORITIES.map(p=>'<option value="'+p+'" label="'+titleCaseWord(p)+'"'+(p===f.priority?' selected':'')+'></option>').join('')+'</select>'+changed;
+}
+document.addEventListener('change',async e=>{
+ const s=e.target.closest('[data-finding-priority]');if(!s)return;
+ // A grouped row changes the priority of every place of that problem.
+ const ids=(s.dataset.findingGroup||s.dataset.findingPriority).split(',');
+ const members=scanFindings.filter(x=>ids.includes(String(x.id)));if(!members.length)return;
+ const before=[...s.options].find(o=>o.defaultSelected)?.value||members[0].priority;s.disabled=true;
+ let done=0;
+ try{
+  for(const f of members){
+   await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/findings/'+encodeURIComponent(f.id)+'/priority',{method:'PATCH',body:JSON.stringify({priority:s.value})});
+   f.priority=s.value;f.priority_manual=true;done++;
+  }
+  notice('Priority changed to '+titleCaseWord(s.value)+(members.length>1?' in all '+members.length+' places':'')+' (severity stays '+titleCaseWord(members[0].severity)+').','success');
+ }catch(err){notice(err.message+(done?' ('+done+' of '+members.length+' places were changed.)':''));if(!done)s.value=before;}
+ finally{
+  const cell=s.closest('td');
+  if(cell){const g=groupFindings(members)[0];cell.innerHTML=priorityCell(g);}
+ }
+});
+// ---- One row per problem: the same problem (same category, title, CVE / CWE, package, severity) found in several
+// places is shown once, with "Found in N places" that opens the list of places inside the row. Every place is
+// still stored on its own; this only changes the display. Priority set on the row applies to every place.
+const PRIORITY_RANK={CRITICAL:4,HIGH:3,MEDIUM:2,LOW:1};
+function groupFindings(list){
+ const groups=new Map();
+ for(const f of list){
+  const key=[f.category,f.title,f.cve||'',f.cwe||'',f.package_name||'',f.severity].join('\u0001');
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(f);
+ }
+ return [...groups.values()].map(members=>{
+  const top=members.reduce((a,b)=>(PRIORITY_RANK[b.priority]||0)>(PRIORITY_RANK[a.priority]||0)?b:a);
+  const withAi=members.find(m=>m.has_ai);
+  const rep=withAi||members[0];
+  // Latest result of the problem: Fixed when every place is gone, Found when any place was found before too, else New.
+  const st=members.every(m=>m.scan_status==='FIXED')?'FIXED':members.some(m=>m.scan_status==='FOUND')?'FOUND':members.some(m=>m.scan_status==='NEW')?'NEW':'FOUND';
+  const history=(members[0].history||[]).map((h,i)=>({...h,result:members.some(m=>m.history?.[i]?.result==='FOUND')?'FOUND':members.some(m=>m.history?.[i]?.result==='NOT_FOUND')?'NOT_FOUND':'NOT_CHECKED'}));
+  return {...rep,members,ids:members.map(m=>m.id),priority:top.priority,priority_manual:members.some(m=>m.priority_manual),
+   has_ai:!!withAi,newCount:members.filter(m=>m.is_new).length,scan_status:st,history,
+   times_found:history.filter(h=>h.result==='FOUND').length||Math.max(...members.map(m=>m.times_found||1)),times_checked:history.filter(h=>h.result!=='NOT_CHECKED').length||1};
+ });
+}
+function placeText(m){return esc(m.file_path||'—')+(m.line?' <span class="tn-muted">: '+Number(m.line)+'</span>':'');}
+// Status: the problem's latest result (Found / New / Fixed), like a test case's Passed / Failed.
+const SCAN_RESULT={FOUND:['Found','fail'],NEW:['New','new'],FIXED:['Fixed','pass']};
+function scanResultTag(st){const x=SCAN_RESULT[st]||SCAN_RESULT.FOUND;return '<span class="tn-result '+x[1]+'">'+x[0]+'</span>';}
+// ---- Accept / Reject a problem (one decision for all its places). QA / project manager.
+// Not decided: ✓ Accept and ✗ Reject. Accepted: tag + ✗ to undo. Rejected: the row stays (greyed) with its reason + ✓ to undo.
+// Accept makes the task, assigned by the system to the team (worked in the Tasks tab, like a failed test case).
+function findingDecision(g){
+ if(g.members.some(m=>m.status==='CONFIRMED'))return 'ACCEPTED';
+ if(g.members.length&&g.members.every(m=>m.status==='FALSE_POSITIVE'))return 'REJECTED';
+ return '';
+}
+function decisionTitle(m){return m&&m.decided_by_name?' title="'+esc('By '+m.decided_by_name+(m.decided_at?' · '+dateTime(m.decided_at):''))+'"':'';}
+function findingActionCell(g,i){
+ const d=findingDecision(g),canEdit=['PROJECT_MANAGER','QA'].includes(state.context?.projectRole);
+ const ids=esc(g.ids.join(',')),name=g.title;
+ const m=g.members.find(x=>x.decided_by_name)||g.members[0];
+ const tag=d==='ACCEPTED'?'<span class="tn-tag success"'+decisionTitle(m)+'>ACCEPTED</span>':d==='REJECTED'?'<span class="tn-tag danger"'+decisionTitle(m)+'>REJECTED</span>':'';
+ const reason=d==='REJECTED'&&m.decision_reason?'<div class="tn-muted small tn-reject-reason">'+esc(m.decision_reason)+'</div>':'';
+ const icons=!canEdit?'':(d!=='ACCEPTED'?actionIcon('accept','data-accept-finding="'+ids+'"','Accept: '+name):'')+(d!=='REJECTED'?actionIcon('reject','data-reject-finding="'+ids+'"','Reject: '+name):'');
+ const eye=i==null?'':actionIcon('eye','data-open-problem="'+i+'"','Details and scan history of '+name);
+ return '<td class="tn-finding-actions"><span class="tn-icon-actions">'+eye+icons+'</span>'+(tag?'<div class="tn-decision-tag">'+tag+'</div>':'')+reason+'</td>';
+}
+async function sendFindingDecision(ids,decision,reason){
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/findings/decision',{method:'POST',body:JSON.stringify({findingIds:ids,decision,reason:reason||null,scanId:currentScanId})});
+ if(decision==='ACCEPT')notice('Accepted. '+(d.existing?'It already has task '+taskNo(d.task.task_number):'Task '+taskNo(d.task.task_number)+(d.ai?.written?' written by AI':'')+(d.task.assigned_to_name?' and assigned to '+d.task.assigned_to_name:''))+'. See it in Tasks.'+(d.ai&&!d.ai.written?' (Not written by AI: '+d.ai.note+')':''),'success');
+ else notice('Rejected.'+(d.task?' Task '+taskNo(d.task.task_number)+' is cancelled.':''),'success');
+ // Same row, new state (no reload of the whole popup).
+ const me=state.user?.name||state.user?.display_name||null;
+ for(const f of scanFindings)if(ids.includes(String(f.id))){f.status=decision==='ACCEPT'?'CONFIRMED':'FALSE_POSITIVE';f.decision_reason=decision==='REJECT'?reason:null;f.decided_by_name=me||f.decided_by_name;f.decided_at=new Date().toISOString();}
+ renderFindings();
+ try{state.tasks=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/work-items')).workItems||state.tasks;renderTasks();}catch{}
+}
+function closeRejectDialog(){const d=$('rejectDialog');if(d.open)d.close();}
+document.addEventListener('click',async e=>{
+ const acc=e.target.closest('[data-accept-finding]');
+ if(acc&&!acc.disabled){
+  acc.disabled=true;acc.classList.add('is-busy');
+  if(ciAiEnabled)notice('Accepting… the AI is writing the task.','info');
+  try{await sendFindingDecision(acc.dataset.acceptFinding.split(','),'ACCEPT');}catch(err){notice(err.message);acc.disabled=false;acc.classList.remove('is-busy');}
+  return;
+ }
+ const rej=e.target.closest('[data-reject-finding]');
+ if(rej){
+  const ids=rej.dataset.rejectFinding.split(','),f=scanFindings.find(x=>ids.includes(String(x.id)));
+  $('rejectDialogProblem').textContent=f?f.title:'';$('rejectReason').value='';$('rejectDialog').dataset.ids=ids.join(',');
+  $('rejectDialog').showModal();$('rejectReason').focus();
+  return;
+ }
+ if(e.target.closest('[data-reject-cancel]')||e.target===$('rejectDialog')){closeRejectDialog();return;}
+ const ok=e.target.closest('[data-reject-confirm]');
+ if(ok&&!ok.disabled){
+  const reason=$('rejectReason').value.trim();
+  if(reason.length<3){notice('Please write the reason.');$('rejectReason').focus();return;}
+  ok.disabled=true;
+  try{await sendFindingDecision($('rejectDialog').dataset.ids.split(','),'REJECT',reason);closeRejectDialog();}catch(err){notice(err.message);}
+  finally{ok.disabled=false;}
+ }
+});
+$('rejectDialog').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeRejectDialog();}});
+// Problems table, laid out like a run's Test cases table:
+//   Problem · Type · Severity · Priority · Status · Times found · Created · Last updated · AI · Actions
+// Created = the first attempt that found it; Last updated = the latest attempt that checked it (or the accept / reject
+// decision, if later). 👁 opens the problem (Details + Scan history), like a test case.
+function problemDates(g){
+ const h=g.history||[],first=h.find(x=>x.result==='FOUND'),last=[...h].reverse().find(x=>x.result!=='NOT_CHECKED');
+ const m=g.members.find(x=>x.decided_at);
+ let upd={by:last?.by,at:last?.created_at};
+ if(m&&(!upd.at||new Date(m.decided_at)>new Date(upd.at)))upd={by:m.decided_by_name,at:m.decided_at};
+ return {created:{by:first?.by,at:first?.created_at},updated:upd};
+}
+function placesShort(g){return g.members.length>1?'Found in '+g.members.length+' places':(g.file_path||'—')+(g.line?' : '+Number(g.line):'');}
+let scanGroups=[];
+function renderFindings(){
+ const groups=groupFindings(scanFindings);scanGroups=groups;
+ $('scanFindingRows').innerHTML=groups.map((g,i)=>{
+  const rowCls=[findingDecision(g)==='REJECTED'?'tn-finding-rejected':'',g.scan_status==='FIXED'?'tn-finding-fixed':''].filter(Boolean).join(' ');
+  const dt=problemDates(g);
+  return '<tr'+(rowCls?' class="'+rowCls+'"':'')+'><td><strong>'+esc(g.title)+'</strong><div class="tn-muted small">'+esc(placesShort(g))+(g.package_name?' · '+esc(g.package_name):'')+'</div></td>'
+  +'<td>'+esc(CAT_LABELS[g.category]||g.category)+'</td>'
+  +'<td data-sort="'+(5-(PRIORITY_RANK[g.severity]||0))+'"><span class="tn-sev tn-sev-'+g.severity.toLowerCase()+'">'+esc(titleCaseWord(g.severity))+'</span></td>'
+  +'<td>'+priorityCell(g)+'</td>'
+  +'<td>'+scanResultTag(g.scan_status)+'</td>'
+  +'<td data-sort="'+Number(g.times_found||1)+'">'+Number(g.times_found||1)+'</td>'
+  +createdCell(dt.created.by,dt.created.at)+updatedCell(dt.updated.by,dt.updated.at,dt.created.by,dt.created.at)
+  // "Ask AI" until asked, then the dark blue ✦ (one answer for the whole row).
+  +'<td>'+(ciAiEnabled?aiButton(g):'<span class="tn-muted small">—</span>')+'</td>'
+  +findingActionCell(g,i)+'</tr>';
+ }).join('')
+  ||'<tr><td colspan="10" class="tn-empty">No findings in this scan.</td></tr>';
+ if($('scanProblemsCount'))$('scanProblemsCount').textContent=groups.length;
+ $('scanPlacesNote').textContent=groups.length?groups.length+' problem'+(groups.length===1?'':'s')+' in '+scanFindings.length+' place'+(scanFindings.length===1?'':'s')+'. The same problem in several places is shown once: 👁 shows where, and its scan history.':'';
+ const pv=$('problemViewer');if(pv?.open&&pv.dataset.key){const j=scanGroups.findIndex(x=>x.ids.join(',')===pv.dataset.key);if(j>=0)openProblem(j,true);}
+}
+// ---- Problem view (👁): like a test case's view — Details tab and Scan history tab ----
+function showProblemTab(name){for(const b of document.querySelectorAll('[data-problem-tab]')){const on=b.dataset.problemTab===name;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;$('problemPanel'+b.dataset.problemTab).hidden=!on;}}
+function openProblem(i,keepTab){
+ const g=scanGroups[i];if(!g)return;
+ const v=$('problemViewer');v.dataset.key=g.ids.join(',');
+ const versions=[...new Set(g.members.map(m=>m.installed_version).filter(Boolean))];
+ const d=findingDecision(g),m=g.members.find(x=>x.decided_by_name)||g.members[0];
+ $('problemViewerTitle').innerHTML='<span class="tn-sev tn-sev-'+esc(g.severity.toLowerCase())+'">'+esc(titleCaseWord(g.severity))+'</span> '+esc(g.title);
+ $('problemViewerMeta').textContent=['Code Intelligence',CAT_LABELS[g.category]||g.category,titleCaseWord(g.priority)+' priority','Scan #'+($('scanPageTitle').textContent.replace(/\D/g,''))].filter(Boolean).join(' · ');
+ const places=[...g.members].sort((a,b)=>String(a.file_path).localeCompare(String(b.file_path))||(a.line||0)-(b.line||0)).map(x=>'<li>'+placeText(x)+(x.installed_version&&g.package_name?' <span class="tn-muted">· '+esc(x.installed_version)+'</span>':'')+(x.scan_status==='FIXED'?' <span class="tn-hist-not_found">· fixed</span>':'')+'</li>').join('');
+ $('problemPanelDetails').innerHTML='<div class="tn-case-status">'
+  +'<span>Status</span><div>'+scanResultTag(g.scan_status)+'</div>'
+  +'<span>Times found</span><div>'+Number(g.times_found||1)+' of '+Number(g.times_checked||1)+'</div>'
+  +'<span>Decision</span><div>'+(d==='ACCEPTED'?'<span class="tn-tag success">ACCEPTED</span>':d==='REJECTED'?'<span class="tn-tag danger">REJECTED</span>':'<span class="tn-muted">Not decided</span>')+(d&&m.decided_by_name?' <span class="tn-muted">'+esc(m.decided_by_name)+(m.decided_at?' · '+esc(dateTime(m.decided_at)):'')+'</span>':'')+(d==='REJECTED'&&m.decision_reason?'<div class="tn-muted small">'+esc(m.decision_reason)+'</div>':'')+'</div>'
+  +'</div>'
+  +'<div class="tn-task-grid tn-problem-grid">'
+  +'<span>Category</span><span>Code Intelligence</span><span>Type</span><span>'+esc(CAT_LABELS[g.category]||g.category)+'</span>'
+  +'<span>Severity</span><span>'+esc(titleCaseWord(g.severity))+'</span><span>Priority</span><span>'+priorityTag(g.priority)+'</span>'
+  +'<span>Package / fix</span><span>'+(g.package_name?esc(g.package_name+(versions.length?' '+versions.join(', '):''))+(g.fixed_version?' · fix: '+esc(g.fixed_version):''):'—')+'</span>'
+  +'<span>CWE / CVE</span><span>'+esc([g.cwe,g.cve].filter(Boolean).join(' · ')||'—')+'</span>'
+  +'<span>AI</span><span>'+(ciAiEnabled?aiButton(g):'<span class="tn-muted">AI is not enabled</span>')+'</span>'
+  +'</div>'
+  +'<h4 class="tn-code-todo-k">Where ('+g.members.length+' place'+(g.members.length===1?'':'s')+')</h4><ul class="tn-problem-places">'+places+'</ul>'
+  +(g.message?'<details class="tn-task-steps"><summary>Scanner details</summary><p class="tn-code-scanner-text">'+esc(g.message)+'</p></details>':'');
+ const hist=[...(g.history||[])].reverse();
+ const word={FOUND:['Found','fail'],NOT_FOUND:['Not found','pass'],NOT_CHECKED:['Not checked','']};
+ $('problemHistoryCount').textContent=hist.length;
+ const scan=scanAttemptList.length?scanAttemptList:[];
+ $('problemHistoryBody').innerHTML=hist.map(h=>{const a=scan.find(x=>x.attempt===h.attempt)||{};const w=word[h.result];
+  return '<tr><td><strong>'+esc(attemptLabel(h.attempt))+'</strong></td><td>'+esc(scanTargetText({...scanAttemptBase,commit_sha:h.commit_sha||a.commit_sha}))+'</td><td>'+(w[1]?'<span class="tn-result '+w[1]+'">'+w[0]+'</span>':'<span class="tn-muted">'+w[0]+'</span>')+'</td>'+createdCell(h.by||a.created_by_name,h.created_at)+'</tr>';}).join('')
+  ||'<tr><td colspan="4" class="tn-empty">No scan history.</td></tr>';
+ if(!keepTab)showProblemTab('Details');
+ if(!v.open)v.showModal();
+}
+let scanAttemptBase={};
+document.addEventListener('click',e=>{
+ const o=e.target.closest('[data-open-problem]');if(o){openProblem(Number(o.dataset.openProblem));return;}
+ const t=e.target.closest('[data-problem-tab]');if(t){showProblemTab(t.dataset.problemTab);return;}
+ const v=$('problemViewer');if(v?.open&&(e.target.closest('[data-close-problem]')||e.target===v))v.close();
+});
+// ---- Download report: the scan's summary and every problem with its latest result (an HTML file, like the AI report) ----
+function scanReportHtml(d){
+ const sc=d.scan,groups=groupFindings(d.findings||[]),project=state.context?.project||{};
+ const title='Scan #'+sc.scan_number,meta=[sc.repo_full_name,scanTargetText(sc),sc.story_ref?'story '+sc.story_ref:'',titleCaseWord(sc.status),'Times scanned: '+(d.attempts||[]).length,'last by '+(sc.created_by_name||'')+' · '+dateTime(sc.created_at)].filter(Boolean).join(' · ');
+ const count=k=>groups.filter(g=>g.scan_status===k).length,sev=k=>groups.filter(g=>g.severity===k).length;
+ const rows=groups.map(g=>{const d=findingDecision(g);return '<tr><td>'+esc(titleCaseWord(g.severity))+'</td><td>'+esc(CAT_LABELS[g.category]||g.category)+'</td><td><b>'+esc(g.title)+'</b><div class="m">'+esc(placesShort(g))+'</div></td><td>'+esc(SCAN_RESULT[g.scan_status]?.[0]||'Found')+'</td><td>'+Number(g.times_found||1)+' of '+Number(g.times_checked||1)+'</td><td>'+(g.package_name?esc(g.package_name)+(g.fixed_version?'<div class="m">fix: '+esc(g.fixed_version)+'</div>':''):'—')+'</td><td>'+esc([g.cwe,g.cve].filter(Boolean).join(' · ')||'—')+'</td><td>'+(d?esc(titleCaseWord(d)):'—')+'</td></tr>';}).join('');
+ return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' report</title><style>body{font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a;margin:24px;padding-top:28px}h1{font-size:20px;margin:0 0 4px}.m{color:#64748b;font-size:12px}table{border-collapse:collapse;width:100%;margin-top:14px;font-size:13px}th,td{border-bottom:1px solid #e2e8f0;padding:7px 8px;text-align:left;vertical-align:top}th{background:#f8fafc;font-size:12px;color:#475569}.sum{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.sum div{border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px}</style></head><body>'
+  +'<h1>'+esc(title)+' · '+esc(project.name||'')+'</h1><div class="m">'+esc(meta)+'</div><div class="m">Report created '+esc(dateTime(new Date().toISOString()))+'</div>'
+  +'<div class="sum"><div><b>'+groups.length+'</b> problems</div><div><b>'+count('FOUND')+'</b> found</div><div><b>'+count('NEW')+'</b> new</div><div><b>'+count('FIXED')+'</b> fixed</div><div>Critical '+sev('CRITICAL')+' · High '+sev('HIGH')+' · Medium '+sev('MEDIUM')+' · Low '+sev('LOW')+'</div></div>'
+  +'<table><thead><tr><th>Severity</th><th>Type</th><th>Problem</th><th>Status</th><th>Times found</th><th>Package / fix</th><th>CWE / CVE</th><th>Decision</th></tr></thead><tbody>'+rows+'</tbody></table></body></html>';
+}
+// Code scans list → 📄: the report opens in a new tab with Download at the top right (same as the run reports).
+// If the browser blocks new tabs, the file is downloaded instead.
+function showScanReport(d,tab){
+ const html=scanReportHtml(d),name='Scan-'+d.scan.scan_number+'-report-'+String(state.context?.project?.reference_no||'project').replace(/[^\w-]+/g,'_')+'.html';
+ if(tab&&!tab.closed){
+  const data='data:text/html;charset=utf-8;base64,'+btoa(unescape(encodeURIComponent(html)));
+  const bar='<div style="position:fixed;top:18px;right:18px;z-index:99"><a href="'+data+'" download="'+esc(name)+'" style="display:inline-block;padding:8px 14px;border-radius:9px;background:#0f1f5c;color:#fff;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(15,23,42,.25)">Download</a></div>';
+  const page=html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="script-src \'none\'">').replace(/<body([^>]*)>/,'<body$1>'+bar);
+  tab.location.href=URL.createObjectURL(new Blob([page],{type:'text/html'}));return;
+ }
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download=name;
+ document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+}
+document.addEventListener('click',async e=>{
+ const rep=e.target.closest('[data-scan-report]');
+ if(rep&&!rep.disabled){rep.disabled=true;const tab=reportTab();try{showScanReport(await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/scans/'+encodeURIComponent(rep.dataset.scanReport)),tab);}catch(err){if(tab&&!tab.closed)tab.close();notice(err.message);}finally{rep.disabled=false;}return;}
+ // Code scans list → scan icon: the same scan again (its next attempt), like ▶ re-run on a test run.
+ const again=e.target.closest('[data-scan-again]');
+ if(again&&!again.disabled){again.disabled=true;try{const row=scanList.find(x=>String(x.id)===again.dataset.scanAgain);await startScan({scanId:again.dataset.scanAgain},'scan #'+(row?.scan_number||''));await loadScansTab();}catch(err){notice(err.message);}finally{again.disabled=false;}}
+});
+// ---- AI on demand: explain one finding (meaning · real risk? · suggested priority · fix), shown as "AI · unverified" ----
+// The same AI sparkle icon used on the AI buttons (Runs & reports, findings).
+const AI_ICON='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+iconPaths.ai+'</svg>';
+const AI_RISK={LIKELY_REAL:['Likely real','real'],POSSIBLE:['Possible','possible'],LIKELY_FALSE_POSITIVE:['Likely false alarm','false']};
+function aiCodeBlock(snippet,start,focusLine){
+ if(!snippet)return '<div class="tn-muted small">No code lines for this finding (e.g. a package finding).</div>';
+ return '<pre class="tn-ai-code">'+String(snippet).split('\n').map((l,i)=>{const n=(start||1)+i;return '<span class="'+(n===focusLine?'hl':'')+'">'+String(n).padStart(4)+' | '+esc(l)+'</span>';}).join('')+'</pre>';
+}
+// AI column: "Ask AI" text button until the AI has answered for this finding, then the dark blue ✦ icon.
+function aiButton(f){
+ if(f.has_ai)return '<span class="tn-icon-actions tn-ai-cell">'+actionIcon('ai','data-finding-ai="'+esc(f.id)+'"','Show the AI explanation of '+f.title)+'</span>';
+ const t='Explain with AI: '+f.title;
+ return '<span class="tn-ai-cell"><button type="button" class="tn-ai-ask" data-finding-ai="'+esc(f.id)+'" title="'+esc(t)+'" aria-label="'+esc(t)+'">'+AI_ICON+'<span>Ask AI</span></button></span>';
+}
+// Header of an AI answer. In the new tab there is no close button (the user closes the tab).
+function aiHead(f,extra,inTab){
+ return '<div class="tn-ai-head"><b class="tn-ai-title" id="aiDialogTitle">'+AI_ICON+' AI explanation</b>'+(extra||'')
+  +(inTab?'':'<button type="button" class="btn-close ms-auto" data-ai-close aria-label="Close AI explanation"></button>')+'</div>';
+}
+function aiAnswerHtml(f,r,inTab){
+ const risk=AI_RISK[r.realRisk]||AI_RISK.POSSIBLE;
+ return aiHead(f,'<span class="tn-ai-badge">AI · unverified</span><span class="tn-muted small">'+esc(f.title)+' · '+esc(f.file_path||'')+(f.line?' : '+Number(f.line):'')+'</span>',inTab)
+  +'<div class="tn-ai-grid"><div>'
+  +'<div class="tn-ai-k">What it means</div><div>'+esc(r.meaning)+'</div>'
+  +'<div class="tn-ai-k">Real risk?</div><div><span class="tn-ai-risk '+risk[1]+'">'+risk[0]+'</span> '+esc(r.riskReason||'')+'</div>'
+  +'<div class="tn-ai-k">Suggested priority</div><div><span class="tn-sev tn-pri-'+String(r.suggestedPriority).toLowerCase()+'">'+esc(titleCaseWord(r.suggestedPriority))+'</span> <span class="tn-muted small">(current: '+esc(titleCaseWord(f.priority))+'; change it in the Priority column if you agree)</span></div>'
+  +'<div class="tn-ai-k">How to fix</div><div>'+esc(r.fix||'—')+'</div>'
+  +'</div><div>'
+  +'<div class="tn-ai-k" style="margin-top:0">Code around the finding (secrets masked)</div>'+aiCodeBlock(r.snippet,r.snippetStart,f.line)
+  +(r.fixCode?'<div class="tn-ai-k">Suggested code</div><pre class="tn-ai-code fix">'+esc(r.fixCode)+'</pre>':'')
+  +'<div class="tn-muted small mt-2">'+(r.cached?'Saved answer':'New answer')+(r.createdBy?' · asked by '+esc(r.createdBy):'')+(r.createdAt?' · '+esc(dateTime(r.createdAt)):'')+' · <button type="button" class="tn-link-btn" data-ai-refresh="'+esc(f.id)+'">Ask again</button></div>'
+  +'</div></div>';
+}
+// ---- The AI answer opens in its own browser tab (like the AI report in Runs & reports), with a Download button.
+// The tab is opened at once on the click (so the browser allows it) and filled when the answer arrives.
+// If the browser blocks new tabs, the answer shows in the popup instead.
+const AI_TAB_CSS='*{box-sizing:border-box}body{margin:0;background:#f5f8ff;color:#0f172a;font:14px/1.55 Inter,"Segoe UI",system-ui,sans-serif}'
+ +'main{max-width:1180px;margin:0 auto;padding:26px 22px 80px}.brand{font-weight:700;color:#0f1f5c;font-size:13px;letter-spacing:.02em;margin-bottom:14px}'
+ +'.tn-ai-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:12px;margin-bottom:6px;border-bottom:1px solid #c7d2fe}'
+ +'.tn-ai-title{display:inline-flex;align-items:center;gap:6px;color:#0f1f5c;font-size:18px}.tn-ai-title svg{width:18px;height:18px}'
+ +'.tn-ai-badge{font-size:10.5px;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:99px;padding:1px 8px}'
+ +'.tn-muted{color:#64748b}.small{font-size:12.5px}.tn-ai-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:22px}'
+ +'@media(max-width:820px){.tn-ai-grid{grid-template-columns:1fr}}'
+ +'.tn-ai-k{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#64748b;margin:12px 0 3px}'
+ +'.tn-ai-risk,.tn-sev{display:inline-block;font-size:11.5px;font-weight:700;border-radius:99px;padding:1px 9px;margin-right:4px;border:1px solid transparent}'
+ +'.tn-ai-risk.real{background:#fef2f2;color:#b91c1c}.tn-ai-risk.possible{background:#fffbeb;color:#b45309}.tn-ai-risk.false{background:#f0fdf4;color:#15803d}'
+ +'.tn-pri-critical{background:#fef2f2;color:#b91c1c;border-color:#fecaca}.tn-pri-high{background:#fff7ed;color:#c2410c;border-color:#fed7aa}'
+ +'.tn-pri-medium{background:#eef2ff;color:#1d4ed8;border-color:#c7d2fe}.tn-pri-low{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}'
+ +'.tn-ai-code{font:12.5px/1.55 ui-monospace,Consolas,monospace;background:#0f172a;color:#e2e8f0;border-radius:9px;padding:9px 0;margin:0;white-space:pre;overflow-x:auto}'
+ +'.tn-ai-code span{display:block;padding:0 12px}.tn-ai-code span.hl{background:#7f1d1d}.tn-ai-code.fix{padding:9px 12px;background:#14532d}'
+ +'.mt-2{margin-top:10px}.tn-link-btn{border:0;background:none;padding:0;color:#1d4ed8;font:inherit;text-decoration:underline;cursor:pointer}'
+ +'.alert{border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:10px;padding:12px 14px;margin-top:12px}'
+ +'.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.topbar .brand{margin:0}'
+ +'.dl{padding:8px 14px;border-radius:9px;background:#0f1f5c;color:#fff;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(15,23,42,.25)}';
+function writeAiTab(tab,f,inner,done){
+ const project=state.context?.project||{};
+ const page=(extraHead,bar)=>'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc('AI explanation · '+f.title)+'</title><style>'+AI_TAB_CSS+'</style>'+extraHead+'</head><body><main><div class="topbar"><div class="brand">TestNexus · '+esc(project.name||'')+'</div>'+bar+'</div>'+inner+'</main></body></html>';
+ let bar='';
+ if(done){
+  // The downloaded copy is a plain page: no "Ask again" (it only works inside TestNexus).
+  const copy=page('<style>[data-ai-refresh]{display:none}</style>','');
+  const name='AI-explanation-'+String(f.title||'finding').replace(/[^\w]+/g,'-').slice(0,60)+'-'+String(project.reference_no||'project').replace(/[^\w-]+/g,'_')+'.html';
+  bar='<a class="dl" href="data:text/html;charset=utf-8;base64,'+btoa(unescape(encodeURIComponent(copy)))+'" download="'+esc(name)+'">Download</a>';
+ }
+ tab.document.open();tab.document.write(page('',bar));tab.document.close();
+ // "Ask again" in the tab asks the AI again and refreshes the same tab.
+ tab.document.addEventListener('click',e=>{const r=e.target.closest('[data-ai-refresh]');if(r){e.preventDefault();explainFinding(r.dataset.aiRefresh,true,tab);}});
+}
+function renderAiPanel(f,r){$('scanAiPanel').innerHTML=aiAnswerHtml(f,r,false);openAiDialog();}
+function openAiDialog(){const d=$('aiDialog');if(!d.open)d.showModal();}
+function closeAiDialog(){const d=$('aiDialog');if(d.open)d.close();$('scanAiPanel').innerHTML='';}
+// Esc closes only the AI popup, not the findings popup under it.
+$('aiDialog').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeAiDialog();}});
+$('aiDialog').addEventListener('click',e=>{if(e.target===$('aiDialog'))closeAiDialog();});
+// "Back to scans" on the scan page. Opened from a task ("Scan results ↗"): goes back to that task in Tasks.
+let scanReturnTask=null;
+$('scanPageBack').addEventListener('click',async()=>{
+ closeAiDialog();
+ const id=scanReturnTask;scanReturnTask=null;
+ if(!id){show('scans');return;}
+ show('tasks');try{await openTask(id);}catch(err){notice(err.message);}
+});
+async function explainFinding(id,refresh,tab){
+ const f=scanFindings.find(x=>String(x.id)===String(id));if(!f)return;
+ if(!tab||tab.closed)tab=window.open('','_blank');
+ const inTab=()=>tab&&!tab.closed;
+ const btns=[...document.querySelectorAll('[data-finding-ai="'+id+'"]')];btns.forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true');b.title='Asking AI…';});
+ const asking=aiHead(f,'<span class="tn-muted small">Asking the AI about '+esc(f.title)+'…</span>',!!tab);
+ if(inTab())writeAiTab(tab,f,asking,false);else{$('scanAiPanel').innerHTML=asking;openAiDialog();}
+ try{
+  const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/findings/'+encodeURIComponent(id)+'/explain'+(refresh?'?refresh=1':''),{method:'POST',body:'{}'});
+  f.has_ai=true;
+  if(inTab())writeAiTab(tab,f,aiAnswerHtml(f,d.review,true),true);else if(!tab)renderAiPanel(f,d.review);
+ }catch(err){
+  const html=aiHead(f,'',!!tab)+'<div class="alert alert-danger mb-0">'+esc(err.message)+'</div>';
+  if(inTab())writeAiTab(tab,f,html,false);else if(!tab){$('scanAiPanel').innerHTML=html;openAiDialog();}
+ }
+ finally{btns.forEach(b=>{const cell=b.closest('.tn-ai-cell');if(cell)cell.outerHTML=aiButton(f);else{b.disabled=false;b.removeAttribute('aria-busy');}});}
+}
+document.addEventListener('click',e=>{
+ const b=e.target.closest('[data-finding-ai]');if(b){explainFinding(b.dataset.findingAi,false);return;}
+ const r=e.target.closest('[data-ai-refresh]');if(r){explainFinding(r.dataset.aiRefresh,true);return;}
+ if(e.target.closest('[data-ai-close]'))closeAiDialog();
+});
+document.addEventListener('click',async e=>{
+ const view=e.target.closest('[data-scan-view]');
+ if(view){try{await openScan(view.dataset.scanView);}catch(err){notice(err.message);}return;}
+ const repoScan=e.target.closest('[data-repo-scan]');
+ if(repoScan&&!repoScan.disabled){
+  if(repoScan.dataset.blocked){notice(repoScan.dataset.blocked);return;}
+  const r=repoList.find(x=>String(x.id)===String(repoScan.dataset.repoScan));if(!r)return;
+  repoScan.disabled=true;
+  try{await startScan({repositoryId:r.id},r.repo_full_name+' ('+(r.default_branch||'main')+')');await loadRepos();}catch(err){notice(err.message);repoScan.disabled=false;}
+  return;
+ }
+ // Code-problem task (Tasks tab): scan again what its scan scanned, to check the fix. Same as a code story's scan icon.
+ const scanTask=e.target.closest('[data-scan-task]');
+ if(scanTask&&!scanTask.disabled){
+  scanTask.disabled=true;
+  const t=(state.tasks||[]).find(x=>String(x.id)===scanTask.dataset.scanTask);
+  try{await startScan({taskId:scanTask.dataset.scanTask},'task '+(t?taskNo(t.task_number):''));show('scans');}
+  catch(err){notice(err.message);}
+  finally{scanTask.disabled=false;}
+  return;
+ }
+ const scanStory=e.target.closest('[data-scan-story]');
+ if(scanStory&&!scanStory.disabled){
+  scanStory.disabled=true;
+  const story=(state.context?.stories||[]).find(s=>String(s.id)===scanStory.dataset.scanStory);
+  try{await startScan({storyId:scanStory.dataset.scanStory},'story '+(story?.reference_no||story?.title||''));show('scans');}
+  catch(err){notice(err.message);}
+  finally{scanStory.disabled=false;}
+  return;
+ }
+ if(e.target.closest('#storyScanCode')&&!$('storyScanCode').disabled){
+  const b=$('storyScanCode');
+  if(b.dataset.blocked){$('storyBranchHint').textContent=b.dataset.blocked;return;}
+  b.disabled=true;
+  try{const s=await startScan({storyId:$('storyId').value},'this story');$('storyBranchHint').textContent='Scan #'+s.scanNumber+' started. See the Code scans tab.';}
+  catch(err){$('storyBranchHint').textContent=err.message;}
+  finally{syncStoryScanButton();}
+ }
+});
+// ---- Code scans tab: the scan list and "+ New scan" (repository, branch / pull request / commit, checks) ----
+async function loadScansTab(){
+ const role=state.context?.projectRole,canEdit=['PROJECT_MANAGER','QA'].includes(role);
+ const [d]=await Promise.all([api('/api/projects/'+encodeURIComponent(requireProject())+'/repositories'),loadCodeStatus(),fetchScans()]);
+ repoList=d.repositories||[];
+ const b=$('scanCreate');b.hidden=!canEdit;b.disabled=false;
+ b.dataset.blocked=!ciEnabled?'Code scanning is not enabled on this server.':!repoList.length?'Add a repository in the Source code tab first.':'';
+ b.title=b.dataset.blocked||'Start a scan';
+}
+function newScanError(m){const el=$('newScanError');el.textContent=m||'';el.classList.toggle('d-none',!m);}
+async function loadNewScanTargets(){
+ const repoId=$('newScanRepo').value,type=$('newScanType').value,input=$('newScanTarget'),hint=$('newScanHint');
+ const repo=repoList.find(r=>String(r.id)===String(repoId));if(!repo)return;
+ hint.textContent='Loading…';input.disabled=true;
+ try{
+  const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/repository-targets?type='+type+'&repoId='+encodeURIComponent(repoId));
+  if(type!==$('newScanType').value||repoId!==$('newScanRepo').value)return; // changed while loading
+  input.disabled=false;
+  window.TNPick.attach(input,d.items,{value:type==='BRANCH'?(repo.default_branch||d.defaultBranch):'',showAllOnOpen:true});
+  if(type!=='BRANCH'){input.value='';input.dataset.value='';}
+  const openList=input.closest('.tn-pick')?.querySelector('.tn-pick-list');if(openList)openList.hidden=true;
+  const pr=prWords(repo.provider);setPrOption($('newScanType'),repo.provider);
+  input.placeholder=type==='PULL_REQUEST'?'Search '+pr.one:type==='COMMIT'?'Search commit':'Search branch';
+  hint.textContent=type==='BRANCH'?'Default branch '+(repo.default_branch||'main')+' = the whole repository as it is now.':type==='PULL_REQUEST'?pr.Many+', open first.':'Recent commits of the default branch.';
+ }catch(err){hint.textContent=err.message;}
+}
+document.addEventListener('click',e=>{
+ if(!e.target.closest('#scanCreate'))return;
+ if($('scanCreate').dataset.blocked){notice($('scanCreate').dataset.blocked);return;}
+ $('newScanForm').reset();newScanError('');
+ $('newScanRepo').innerHTML=repoList.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.repo_full_name)+'</option>').join('');
+ $('newScanType').value='BRANCH';
+ bootstrap.Modal.getOrCreateInstance($('newScanModal')).show();
+ loadNewScanTargets();
+});
+document.addEventListener('change',e=>{if(e.target.id==='newScanRepo'||e.target.id==='newScanType')loadNewScanTargets();});
+document.addEventListener('submit',async e=>{
+ if(e.target.id!=='newScanForm')return;e.preventDefault();newScanError('');
+ const type=$('newScanType').value,target=window.TNPick.value($('newScanTarget'));
+ const checks=[...document.querySelectorAll('input[name="newScanCheck"]:checked')].map(c=>c.value);
+ const prRepo=repoList.find(r=>String(r.id)===String($('newScanRepo').value));
+ if(target===null||(!target&&type!=='BRANCH')){newScanError('Choose a '+(type==='PULL_REQUEST'?prWords(prRepo?.provider).one:type==='COMMIT'?'commit':'branch')+' from the list.');return;}
+ if(!checks.length){newScanError('Tick at least one check.');return;}
+ const repo=repoList.find(r=>String(r.id)===String($('newScanRepo').value));
+ const btn=$('newScanStart');btn.disabled=true;btn.title='Starting…';
+ try{
+  await startScan({repositoryId:repo.id,targetType:type,target:target||repo.default_branch||'main',checks},repo.repo_full_name);
+  bootstrap.Modal.getOrCreateInstance($('newScanModal')).hide();
+  await loadScansTab();
+ }catch(err){newScanError(err.message);}finally{btn.disabled=false;btn.title='Start scan';}
 });
 // AI learning tab: Local (this project's learnings) or Global (shared by all projects).
 function renderLearning(list){
@@ -279,7 +842,7 @@ function personCell(name,when){
  return '<span class="tn-who">'+(name?esc(name):'<span class="tn-muted">Not recorded</span>')+'</span><div class="tn-when">'+esc(dateTime(when))+'</div>';
 }
 function statusTag(s){const x=String(s||'PENDING');const c=x==='COMPLETED'?'success':x==='ON_HOLD'?'warn':x==='PENDING'?'':'danger';return '<span class="tn-tag '+c+'">'+esc(x.replaceAll('_',' '))+'</span>';}
-const detailViews=new Set(['details','stories','inventory','audit','learning','executions','tasks','team','attachments','environments','run']);
+const detailViews=new Set(['details','stories','inventory','audit','learning','executions','tasks','team','attachments','environments','source','scans','scan','run']);
 const regularViews=new Set(['overview','projects','reports','users','teams']);
 function show(view,historyMode='push'){
  if(!regularViews.has(view)&&!detailViews.has(view))view='projects';
@@ -290,13 +853,13 @@ function show(view,historyMode='push'){
  $('projectDetailTabs').classList.toggle('d-none',!inDetails);
  document.querySelectorAll('[data-view]').forEach(el=>{
   const tab=!!el.closest('#projectDetailTabs');
-  const active=el.dataset.view===view||(view==='run'&&el.dataset.view==='executions')||(!tab&&inDetails&&el.dataset.view==='projects'&&!!el.closest('.tn-top'));
+  const active=el.dataset.view===view||(view==='run'&&el.dataset.view==='executions')||(view==='scan'&&el.dataset.view==='scans')||(!tab&&inDetails&&el.dataset.view==='projects'&&!!el.closest('.tn-top'));
   el.classList.toggle('active',active);
   if(tab){el.setAttribute('aria-selected',String(active));el.tabIndex=active?0:-1;}
   else if(active)el.setAttribute('aria-current','page');
   else el.removeAttribute('aria-current');
  });
- const labels={teams:'Teams',run:'Run details',environments:'Project environments',overview:'Home',projects:'Projects',users:'Administration',details:'Project context & scope',stories:'Project stories',tasks:'Project tasks',reports:'Test reports & evidence',executions:'Project runs & reports',inventory:'Project test cases',audit:'Project audit',learning:'Project AI learning',team:'Project team',attachments:'Project attachments'};
+ const labels={teams:'Teams',run:'Run details',scan:'Scan details',environments:'Project environments',source:'Project source code',scans:'Project code scans',overview:'Home',projects:'Projects',users:'Administration',details:'Project context & scope',stories:'Project stories',tasks:'Project tasks',reports:'Test reports & evidence',executions:'Project runs & reports',inventory:'Project test cases',audit:'Project audit',learning:'Project AI learning',team:'Project team',attachments:'Project attachments'};
  const project=state.context?.project;
  if(inDetails&&project){
   // Project pages: the project's name is the title, with its key facts underneath.
@@ -319,15 +882,17 @@ function show(view,historyMode='push'){
  clearNotice();
  if((view==='inventory'||view==='audit'||view==='learning')&&state.projectId)loadInventory().catch(e=>notice(e.message));
  if(view==='users')loadUsers().catch(e=>notice(e.message));
- if(view==='details'&&state.projectId)loadRepos().catch(()=>{});
+ if(view==='source'&&state.projectId)loadRepos().catch(()=>{});
+ if(view==='scans'&&state.projectId)loadScansTab().catch(()=>{});
  if(view==='team'&&state.projectId)loadTeams().catch(e=>notice(e.message));
  if(view==='teams')loadCompanyTeams().catch(e=>notice(e.message));
  if(view==='environments'&&state.projectId)loadEnvironments().catch(e=>notice(e.message));
  if(view==='run'&&state.projectId)loadRunPage().catch(e=>notice(e.message));
+ if(view==='scan'&&state.projectId)loadScanPage().catch(e=>notice(e.message));
  const startCardShown=view==='details'&&$('projectStartCard')&&!$('projectStartCard').hidden;
  // Start Testing lives only on Context & scope (its card there); the header button is a fallback for when that card is hidden.
  for(const el of document.querySelectorAll('.tn-page-actions [data-start-project]'))el.hidden=view!=='details'||startCardShown;
- const path=inDetails?(view==='run'&&state.runId?'/workspace.html?projectId='+encodeURIComponent(state.projectId)+'&runId='+encodeURIComponent(state.runId)+'#run':projectRoute(state.projectId,view)):'/workspace.html#'+view;
+ const path=inDetails?(view==='run'&&state.runId?'/workspace.html?projectId='+encodeURIComponent(state.projectId)+'&runId='+encodeURIComponent(state.runId)+'#run':view==='scan'&&state.scanId?'/workspace.html?projectId='+encodeURIComponent(state.projectId)+'&scanId='+encodeURIComponent(state.scanId)+'#scan':projectRoute(state.projectId,view)):'/workspace.html#'+view;
  if(historyMode!=='none'&&window.location.pathname+window.location.search+window.location.hash!==path){
   if(historyMode==='replace')window.history.replaceState(null,'',path);
   else window.history.pushState(null,'',path);
@@ -348,6 +913,7 @@ async function openProject(id,section='details',historyMode='push'){
 async function routeFromUrl(){
  const requested=new URLSearchParams(window.location.search).get('projectId');
  state.runId=new URLSearchParams(window.location.search).get('runId')||state.runId||'';
+ state.scanId=new URLSearchParams(window.location.search).get('scanId')||state.scanId||'';
  const fragment=window.location.hash.replace('#','');
  const view=fragment||(requested?'details':'projects');
  if(detailViews.has(view)||requested&&(!fragment||fragment==='details')){
@@ -435,12 +1001,92 @@ function renderOverview(){
 }
 function renderStoryList(){
  const c=state.context;
- $('storyList').innerHTML=c.stories.map(x=>'<tr><td><strong>'+esc(x.title)+'</strong><div class="tn-muted">'+esc(x.reference_no||'')+'</div></td><td data-sort="'+Number(x.story_points||0)+'">'+(x.story_points?'<span class="tn-points" title="Story points">'+Number(x.story_points)+' pts</span>':'<span class="tn-muted">—</span>')+'</td><td>'+priorityTag(x.priority||'MEDIUM')+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('edit','data-story="'+esc(x.id)+'"','Edit story '+x.title)+actionIcon('play','data-start-story="'+esc(x.id)+'"','Start testing story '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-story="'+esc(x.id)+'"','Delete story '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="6" class="tn-empty">No stories yet. Use + Create to add one.</td></tr>';
+ $('storyList').innerHTML=c.stories.map(x=>'<tr><td><strong>'+esc(x.title)+'</strong><div class="tn-muted">'+esc(x.reference_no||'')+'</div>'+storyTypeTags(x)+'</td><td data-sort="'+Number(x.story_points||0)+'">'+(x.story_points?'<span class="tn-points" title="Story points">'+Number(x.story_points)+' pts</span>':'<span class="tn-muted">—</span>')+'</td><td>'+priorityTag(x.priority||'MEDIUM')+'</td>'+createdCell(x.created_by_name,x.created_at)+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('edit','data-story="'+esc(x.id)+'"','Edit story '+x.title)+(isCodeStory(x)?actionIcon('scan','data-scan-story="'+esc(x.id)+'"','Scan code for story '+x.title):actionIcon('play','data-start-story="'+esc(x.id)+'"','Start testing story '+x.title))+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-story="'+esc(x.id)+'"','Delete story '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="6" class="tn-empty">No stories yet. Use + Create to add one.</td></tr>';
  $('storyEnvironment').innerHTML='<option value="">Select environment</option>'+c.environments.filter(e=>e.is_active!==false).map(e=>'<option value="'+esc(e.id)+'">'+esc(e.name)+(e.is_default?' (default)':'')+'</option>').join('');
 }
 
+// ---- Story type (Functional / Code Intelligence) and Code branch (branches of the linked repository) ----
+const STORY_TYPE_LABELS={FUNCTIONAL:'Functional',CODE_SAST:'SAST',CODE_SECRETS:'Secrets',CODE_SCA:'SCA',CODE_AI_REVIEW:'AI code review',CODE_QUALITY:'Code quality'};
+const branchCache={};
+// Story type: Functional OR Code Intelligence (radio); under Code Intelligence its checks are tick boxes.
+function storyTypeChecks(){return [...document.querySelectorAll('#storyTypePick input[name="storyTypes"]')];}
+// Story type: Functional (website tests) OR Code Intelligence (code scan only) — radio.
+function storyKind(){return document.querySelector('#storyTypePick input[name="storyKind"]:checked')?.value||'FUNCTIONAL';}
+// target: {type:'PULL_REQUEST'|'BRANCH'|'COMMIT', value} — what the story's code scan runs on.
+function setStoryTypes(types,target){
+ const list=Array.isArray(types)&&types.length?types:['FUNCTIONAL'];
+ const code=list.some(t=>String(t).startsWith('CODE_'));
+ for(const r of document.querySelectorAll('#storyTypePick input[name="storyKind"]'))r.checked=r.value===(code?'CODE':'FUNCTIONAL');
+ for(const c of storyTypeChecks())c.checked=code&&list.includes(c.value);
+ $('storyTargetType').value=target?.type||'PULL_REQUEST';
+ $('storyRepo').dataset.wanted=target?.repo||'';$('storyRepo').value=''; // a new story starts on the newest repository
+ $('storyCodeBranch').dataset.wanted=target?.value||'';
+ $('storyCodeBranch').dataset.wantedType=$('storyTargetType').value;
+ syncStoryType();
+}
+function syncStoryType(){
+ const code=storyKind()==='CODE',checks=storyTypeChecks(),on=checks.filter(c=>c.checked);
+ for(const c of checks)c.disabled=!code; // code checks only count for a Code Intelligence story
+ $('storyTypeSummary').textContent=!code?'Functional':on.length===checks.length?'Code Intelligence (all)':on.length?'Code Intelligence: '+on.map(c=>STORY_TYPE_LABELS[c.value]).join(', '):'Code Intelligence: tick at least one check';
+ $('storyBranchField').hidden=!code;
+ // The story's ⛶ Scan: on when code scanning is enabled and the story is saved (re-applied after the form's permission switch).
+ syncStoryScanButton();
+ if(code)loadStoryTargets();
+}
+// Scan by → the list of pull requests, branches or recent commits of the linked repository (search box).
+const TARGET_HINTS={PULL_REQUEST:'Pull requests (open first)',BRANCH:'Branches',COMMIT:'Recent commits of the default branch'};
+// "Pull request" on GitHub, "Merge request" on GitLab — same choice, the provider's own word.
+function prWords(provider){return provider==='gitlab'?{one:'merge request',many:'merge requests',One:'Merge request',Many:'Merge requests',mark:'!'}:{one:'pull request',many:'pull requests',One:'Pull request',Many:'Pull requests',mark:'#'};}
+function setPrOption(select,provider){const o=select?.querySelector('option[value="PULL_REQUEST"]');if(o)o.textContent=prWords(provider).One;}
+// Story → Repository: a project can link GitHub and GitLab repositories, so the story says which one it scans.
+// The list shows the linked (enabled) repositories, newest first; the story's saved one is chosen when editing.
+let storyRepoList=null;
+async function loadStoryRepos(){
+ const sel=$('storyRepo');
+ if(!storyRepoList)storyRepoList=((await api('/api/projects/'+encodeURIComponent(requireProject())+'/repositories')).repositories||[]).filter(r=>r.source_enabled!==false);
+ const keep=sel.dataset.wanted||sel.value;
+ sel.innerHTML=storyRepoList.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.repo_full_name)+' · '+(r.provider==='gitlab'?'GitLab':'GitHub')+'</option>').join('');
+ if(keep&&storyRepoList.some(r=>String(r.id)===String(keep)))sel.value=keep;
+ sel.dataset.wanted='';sel.hidden=!storyRepoList.length;
+}
+async function loadStoryTargets(){
+ const p=requireProject(),type=$('storyTargetType').value,input=$('storyCodeBranch'),hint=$('storyBranchHint');
+ hint.textContent='Loading…';
+ try{
+  await loadStoryRepos();
+  const repoId=$('storyRepo').value;
+  // Remember a list only when a repository is linked, so linking one later shows its list at once.
+  const key=p+'|'+repoId+'|'+type,d=branchCache[key]||await api('/api/projects/'+encodeURIComponent(p)+'/repository-targets?type='+type+(repoId?'&repoId='+encodeURIComponent(repoId):''));
+  if(d.repository)branchCache[key]=d;
+  if(type!==$('storyTargetType').value||repoId!==$('storyRepo').value)return; // changed while loading
+  if(!d.repository){input.disabled=true;input.value='';$('storyTargetType').disabled=true;hint.textContent='Link a repository in the Source code tab to choose what to scan.';return;}
+  input.disabled=false;$('storyTargetType').disabled=false;
+  const wanted=input.dataset.wantedType===type?input.dataset.wanted:'';
+  window.TNPick.attach(input,d.items,{value:wanted||(type==='BRANCH'?d.defaultBranch:''),showAllOnOpen:true});
+  // A list left open from the previous type is closed, so the next click shows the new list.
+  const openList=input.closest('.tn-pick')?.querySelector('.tn-pick-list');if(openList)openList.hidden=true;
+  if(!wanted&&type!=='BRANCH'){input.value='';input.dataset.value='';}
+  // GitLab calls pull requests "merge requests" (numbers start with !).
+  const pr=prWords(d.provider);setPrOption($('storyTargetType'),d.provider);
+  input.placeholder=type==='PULL_REQUEST'?'Search '+pr.one:type==='COMMIT'?'Search commit':'Search branch';
+  hint.textContent=d.items.length?(type==='PULL_REQUEST'?pr.Many+' (open first)':TARGET_HINTS[type])+' of '+d.repository+(type==='BRANCH'?' · default: '+d.defaultBranch:''):'No '+(type==='PULL_REQUEST'?pr.many:type==='COMMIT'?'commits':'branches')+' found in '+d.repository+'.';
+ }catch(err){delete branchCache[p+'|'+($('storyRepo').value||'')+'|'+type];input.disabled=true;hint.textContent=err.message;}
+}
+function clearTargetCache(){for(const k of Object.keys(branchCache))delete branchCache[k];storyRepoList=null;}
+// A Code Intelligence story has code checks (CODE_*) instead of Functional; its ▶ starts a code scan, not test case generation.
+function isCodeStory(x){return Array.isArray(x.story_types)&&x.story_types.some(t=>String(t).startsWith('CODE_'));}
+function storyTypeTags(x){
+ const types=Array.isArray(x.story_types)&&x.story_types.length?x.story_types:['FUNCTIONAL'];
+ // Functional as its own tag; the Code Intelligence checks together in one tag (branch on hover).
+ const code=types.filter(t=>t.startsWith('CODE_')).map(t=>STORY_TYPE_LABELS[t]||t);
+ return '<div class="tn-story-types">'+(types.includes('FUNCTIONAL')?'<span class="tn-tag">Functional</span>':'')
+  +(code.length?'<span class="tn-tag tn-tag-code" title="Code Intelligence · scan by '+esc(targetText(x))+'">Code: '+esc(code.join(' · '))+'</span>':'')+'</div>';
+}
+// "pull request #45", "branch main", "commit a1b2c3d" (empty = project default branch).
+function targetText(x){const t=x.code_target_type||'BRANCH',v=x.code_target||x.code_branch||'';if(!v)return 'project default branch';return t==='PULL_REQUEST'?'pull request #'+v:t==='COMMIT'?'commit '+v.slice(0,7):'branch '+v;}
 function clearStory(){
  $('storyForm').reset();$('storyId').value='';$('storyFormTitle').textContent='Write business story';
+ setStoryTypes(['FUNCTIONAL'],{type:'PULL_REQUEST',value:''});
  const chosen=state.context?.environments.find(e=>e.is_active!==false&&e.is_default)||state.context?.environments.find(e=>e.is_active!==false);
  if(chosen)$('storyEnvironment').value=chosen.id;
 }
@@ -450,15 +1096,25 @@ function selectStory(id){
  for(const [key,val] of Object.entries({title:story.title,referenceNo:story.reference_no,story:story.story,acceptanceCriteria:story.acceptance_criteria,pagePaths:story.page_paths,priority:story.priority,environmentId:story.environment_id,storyPoints:story.story_points,pageScope:story.page_scope||'ALL_DISCOVERED_PAGES'})){
  if(form.elements.namedItem(key))form.elements.namedItem(key).value=val||'';
  }
+ setStoryTypes(story.story_types,{type:story.code_target_type||'BRANCH',value:story.code_target||story.code_branch||'',repo:story.code_repository_id||''});
  $('storyFormTitle').textContent='Edit story · '+(story.reference_no||'');
  show('stories');
  openStoryModal();
 }
 // Story form lives in a popup: opened by "+ Create" (new story) or the edit icon (existing story).
-function openStoryModal(){storyFormError('');bootstrap.Modal.getOrCreateInstance($('storyModal')).show();}
+function openStoryModal(){storyFormError('');loadCodeStatus();bootstrap.Modal.getOrCreateInstance($('storyModal')).show();}
 function storyFormError(message){const el=$('storyFormError');if(!el)return;el.textContent=message;el.classList.toggle('d-none',!message);}
 async function saveStory(){
  const p=requireProject(),values=formPayload($('storyForm')),id=$('storyId').value;
+ values.storyTypes=storyKind()==='CODE'?storyTypeChecks().filter(c=>c.checked).map(c=>c.value):['FUNCTIONAL'];
+ if(!values.storyTypes.length)throw Error('Tick at least one Code Intelligence check.');
+ values.codeTargetType=$('storyTargetType').value;values.codeTarget='';
+ values.codeRepositoryId=values.storyTypes.some(t=>t.startsWith('CODE_'))?($('storyRepo').value||null):null;
+ if(values.storyTypes.some(t=>t.startsWith('CODE_'))&&!$('storyCodeBranch').disabled){
+  const b=window.TNPick.value($('storyCodeBranch'));
+  if(b===null)throw Error('Choose a '+($('storyTargetType').value==='PULL_REQUEST'?'pull request':$('storyTargetType').value==='COMMIT'?'commit':'branch')+' from the list, or clear it to use the default branch.');
+  values.codeTarget=b||'';
+ }
  const path='/api/projects/'+encodeURIComponent(p)+'/stories'+(id?'/'+encodeURIComponent(id):'');
  const d=await api(path,{method:id?'PATCH':'POST',body:JSON.stringify(values)});
  await loadWorkspace();notice('Story saved to this project.','success');
@@ -502,7 +1158,7 @@ function renderTasks(){
   for(const t of tasks)if(!t.parent_work_item_id||!tasks.some(x=>x.id===t.parent_work_item_id))walk(t);
   for(const t of tasks)walk(t);tasks=order;
  }
- $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><span class="tn-task-no">'+taskNo(x.task_number)+'</span>'+(x.story_points?' <span class="tn-points" title="Story points">'+Number(x.story_points)+' pts</span>':'')+' <button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(workTypeLabel(x.work_type))+(x.origin==='FAILED_TEST'?' · from a failed test':'')+'</div></div></div></td><td>'+(x.parent_task_number?'<button class="tn-link" data-task="'+esc(x.parent_work_item_id)+'" title="'+esc(x.parent_title||'')+'">'+taskNo(x.parent_task_number)+'</button>':'—')+'</td><td>'+(x.story_ref?'<button class="tn-link" data-story="'+esc(x.story_id)+'" title="'+esc(x.story_title||'')+'">'+esc(x.story_ref)+'</button>'+(x.story_story_points?'<div class="tn-muted">'+Number(x.story_story_points)+' pts</div>':''):'—')+'</td><td>'+display(x.team_name)+'</td><td>'+(x.assigned_to_name?'<strong>'+esc(x.assigned_to_name)+'</strong>'+(x.assigned_role?'<div class="tn-muted">'+esc(ROLE_NAMES[x.assigned_role]||x.assigned_role)+(x.assigned_by_system?' · by system':'')+'</div>':''):'<span class="tn-muted">Not assigned</span>')+'</td><td>'+statusTag(x.status)+'</td><td data-sort="'+Number(x.progress_percent||0)+'"><div class="tn-progress" title="'+Number(x.progress_percent||0)+'% · time spent '+esc(hoursText(x.time_spent_minutes))+'"><span style="width:'+Number(x.progress_percent||0)+'%"></span></div><div class="tn-muted">'+Number(x.progress_percent||0)+'%'+(x.time_spent_minutes?' · '+esc(hoursText(x.time_spent_minutes)):'')+'</div></td>'+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-task="'+esc(x.id)+'"','Open task '+x.title)+actionIcon('edit','data-edit-task="'+esc(x.id)+'"','Edit task '+x.title)+actionIcon('play','data-start-task="'+esc(x.id)+'"','Start testing task '+x.title)+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-task="'+esc(x.id)+'"','Delete task '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="10" class="tn-empty">No tasks match your filters. Clear the search or change the filters.</td></tr>';
+ $('tasksBody').innerHTML=tasks.map(x=>'<tr><td><input type="checkbox" class="task-select" value="'+esc(x.id)+'" aria-label="Select '+esc(x.title)+'"></td><td><div class="tn-task-name" style="--task-depth:'+Math.min(x._depth||0,8)+'">'+(x._depth?' <span class="tn-tree-mark" aria-hidden="true">↳</span>':'')+'<div><span class="tn-task-no">'+taskNo(x.task_number)+'</span>'+(x.story_points?' <span class="tn-points" title="Story points">'+Number(x.story_points)+' pts</span>':'')+' <button class="tn-link tn-task-title" data-task="'+esc(x.id)+'">'+esc(x.title)+'</button><div class="tn-muted">'+esc(workTypeLabel(x.work_type))+(x.origin==='FAILED_TEST'?' · from a failed test':x.origin==='CODE_FINDING'?' · from a code scan':'')+'</div></div></div></td><td>'+(x.parent_task_number?'<button class="tn-link" data-task="'+esc(x.parent_work_item_id)+'" title="'+esc(x.parent_title||'')+'">'+taskNo(x.parent_task_number)+'</button>':'—')+'</td><td>'+(x.story_ref?'<button class="tn-link" data-story="'+esc(x.story_id)+'" title="'+esc(x.story_title||'')+'">'+esc(x.story_ref)+'</button>'+(x.story_story_points?'<div class="tn-muted">'+Number(x.story_story_points)+' pts</div>':''):'—')+'</td><td>'+display(x.team_name)+'</td><td>'+(x.assigned_to_name?'<strong>'+esc(x.assigned_to_name)+'</strong>'+(x.assigned_role?'<div class="tn-muted">'+esc(ROLE_NAMES[x.assigned_role]||x.assigned_role)+(x.assigned_by_system?' · by system':'')+'</div>':''):'<span class="tn-muted">Not assigned</span>')+'</td><td>'+statusTag(x.status)+'</td><td data-sort="'+Number(x.progress_percent||0)+'"><div class="tn-progress" title="'+Number(x.progress_percent||0)+'% · time spent '+esc(hoursText(x.time_spent_minutes))+'"><span style="width:'+Number(x.progress_percent||0)+'%"></span></div><div class="tn-muted">'+Number(x.progress_percent||0)+'%'+(x.time_spent_minutes?' · '+esc(hoursText(x.time_spent_minutes)):'')+'</div></td>'+updatedCell(x.updated_by_name,x.updated_at,x.created_by_name,x.created_at)+'<td><span class="tn-icon-actions">'+actionIcon('eye','data-task="'+esc(x.id)+'"','Open task '+x.title)+actionIcon('edit','data-edit-task="'+esc(x.id)+'"','Edit task '+x.title)+(x.origin==='CODE_FINDING'?(['PROJECT_MANAGER','QA'].includes(state.context?.projectRole)?actionIcon('scan','data-scan-task="'+esc(x.id)+'"','Scan again for task '+x.title):''):actionIcon('play','data-start-task="'+esc(x.id)+'"','Start testing task '+x.title))+(state.context?.projectRole==='PROJECT_MANAGER'?actionIcon('remove','data-delete-task="'+esc(x.id)+'"','Delete task '+x.title):'')+'</span></td></tr>').join('')||'<tr><td colspan="10" class="tn-empty">No tasks match your filters. Clear the search or change the filters.</td></tr>';
  $('taskVisibleCount').textContent=tasks.length;updateTaskSelection();
 }
 const canRerun=()=>['QA','PROJECT_MANAGER'].includes(state.context?.projectRole);
@@ -795,7 +1451,7 @@ async function openTask(id,mode){
  $('taskFiles').disabled=d.projectRole==='VIEWER';
  for(const btn of document.querySelectorAll('[data-task-action]'))btn.disabled=!(canReview||(btn.dataset.taskAction==='ETA'&&isDeveloper))||(btn.dataset.taskAction==='DELETE'&&!isManager);
  $('drawerTitle').textContent=t.title;
- $('drawerInfo').innerHTML='<div class="tn-kv"><span>Task no.</span><span>'+taskNo(t.task_number)+'</span></div>'+'<div class="tn-kv"><span>Parent task</span><span>'+(d.parent?'<button class="tn-link" data-task="'+esc(d.parent.id)+'">'+taskNo(d.parent.task_number)+' · '+esc(d.parent.title)+'</button>':'—')+'</span></div>'+'<div class="tn-kv"><span>Story</span><span>'+(d.story?'<button class="tn-link" data-story="'+esc(d.story.id)+'">'+esc(d.story.reference_no+' · '+d.story.title)+'</button>'+(d.story.story_points?' <span class="tn-points">'+Number(d.story.story_points)+' pts</span>':''):'—')+'</span></div>'+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(workTypeLabel(t.work_type))+' / '+priorityTag(t.priority)+'</span></div>'+(t.origin==='FAILED_TEST'?'<div class="tn-kv"><span>Team / Role</span><span>'+display((state.tasks||[]).find(x=>x.id===t.id)?.team_name)+(t.assigned_role?' · '+esc(ROLE_NAMES[t.assigned_role]||t.assigned_role):'')+(t.assigned_by_system?' <span class="tn-muted">(assigned by system)</span>':'')+'</span></div>':'')+'<div class="tn-kv"><span>Assigned to</span><span>'+display((state.tasks||[]).find(x=>x.id===t.id)?.assigned_to_name)+(t.assigned_role?' · '+esc(ROLE_NAMES[t.assigned_role]||t.assigned_role):'')+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Start date</span><span>'+(t.start_at?date(t.start_at):'—')+'</span></div><div class="tn-kv"><span>Due date</span><span>'+(t.due_at?date(t.due_at):'—')+'</span></div><div class="tn-kv"><span>Story points</span><span>'+(t.story_points?Number(t.story_points)+' pts':'—')+'</span></div><div class="tn-kv tn-task-viewrow"><span>Progress</span><span>'+Number(t.progress_percent||0)+'%'+(t.time_spent_minutes?' · time spent '+esc(hoursText(t.time_spent_minutes)):'')+'</span></div>'+(t.closed_at?'<div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+(t.closed_by_name?' · by '+esc(t.closed_by_name):'')+'</span></div>':'')+'<div id="taskFailureBox"></div><p class="tn-info mt-3">'+display(t.description)+'</p><div class="tn-task-edit"><div class="tn-edit-grid"><div class="tn-edit-field tn-edit-full"><label class="form-label" for="taskAssignee">Assigned to</label><input id="taskAssignee" class="form-control" placeholder="Search by name or role"></div><div class="tn-edit-field"><label class="form-label" for="taskParentSearch">Parent task (optional)</label><input id="taskParentSearch" class="form-control" placeholder="Search by task number or title"></div><div class="tn-edit-field"><label class="form-label" for="taskStorySearch">Story (optional)</label><input id="taskStorySearch" class="form-control" placeholder="Search by story number or title"><div class="tn-muted tn-edit-hint" id="taskStoryPoints">'+(d.story?.story_points?'Story points: '+Number(d.story.story_points):'')+'</div></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskStatusChange">Status</label><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option value="'+v+'"'+(v===t.status?' selected':'')+'>'+(TASK_STATUS_LABELS[v]||v)+'</option>').join('')+'</select></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskStartDate">Start date</label><input id="taskStartDate" type="date" class="form-control" value="'+(t.start_at?new Date(new Date(t.start_at).getTime()-new Date(t.start_at).getTimezoneOffset()*60000).toISOString().slice(0,10):'')+'"></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskDueDate">Due date</label><input id="taskDueDate" type="date" class="form-control" value="'+(t.due_at?new Date(new Date(t.due_at).getTime()-new Date(t.due_at).getTimezoneOffset()*60000).toISOString().slice(0,10):'')+'"></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskPoints">Story points</label><input id="taskPoints" class="form-control" type="text" inputmode="numeric" maxlength="2" placeholder="Add story points" value="'+(t.story_points?Number(t.story_points):'')+'"></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskProgress">Progress</label><select id="taskProgress" class="form-select">'+[0,10,20,30,40,50,60,70,80,90,100].map(v=>'<option value="'+v+'"'+(v===Math.round(Number(t.progress_percent||0)/10)*10?' selected':'')+'>'+v+'%</option>').join('')+'</select></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskAddHours">Add hours</label><input id="taskAddHours" class="form-control" type="number" min="0" max="24" step="0.25" placeholder="e.g. 1.5"><div class="tn-muted tn-edit-hint" id="taskTimeSpent">Time spent: '+esc(hoursText(t.time_spent_minutes))+'</div></div><div class="tn-edit-field tn-edit-full"><label class="form-label" for="taskEditComment">Comment</label><textarea id="taskEditComment" class="form-control" rows="3" placeholder="What was done, or what is next (optional)"></textarea></div></div></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
+ $('drawerInfo').innerHTML='<div class="tn-kv"><span>Task no.</span><span>'+taskNo(t.task_number)+'</span></div>'+'<div class="tn-kv"><span>Parent task</span><span>'+(d.parent?'<button class="tn-link" data-task="'+esc(d.parent.id)+'">'+taskNo(d.parent.task_number)+' · '+esc(d.parent.title)+'</button>':'—')+'</span></div>'+'<div class="tn-kv"><span>Story</span><span>'+(d.story?'<button class="tn-link" data-story="'+esc(d.story.id)+'">'+esc(d.story.reference_no+' · '+d.story.title)+'</button>'+(d.story.story_points?' <span class="tn-points">'+Number(d.story.story_points)+' pts</span>':''):'—')+'</span></div>'+'<div class="tn-kv"><span>Type / Priority</span><span>'+esc(workTypeLabel(t.work_type))+' / '+priorityTag(t.priority)+'</span></div>'+(['FAILED_TEST','CODE_FINDING'].includes(t.origin)?'<div class="tn-kv"><span>Team / Role</span><span>'+display((state.tasks||[]).find(x=>x.id===t.id)?.team_name)+(t.assigned_role?' · '+esc(ROLE_NAMES[t.assigned_role]||t.assigned_role):'')+(t.assigned_by_system?' <span class="tn-muted">(assigned by system)</span>':'')+'</span></div>':'')+'<div class="tn-kv"><span>Assigned to</span><span>'+display((state.tasks||[]).find(x=>x.id===t.id)?.assigned_to_name)+(t.assigned_role?' · '+esc(ROLE_NAMES[t.assigned_role]||t.assigned_role):'')+'</span></div><div class="tn-kv"><span>Status</span><span>'+statusTag(t.status)+'</span></div><div class="tn-kv"><span>Start date</span><span>'+(t.start_at?date(t.start_at):'—')+'</span></div><div class="tn-kv"><span>Due date</span><span>'+(t.due_at?date(t.due_at):'—')+'</span></div><div class="tn-kv"><span>Story points</span><span>'+(t.story_points?Number(t.story_points)+' pts':'—')+'</span></div><div class="tn-kv tn-task-viewrow"><span>Progress</span><span>'+Number(t.progress_percent||0)+'%'+(t.time_spent_minutes?' · time spent '+esc(hoursText(t.time_spent_minutes)):'')+'</span></div>'+(t.closed_at?'<div class="tn-kv"><span>Closed</span><span>'+dateTime(t.closed_at)+(t.closed_by_name?' · by '+esc(t.closed_by_name):'')+'</span></div>':'')+'<div id="taskFailureBox"></div>'+(t.origin==='CODE_FINDING'?'':'<p class="tn-info mt-3">'+display(t.description)+'</p>')+'<div class="tn-task-edit"><div class="tn-edit-grid"><div class="tn-edit-field tn-edit-full"><label class="form-label" for="taskAssignee">Assigned to</label><input id="taskAssignee" class="form-control" placeholder="Search by name or role"></div><div class="tn-edit-field"><label class="form-label" for="taskParentSearch">Parent task (optional)</label><input id="taskParentSearch" class="form-control" placeholder="Search by task number or title"></div><div class="tn-edit-field"><label class="form-label" for="taskStorySearch">Story (optional)</label><input id="taskStorySearch" class="form-control" placeholder="Search by story number or title"><div class="tn-muted tn-edit-hint" id="taskStoryPoints">'+(d.story?.story_points?'Story points: '+Number(d.story.story_points):'')+'</div></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskStatusChange">Status</label><select id="taskStatusChange" class="form-select">'+['PENDING','IN_PROGRESS','ON_HOLD','READY_FOR_RETEST','COMPLETED','CANCELLED'].map(v=>'<option value="'+v+'"'+(v===t.status?' selected':'')+'>'+(TASK_STATUS_LABELS[v]||v)+'</option>').join('')+'</select></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskStartDate">Start date</label><input id="taskStartDate" type="date" class="form-control" value="'+(t.start_at?new Date(new Date(t.start_at).getTime()-new Date(t.start_at).getTimezoneOffset()*60000).toISOString().slice(0,10):'')+'"></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskDueDate">Due date</label><input id="taskDueDate" type="date" class="form-control" value="'+(t.due_at?new Date(new Date(t.due_at).getTime()-new Date(t.due_at).getTimezoneOffset()*60000).toISOString().slice(0,10):'')+'"></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskPoints">Story points</label><input id="taskPoints" class="form-control" type="text" inputmode="numeric" maxlength="2" placeholder="Add story points" value="'+(t.story_points?Number(t.story_points):'')+'"></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskProgress">Progress</label><select id="taskProgress" class="form-select">'+[0,10,20,30,40,50,60,70,80,90,100].map(v=>'<option value="'+v+'"'+(v===Math.round(Number(t.progress_percent||0)/10)*10?' selected':'')+'>'+v+'%</option>').join('')+'</select></div><div class="tn-edit-field tn-edit-third"><label class="form-label" for="taskAddHours">Add hours</label><input id="taskAddHours" class="form-control" type="number" min="0" max="24" step="0.25" placeholder="e.g. 1.5"><div class="tn-muted tn-edit-hint" id="taskTimeSpent">Time spent: '+esc(hoursText(t.time_spent_minutes))+'</div></div><div class="tn-edit-field tn-edit-full"><label class="form-label" for="taskEditComment">Comment</label><textarea id="taskEditComment" class="form-control" rows="3" placeholder="What was done, or what is next (optional)"></textarea></div></div></div>'+((t.deferred_until)?'<p class="tn-muted mt-2">Deferred until '+dateTime(t.deferred_until)+' · '+esc(t.deferred_reason||'')+'</p>':'');
  if($('saveTaskEdit'))Object.assign($('saveTaskEdit').dataset,{origAssignee:t.assigned_to||'',origStatus:t.status,origProgress:String(Math.round(Number(t.progress_percent||0)/10)*10),origParent:t.parent_work_item_id||'',origStory:t.story_id||'',origDue:$('taskDueDate')?.value||'',origStart:$('taskStartDate')?.value||'',origPoints:t.story_points?String(t.story_points):''});
  if($('taskAssignee'))$('taskAssignee').disabled=d.projectRole!=='PROJECT_MANAGER';
  {const all=state.tasks||[],kids=new Set([t.id]);let grew=true;while(grew){grew=false;for(const x of all)if(x.parent_work_item_id&&kids.has(x.parent_work_item_id)&&!kids.has(x.id)){kids.add(x.id);grew=true;}}
@@ -808,6 +1464,7 @@ async function openTask(id,mode){
   const canLink=['PROJECT_MANAGER','QA'].includes(d.projectRole);['taskParentSearch','taskStorySearch'].forEach(x=>{if($(x))$(x).disabled=!canLink;});}
  {const canProgress=['PROJECT_MANAGER','QA'].includes(d.projectRole)||String(t.assigned_to||'')===String(state.user?.id||state.user?.sub||'');['taskProgress','taskAddHours'].forEach(x=>{if($(x))$(x).disabled=!canProgress;});}
  loadTaskFailure(t).catch(err=>{if($('taskFailureBox'))$('taskFailureBox').innerHTML='<p class="tn-muted">Failure details are not available: '+esc(err.message)+'</p>';});
+ if(t.origin==='CODE_FINDING')loadTaskCodeProblem(t).catch(err=>{if($('taskFailureBox'))$('taskFailureBox').innerHTML='<p class="tn-muted">Code problem details are not available: '+esc(err.message)+'</p>';});
  $('linkSession').value=t.session_id||'';$('linkCase').value=t.external_case_id||'';
  let availableCases=[];try{availableCases=(await api('/api/projects/'+encodeURIComponent(requireProject())+'/test-cases')).cases||[];}catch(err){console.warn('Case catalog unavailable:',err.message);}
  const choices=[...new Set([t.session_id,...availableCases.map(x=>x.session_id)].filter(Boolean))];
@@ -826,11 +1483,12 @@ async function openTask(id,mode){
  $('drawerAttachments').innerHTML=d.attachments.map(x=>'<div class="tn-kv"><span>'+date(x.created_at)+'</span><button class="tn-link" data-task-file="'+esc(x.id)+'">'+esc(x.filename)+'</button></div>').join('')||'<p class="tn-muted">No attachments yet.</p>';
  $('drawerComments').innerHTML=d.comments.map(x=>'<div class="tn-comment"><strong>'+esc(x.user_name||'User')+'</strong> <span class="tn-muted">'+dateTime(x.created_at)+'</span><p>'+esc(x.comment)+'</p></div>').join('')||'<p class="tn-muted mt-2">No comments.</p>';
  // Failed-test tasks show their runs, screenshots, video and reports through the Failure section's button, so these two lists are only for other tasks.
- const failedTask=t.origin==='FAILED_TEST';
+ // Code-problem tasks have no test runs either: their scan places are shown in the Code problem section instead.
+ const failedTask=t.origin==='FAILED_TEST'||t.origin==='CODE_FINDING';
  const history=failedTask?{results:[]}:await api('/api/projects/'+encodeURIComponent(requireProject())+'/task-test-history?taskId='+encodeURIComponent(id));if(serial!==taskOpenSerial)return;
  if(!failedTask)$('drawerInfo').insertAdjacentHTML('beforeend','<h3 class="mt-3">Task test history</h3>'+(history.results.length?history.results.map(r=>'<div class="tn-sub">Run #'+esc(r.run_number)+' · '+esc(r.tester||'Unknown tester')+' · '+dateTime(r.completed_at)+' · '+(r.passed?'Passed':'Failed')+'<div>'+evidenceButtons(r.evidence_json)+'</div></div>').join(''):'<p class="tn-muted">No linked execution history yet.</p>'));
  // Activity history in plain words, one line each (comments too). Only the latest AI line is kept, so repeated AI checks do not fill the list.
- {const labels={WORK_ITEM_CREATED:'Task created',WORKFLOW_FAILED_TEST:'Created from failed test',TEST_FAILED_AGAIN:'Failed again',TEST_PASSED:'Passed',AI_ROUTED:'AI check',AI_ANALYSED:'AI check',ROUTING_CHANGED:'Team or type changed',PROGRESS_UPDATED:'Progress',COMMENT_ADDED:'Comment',STATUS_CHANGED:'Status changed',WORK_ITEM_ASSIGNED:'Assigned',ASSIGNED:'Assigned',SUBTASK_CREATED:'Subtask added',VERIFIED_RETEST_PASSED:'Closed after passing retest',TASK_DELETE:'Deleted',TASK_RESTORE:'Restored',LINKS_CHANGED:'Details changed'};
+ {const labels={WORK_ITEM_CREATED:'Task created',WORKFLOW_FAILED_TEST:'Created from failed test',TEST_FAILED_AGAIN:'Failed again',TEST_PASSED:'Passed',AI_ROUTED:'AI check',AI_ANALYSED:'AI check',ROUTING_CHANGED:'Team or type changed',PROGRESS_UPDATED:'Progress',COMMENT_ADDED:'Comment',STATUS_CHANGED:'Status changed',WORK_ITEM_ASSIGNED:'Assigned',ASSIGNED:'Assigned',SUBTASK_CREATED:'Subtask added',VERIFIED_RETEST_PASSED:'Closed after passing retest',CODE_TASK_CREATED:'Created from code scan',CODE_DECISION:'Decision',CODE_REJECTED:'Rejected',AI_TASK_WRITTEN:'Written by AI',AI_TASK_CHECKED:'AI checked',CODE_STILL_FOUND:'Still found by scan',CODE_FIXED:'Fixed (checked by scan)',TASK_DELETE:'Deleted',TASK_RESTORE:'Restored',LINKS_CHANGED:'Details changed'};
   let aiSeen=false;const rows=d.history.filter(h=>{if(!/^AI_/.test(h.event_type))return true;if(aiSeen)return false;aiSeen=true;return true;});
   $('drawerHistory').innerHTML=rows.map(h=>'<div class="tn-activity"><strong>'+esc(labels[h.event_type]||titleCase(h.event_type))+'</strong> · '+dateTime(h.created_at)+(h.by_name?' · '+esc(h.by_name):' · System')+(h.comment?' — '+esc(h.comment):'')+'</div>').join('')||'No activity';}
  const related=state.evidence.filter(x=>String(x.session_id)===String(t.session_id)&&String(x.external_case_id)===String(t.external_case_id)).slice(0,2);
@@ -1007,6 +1665,17 @@ function bind(){
  if($('addScope'))$('addScope').onclick=()=>$('editProfile').click();
  $('projectPicker').onchange=async e=>{closeTask();state.projectId=e.target.value;localStorage.setItem('testnexus:currentProject',state.projectId);try{await loadWorkspace();show(state.projectId?'details':'projects');}catch(err){notice(err.message);}};
  $('environmentForm').onsubmit=async e=>{e.preventDefault();try{const vals=formPayload(e.target);await api('/api/projects/'+encodeURIComponent(requireProject())+'/environments',{method:'POST',body:JSON.stringify({...vals,isDefault:!!e.target.elements.namedItem('isDefault').checked})});e.target.reset();await loadWorkspace();notice('Environment saved.','success');}catch(err){notice(err.message);}};
+ // Story type dropdown: tick to change, closes when clicking elsewhere.
+ document.addEventListener('change',e=>{
+  if(!e.target.closest('#storyTypePick'))return;
+  // Ticking "Code Intelligence" ticks (or clears) all of its code checks.
+  // Choosing Code Intelligence with nothing ticked ticks all of its checks.
+  // Choosing Code Intelligence with nothing ticked ticks all of its checks.
+  if(e.target.name==='storyKind'&&e.target.value==='CODE'&&!storyTypeChecks().some(c=>c.checked))for(const c of storyTypeChecks())c.checked=true;
+  syncStoryType();
+ });
+ document.addEventListener('change',e=>{if(e.target.id==='storyTargetType')loadStoryTargets();if(e.target.id==='storyRepo'){const i=$('storyCodeBranch');i.dataset.wanted='';i.value='';i.dataset.value='';loadStoryTargets();}});
+ document.addEventListener('click',e=>{const d=$('storyTypePick');if(d?.open&&!d.contains(e.target))d.open=false;});
  $('storyForm').onsubmit=async e=>{e.preventDefault();storyFormError('');try{await saveStory();bootstrap.Modal.getOrCreateInstance($('storyModal')).hide();}catch(err){storyFormError(err.message);}};
  document.addEventListener('click',e=>{if(e.target.closest('#storyCreate')){clearStory();openStoryModal();}});
  $('storyLaunch').onclick=async()=>{storyFormError('');try{await launchStory();}catch(err){storyFormError(err.message);}};
@@ -1269,8 +1938,12 @@ async function viewAiReport(runId,label,tab=null){
  aiReport.blob=new Blob([html],{type:'text/html'});aiReport.name='AI-report-'+String(label||'run').replace(/[^\w]+/g,'-')+'-'+String(state.context?.project?.reference_no||'project').replace(/[^\w-]+/g,'_')+'.html';
  if(tab&&!tab.closed){
   const data='data:text/html;charset=utf-8;base64,'+btoa(unescape(encodeURIComponent(html)));
-  const bar='<a href="'+data+'" download="'+esc(aiReport.name)+'" style="position:fixed;bottom:18px;right:18px;z-index:99;padding:8px 14px;border-radius:9px;background:#0f1f5c;color:#fff;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(15,23,42,.25)">Download</a>';
-  const page=html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="script-src \'none\'"><title>'+esc('AI report · '+(label||''))+'</title>').replace('</head>','<style>#exportAnalysisExcel{display:none!important}</style></head>').replace(/<body([^>]*)>/,'<body$1>'+bar);
+  // Download sits at the top right of the report header (same place as in the AI explanation tab of a code finding).
+  const bar='<a href="'+data+'" download="'+esc(aiReport.name)+'" style="display:inline-block;padding:8px 14px;border-radius:9px;background:#0f1f5c;color:#fff;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(15,23,42,.25)">Download</a>';
+  const withHead=html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="script-src \'none\'"><title>'+esc('AI report · '+(label||''))+'</title>').replace('</head>','<style>#exportAnalysisExcel{display:none!important}</style></head>');
+  // Older reports without the header actions area: keep the button at the top right, fixed.
+  const page=withHead.includes('<div class="hero-actions">')?withHead.replace('<div class="hero-actions">','<div class="hero-actions">'+bar)
+   :withHead.replace(/<body([^>]*)>/,'<body$1><div style="position:fixed;top:18px;right:18px;z-index:99">'+bar+'</div>');
   tab.location.href=URL.createObjectURL(new Blob([page],{type:'text/html'}));
   return;
  }
@@ -1556,6 +2229,66 @@ makeCombo('ctAddMemberSelect','Search users by name or email');
 makeCombo('ctAssignSelect','Search projects');
 // ---- Failed tests as tasks ----
 // Task popup: the failed test case (same facts as the Test cases and Runs pages) and its failure.
+// Code-problem task: laid out like a failed-test task.
+//   "Scanner"     (like "Test case") — what the scanner found: the same labels as the findings popup.
+//   "Scan result" (like "Failure")   — latest scan, times found, where, assigned, and a link back to the scan.
+//   "AI"                             — the task written by the AI when the problem was accepted (AI · unverified
+//                                     until someone clicks "✓ Mark as checked").
+// The task itself is worked like any other task (status, progress, comments); the next scan checks the fix.
+async function loadTaskCodeProblem(t){
+ const box=$('taskFailureBox');if(!box)return;
+ const d=await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/tasks/'+encodeURIComponent(t.id));
+ if(String(state.taskId)!==String(t.id)||!$('taskFailureBox'))return;
+ const f=d.places[0]||{},meta=d.task.metadata||{},ai=meta.aiTask;
+ const by=d.places.find(p=>p.decided_by_name);
+ const places=d.places.map(p=>'<li>'+esc(p.file_path||'—')+(p.line?' <span class="tn-muted">: '+Number(p.line)+'</span>':'')+(p.installed_version&&p.package_name?' <span class="tn-muted">· '+esc(p.installed_version)+'</span>':'')+'</li>').join('');
+ const versions=[...new Set(d.places.map(p=>p.installed_version).filter(Boolean))];
+ let html='<div class="tn-task-section"><h3>Scanner</h3>'
+  +'<div class="tn-task-case-title"><span class="tn-sev tn-sev-'+esc(String(f.severity||'').toLowerCase())+'">'+esc(titleCaseWord(f.severity))+'</span> '+esc(f.title||'')+'</div>'
+  +'<div class="tn-task-grid"><span>Category</span><span>Code Intelligence</span>'
+  +'<span>Type</span><span>'+esc(CAT_LABELS[f.category]||f.category||'—')+'</span>'
+  +'<span>Severity</span><span>'+esc(titleCaseWord(f.severity)||'—')+'</span>'
+  +'<span>Priority</span><span>'+(t.priority?priorityTag(t.priority):'—')+'</span>'
+  +'<span>Package / fix</span><span>'+(f.package_name?esc(f.package_name+(versions.length?' '+versions.join(', '):''))+(f.fixed_version?' · fix: '+esc(f.fixed_version):''):'—')+'</span>'
+  +'<span>CWE / CVE</span><span>'+esc([f.cwe,f.cve].filter(Boolean).join(' · ')||'—')+'</span>'
+  +'<span>Accepted by</span><span>'+(by?esc(by.decided_by_name)+(by.decided_at?' · '+dateTime(by.decided_at):''):'—')+'</span></div>'
+  +(f.message?'<details class="tn-task-steps"><summary>Scanner details</summary><p class="tn-code-scanner-text">'+esc(f.message)+'</p></details>':'')+'</div>';
+ html+='<div class="tn-task-section"><h3>Scan result</h3><div class="tn-task-grid">'
+  +'<span>Latest scan</span><span>'+(meta.scanNumber?'Scan #'+Number(meta.scanNumber):'—')+'</span>'
+  +'<span>Times found</span><span>'+Number(d.task.failure_count||1)+'</span>'
+  +'<span>Where</span><span><details class="tn-places"'+(d.places.length<=3?' open':'')+'><summary>Found in '+d.places.length+' place'+(d.places.length===1?'':'s')+'</summary><ul>'+places+'</ul></details></span>'
+  +'<span>Assigned</span><span>'+esc([t.team_name||(state.tasks||[]).find(x=>x.id===t.id)?.team_name||'No team',ROLE_NAMES[t.assigned_role]||t.assigned_role].filter(Boolean).join(' · '))+(t.assigned_by_system?' <span class="tn-muted">(by system)</span>':'')+'</span></div>'
+  +(meta.scanRunId?'<button type="button" class="btn btn-outline-secondary tn-btn mt-2" data-task-scan="'+esc(meta.scanRunId)+'">Scan results ↗</button>':'')+'</div>';
+ // AI: the task written by the AI when the problem was accepted ("✓ Mark as checked" once someone agrees with it).
+ html+='<div class="tn-task-section tn-code-todo"><h3>AI</h3>';
+ if(ai){
+  const risk=AI_RISK[ai.realRisk]||AI_RISK.POSSIBLE;
+  const canCheck=['PROJECT_MANAGER','QA','DEVELOPER'].includes(d.role);
+  html+='<div class="tn-code-todo-head">'+(ai.checkedAt?'<span class="tn-ai-badge is-checked">AI · checked by '+esc(ai.checkedByName||'a team member')+' · '+esc(dateTime(ai.checkedAt))+'</span>':'<span class="tn-ai-badge">AI · unverified</span>'+(canCheck?'<button type="button" class="btn btn-outline-success btn-sm tn-ai-check" data-code-ai-check="'+esc(t.id)+'">✓ Mark as checked</button>':''))+'</div>'
+   +'<div class="tn-task-grid"><span>Problem</span><span>'+esc(ai.problem||'—')+'</span>'
+   +'<span>Real risk?</span><span><span class="tn-ai-risk '+risk[1]+'">'+risk[0]+'</span> '+esc(ai.riskReason||'')+'</span>'
+   +'<span>Suggested priority</span><span><span class="tn-sev tn-pri-'+esc(String(ai.suggestedPriority||'').toLowerCase())+'">'+esc(titleCaseWord(ai.suggestedPriority))+'</span></span></div>'
+   +'<h4 class="tn-code-todo-k">Steps</h4><ol class="tn-code-steps">'+(ai.steps||[]).map(s=>'<li>'+esc(s)+'</li>').join('')+'</ol>'
+   +(ai.fixCode?'<h4 class="tn-code-todo-k">Suggested code</h4><pre class="tn-ai-code fix">'+esc(ai.fixCode)+'</pre>':'')
+   +'<div class="tn-muted small mt-2">Written by AI when accepted'+(ai.createdByName?' by '+esc(ai.createdByName):'')+(ai.createdAt?' · '+esc(dateTime(ai.createdAt)):'')+'</div>';
+ }else{
+  html+='<p class="tn-muted small mb-0">Not written by AI'+(d.aiEnabled?'':' (AI is not enabled on this server)')+'. Use the Package / fix and Scanner details above.</p>';
+ }
+ html+='</div>';
+ box.innerHTML=html;
+}
+document.addEventListener('click',async e=>{
+ // "Scan results ↗" in a code-problem task: open that scan's results (like "Evidence, reports and run history ↗").
+ const sc=e.target.closest('[data-task-scan]');
+ if(sc){const back=state.taskId;closeTask();scanReturnTask=back;try{await openScan(sc.dataset.taskScan);}catch(err){notice(err.message);}return;}
+ // "✓ Mark as checked": someone read the AI text and agrees; the badge becomes "AI · checked by … · date".
+ const ck=e.target.closest('[data-code-ai-check]');
+ if(ck&&!ck.disabled){
+  const id=ck.dataset.codeAiCheck;ck.disabled=true;
+  try{await api('/api/projects/'+encodeURIComponent(requireProject())+'/code-intelligence/tasks/'+encodeURIComponent(id)+'/ai-check',{method:'POST',body:'{}'});notice('AI text marked as checked.','success');if(String(state.taskId)===String(id))await openTask(id);}
+  catch(err){notice(err.message);ck.disabled=false;}
+ }
+});
 async function loadTaskFailure(t){
  if(!$('taskFailureBox')||!t.session_id||!t.external_case_id)return;
  const d=await api('/api/work-items/'+encodeURIComponent(t.id)+'/failure');

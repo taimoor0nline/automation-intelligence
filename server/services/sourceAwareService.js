@@ -5,9 +5,16 @@ const MAX_CANDIDATES = Math.max(3, Math.min(Number(process.env.SOURCE_MAX_CANDID
 const MAX_FILE_BYTES = Math.max(20000, Math.min(Number(process.env.SOURCE_MAX_FILE_BYTES || 180000), 500000));
 const ALLOWED_EXTENSIONS = new Set(['.js','.jsx','.ts','.tsx','.cs','.java','.py','.php','.rb','.go','.vue','.svelte','.html']);
 
-function githubHeaders() {
+// The repository's own token (Source code card, stored encrypted) first; otherwise the server's GITHUB_SOURCE_TOKEN.
+function tokenFor(repository) {
+  if (repository?.access_token_encrypted) {
+    try { return require('./credentialVault').decrypt(repository.access_token_encrypted); } catch { /* unreadable: fall back */ }
+  }
+  return process.env.GITHUB_SOURCE_TOKEN || '';
+}
+function githubHeaders(repository, token = tokenFor(repository)) {
   const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
-  if (process.env.GITHUB_SOURCE_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_SOURCE_TOKEN}`;
+  if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
@@ -37,8 +44,8 @@ function tokenizeFailure({ testCase, expected, actual, analysis }) {
   return [...new Set((text.match(/[a-z][a-z0-9_-]{2,}/g) || []).filter((w) => !stop.has(w)))].slice(0, 36);
 }
 
-async function fetchJson(url) {
-  const res = await fetch(url, { headers: githubHeaders() });
+async function fetchJson(url, repository) {
+  const res = await fetch(url, { headers: githubHeaders(repository) });
   if (!res.ok) throw new Error(`GitHub source request failed (${res.status}).`);
   return res.json();
 }
@@ -46,7 +53,7 @@ async function fetchJson(url) {
 async function getRepository(repositoryId) {
   if (!repositoryId || !db.isConfigured()) return null;
   const result = await db.query(
-    `select id,project_id,repo_full_name,default_branch,repository_url,source_enabled
+    `select id,project_id,provider,api_base_url,repo_full_name,default_branch,repository_url,source_enabled,access_token_encrypted
        from source_repositories where id=$1`, [repositoryId]
   );
   return result.rows[0] || null;
@@ -55,9 +62,9 @@ async function getRepository(repositoryId) {
 async function listTree(repository) {
   const { owner, repo } = repoParts(repository.repo_full_name);
   const branch = repository.default_branch || 'main';
-  const ref = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`);
-  const commit = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits/${encodeURIComponent(ref.object.sha)}`);
-  const data = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(commit.tree.sha)}?recursive=1`);
+  const ref = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, repository);
+  const commit = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits/${encodeURIComponent(ref.object.sha)}`, repository);
+  const data = await fetchJson(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(commit.tree.sha)}?recursive=1`, repository);
   return (data.tree || [])
     .filter((item) => item.type === 'blob' && ALLOWED_EXTENSIONS.has(ext(item.path)))
     .slice(0, MAX_TREE_FILES);
@@ -68,7 +75,7 @@ async function fetchRepositoryFile(repository, filePath) {
   const branch = repository.default_branch || 'main';
   const encodedPath = String(filePath).split('/').map(encodeURIComponent).join('/');
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`;
-  const data = await fetchJson(url);
+  const data = await fetchJson(url, repository);
   if (!data || data.type !== 'file' || data.encoding !== 'base64' || !data.content) throw new Error('GitHub did not return a readable source file.');
   return Buffer.from(String(data.content).replace(/\s/g, ''), 'base64').toString('utf8').slice(0, MAX_FILE_BYTES);
 }
@@ -125,6 +132,8 @@ function snippets(content, tokens) {
 async function buildSourceContext({ repositoryId, testCase, expected, actual, analysis }) {
   const repository = await getRepository(repositoryId);
   if (!repository || !repository.source_enabled) return null;
+  // Reading source files to explain failed tests is GitHub-only for now; GitLab repositories are used for code scans.
+  if (isGitLab(repository)) return null;
   const tokens = tokenizeFailure({ testCase, expected, actual, analysis });
   const tree = await listTree(repository);
   const pathCandidates = chooseCandidates(tree, tokens);
@@ -161,4 +170,62 @@ async function buildSourceContext({ repositoryId, testCase, expected, actual, an
   };
 }
 
-module.exports = { buildSourceContext, getRepository };
+// Branch names of a linked repository (story form → Code branch). Private repositories need GITHUB_SOURCE_TOKEN.
+const isGitLab = (repository) => String(repository?.provider || '').toLowerCase() === 'gitlab';
+async function listBranches(repository) {
+  if (isGitLab(repository)) return require('./gitlabSource').listBranches(repository);
+  const { owner, repo } = repoParts(repository.repo_full_name);
+  const names = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=100&page=${page}`, { headers: githubHeaders(repository) });
+    if (res.status === 404) throw Object.assign(new Error(tokenFor(repository) ? 'Repository not found, or the token cannot read it.' : 'Repository not found. A private repository needs a GitHub token.'), { statusCode: 404 });
+    if (!res.ok) throw Object.assign(new Error(`GitHub branch list failed (${res.status}).`), { statusCode: 502 });
+    const data = await res.json();
+    names.push(...(Array.isArray(data) ? data.map((b) => String(b.name || '')).filter(Boolean) : []));
+    if (!Array.isArray(data) || data.length < 100) break;
+  }
+  return names;
+}
+
+// Pull requests of a linked repository (story → Scan by → Pull request): open ones first, then recently merged/closed.
+async function listPullRequests(repository) {
+  if (isGitLab(repository)) return require('./gitlabSource').listPullRequests(repository);
+  const { owner, repo } = repoParts(repository.repo_full_name);
+  // Up to 200 pull requests (2 pages of 100), most recently updated first.
+  const data = [];
+  for (let page = 1; page <= 2; page += 1) {
+    const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`, { headers: githubHeaders(repository) });
+    if (!res.ok) throw Object.assign(new Error(`GitHub pull request list failed (${res.status}).`), { statusCode: res.status === 404 ? 404 : 502 });
+    const rows = await res.json();
+    if (!Array.isArray(rows)) break;
+    data.push(...rows);
+    if (rows.length < 100) break;
+  }
+  const state = (p) => (p.state === 'open' ? 'open' : p.merged_at ? 'merged' : 'closed');
+  return (Array.isArray(data) ? data : [])
+    .map((p) => ({ id: String(p.number), number: p.number, title: String(p.title || ''), state: state(p), branch: p.head?.ref || '', sha: p.head?.sha || '' }))
+    .sort((a, b) => (a.state === 'open' ? 0 : 1) - (b.state === 'open' ? 0 : 1));
+}
+
+// Recent commits of a branch (story → Scan by → Commit).
+async function listCommits(repository, branch) {
+  if (isGitLab(repository)) return require('./gitlabSource').listCommits(repository, branch);
+  const { owner, repo } = repoParts(repository.repo_full_name);
+  const ref = encodeURIComponent(branch || repository.default_branch || 'main');
+  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?sha=${ref}&per_page=50`, { headers: githubHeaders(repository) });
+  if (!res.ok) throw Object.assign(new Error(`GitHub commit list failed (${res.status}).`), { statusCode: res.status === 404 ? 404 : 502 });
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []).map((c) => ({ id: c.sha, sha: c.sha, message: String(c.commit?.message || '').split('\n')[0], date: c.commit?.author?.date || null }));
+}
+
+// Check that a token can read the repository before it is saved.
+async function checkToken(repository, token) {
+  if (isGitLab(repository)) return require('./gitlabSource').checkToken(repository, token);
+  const { owner, repo } = repoParts(repository.repo_full_name);
+  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { headers: githubHeaders(repository, token) });
+  if (res.status === 401) throw Object.assign(new Error('GitHub did not accept this token.'), { statusCode: 400 });
+  if (res.status === 404 || res.status === 403) throw Object.assign(new Error('This token cannot read the repository.'), { statusCode: 400 });
+  if (!res.ok) throw Object.assign(new Error(`GitHub check failed (${res.status}).`), { statusCode: 502 });
+}
+
+module.exports = { buildSourceContext, getRepository, listBranches, listPullRequests, listCommits, checkToken, githubHeaders, repoParts };

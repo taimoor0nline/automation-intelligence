@@ -120,6 +120,32 @@
     const records=(mode==='story'||mode==='project')?state.stories:mode==='task'?state.tasks:[];
     return records.find(r=>String(r.id)===id)||null;
   }
+  // Story type + Code branch of the selected story, and its Code Intelligence checks above the review list.
+  // The checks only run once a scanning engine is connected; until then they are listed as waiting.
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const STORY_TYPE_LABELS={FUNCTIONAL:'Functional',CODE_SAST:'SAST',CODE_SECRETS:'Secrets',CODE_SCA:'SCA',CODE_AI_REVIEW:'AI code review',CODE_QUALITY:'Code quality'};
+  const CODE_CHECK_HINTS={CODE_SAST:'unsafe code',CODE_SECRETS:'passwords/keys in code',CODE_SCA:'old/vulnerable packages',CODE_AI_REVIEW:'explain + suggest fixes',CODE_QUALITY:'messy/risky code'};
+  // "Pull request #45", "Branch main", "Commit a1b2c3d" (empty = project default branch). Same wording as the story form.
+  function targetText(x){const t=x.code_target_type||'BRANCH',v=x.code_target||x.code_branch||'';if(!v)return 'Project default branch';return t==='PULL_REQUEST'?'Pull request #'+v:t==='COMMIT'?'Commit '+v.slice(0,7):'Branch '+v;}
+  function renderStoryKind(story){
+    const box=$('testContextStoryKind');
+    const types=story&&Array.isArray(story.story_types)&&story.story_types.length?story.story_types:(story?['FUNCTIONAL']:[]);
+    const code=types.filter(t=>String(t).startsWith('CODE_'));
+    if(box){
+      box.hidden=!story;
+      box.innerHTML=story?'<div><span>Story type</span><b>'+esc([types.includes('FUNCTIONAL')?'Functional':'',code.length?'Code: '+code.map(t=>STORY_TYPE_LABELS[t]||t).join(' · '):''].filter(Boolean).join(' + '))+'</b></div>'
+        +(code.length?'<div><span>Scan by</span><b>'+esc(targetText(story))+'</b></div>':''):'';
+    }
+    let block=$('codeChecksBlock');
+    const cases=$('cases');
+    if(!block&&cases){block=document.createElement('div');block.id='codeChecksBlock';block.className='code-checks-block';cases.before(block);}
+    if(!block)return;
+    block.hidden=!code.length;
+    if(!code.length){block.innerHTML='';return;}
+    block.innerHTML='<div class="code-checks-head"><b>Code Intelligence checks</b><span>'+esc(targetText(story))+'</span></div>'
+      +code.map((t,i)=>'<div class="code-check-row"><span class="code-check-id">SC'+String(i+1).padStart(3,'0')+'</span><span><b>'+esc(STORY_TYPE_LABELS[t]||t)+'</b> <span class="code-check-hint">· '+esc(CODE_CHECK_HINTS[t]||'')+'</span></span><span class="code-check-state">Waiting for scanning engine</span></div>').join('')
+      +'<div class="code-checks-note">These checks come from the story. They will run on the chosen pull request, branch or commit once a scanning engine is connected.</div>';
+  }
   function renderSelection(){
     const mode=$('testContextMode').value,project=state.project;
     state.mode=mode;
@@ -135,6 +161,7 @@
       details.textContent=details.hidden?'':base.join('\n\n')||'No project description, objectives, scope, or acceptance criteria recorded.';
     }
     renderTestingBreadcrumb(project,mode);
+    renderStoryKind(mode==='story'?item:null);
     const url=useEnvironment(mode==='story'?item:null);
     let text='';
     if(mode==='manual'){
@@ -534,6 +561,7 @@
       '<option value="project">Project requirements</option><option value="story">Existing story</option>'+
       '<option value="task">Existing task</option><option value="manual">Write manually</option></select>'+
       '<div id="testContextRecordWrap" hidden><label for="testContextRecord">Project story (optional)</label><select id="testContextRecord"></select></div>'+
+      '<div id="testContextStoryKind" class="testing-context-kind" hidden></div>'+
       '<div class="testing-context-actions">'+
       '<button id="testContextEditStory" type="button" class="testing-context-link" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 4 4 4M4 20l4-.7L20 7a2 2 0 0 0-3-3L5 16z"/></svg>Edit story</button>'+
       '<button id="testContextManualToggle" type="button" class="testing-context-link">+ Custom story</button>'+

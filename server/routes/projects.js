@@ -46,18 +46,33 @@ router.get('/api/developers', requireAuth, requireRole('QA','MANAGER'), async (_
 
 router.get('/api/projects/:projectId/repositories', requireAuth, async (req, res) => {
   try {
-    const result = await db.query(`select * from source_repositories where project_id=$1 order by created_at desc`, [req.params.projectId]);
+    // Never send the stored token to the browser: only whether one is saved.
+    const result = await db.query(`select r.id,r.project_id,r.provider,r.api_base_url,r.repo_full_name,r.default_branch,r.repository_url,r.source_enabled,r.created_by,r.created_at,r.updated_at,
+      (r.access_token_encrypted is not null) as has_token,r.token_updated_at,cu.display_name created_by_name,uu.display_name updated_by_name
+      from source_repositories r left join users cu on cu.id=r.created_by left join users uu on uu.id=r.updated_by
+      where r.project_id=$1 order by r.created_at desc`, [req.params.projectId]);
     res.json({ ok: true, repositories: result.rows });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });
 
 router.post('/api/projects/:projectId/repositories', requireAuth, requireRole('QA','MANAGER'), async (req, res) => {
   try {
-    const repo = String(req.body?.repoFullName || '').trim();
-    if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) return res.status(400).json({ reply: 'Repository must use owner/name format.' });
+    // GitHub: owner/repository. GitLab: group/project (subgroups allowed) on gitlab.com or the company's own GitLab address.
+    const provider = String(req.body?.provider || 'github').toLowerCase() === 'gitlab' ? 'gitlab' : 'github';
+    const repo = String(req.body?.repoFullName || '').trim().replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
+    if (provider === 'github' && !/^[^/\s]+\/[^/\s]+$/.test(repo)) return res.status(400).json({ reply: 'GitHub repository must use owner/repository format.' });
+    if (provider === 'gitlab' && !/^[^/\s]+(\/[^/\s]+)+$/.test(repo)) return res.status(400).json({ reply: 'GitLab repository must use group/project format.' });
+    let apiBase = null;
+    if (provider === 'gitlab') {
+      apiBase = String(req.body?.apiBaseUrl || 'https://gitlab.com').trim().replace(/\/+$/, '') || 'https://gitlab.com';
+      let u; try { u = new URL(apiBase); } catch { u = null; }
+      if (!u || u.protocol !== 'https:' || u.pathname.replace(/\/+$/, '') !== '' || u.search || u.username) return res.status(400).json({ reply: 'GitLab address must be like https://gitlab.com or https://gitlab.yourcompany.com.' });
+      apiBase = u.origin;
+    }
     const branch = String(req.body?.defaultBranch || 'main').trim() || 'main';
-    const repositoryUrl = String(req.body?.repositoryUrl || `https://github.com/${repo}`).trim();
-    const result = await db.query(`insert into source_repositories(project_id,repo_full_name,default_branch,repository_url,created_by) values($1,$2,$3,$4,$5) on conflict(project_id,repo_full_name) do update set default_branch=excluded.default_branch,repository_url=excluded.repository_url,source_enabled=true,updated_at=now() returning *`,[req.params.projectId, repo, branch, repositoryUrl, req.user.sub]);
+    if (!/^[\w.\-\/]+$/.test(branch) || branch.includes('..')) return res.status(400).json({ reply: 'Default branch name is not valid.' });
+    const repositoryUrl = provider === 'gitlab' ? apiBase + '/' + repo : `https://github.com/${repo}`;
+    const result = await db.query(`insert into source_repositories(project_id,provider,api_base_url,repo_full_name,default_branch,repository_url,created_by) values($1,$2,$3,$4,$5,$6,$7) on conflict(project_id,repo_full_name) do update set provider=excluded.provider,api_base_url=excluded.api_base_url,default_branch=excluded.default_branch,repository_url=excluded.repository_url,source_enabled=true,updated_at=now() returning id,project_id,provider,api_base_url,repo_full_name,default_branch,repository_url,source_enabled,created_at,(access_token_encrypted is not null) as has_token`,[req.params.projectId, provider, apiBase, repo, branch, repositoryUrl, req.user.sub]);
     res.status(201).json({ ok: true, repository: result.rows[0] });
   } catch (err) { res.status(500).json({ reply: err.message }); }
 });

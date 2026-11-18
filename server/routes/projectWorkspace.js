@@ -239,6 +239,25 @@ router.delete('/api/projects/:projectId/environments/:environmentId',requireAuth
 // Story points (Scrum estimate): empty or a whole number from 1 to 10.
 // Page scope of a story: its Known pages and linked pages (default), or only the environment's starting page.
 function pageScope(v){return String(v||'').toUpperCase()==='STARTING_PAGE_ONLY'?'STARTING_PAGE_ONLY':'ALL_DISCOVERED_PAGES';}
+// Story type: Functional (website tests) OR Code Intelligence checks (code scan only), not both.
+const STORY_TYPES=['FUNCTIONAL','CODE_SAST','CODE_SECRETS','CODE_SCA','CODE_AI_REVIEW','CODE_QUALITY'];
+function storyTypes(v){const list=(Array.isArray(v)?v:String(v||'').split(',')).map(x=>String(x).trim().toUpperCase()).filter(x=>STORY_TYPES.includes(x));
+ if(list.includes('FUNCTIONAL')&&list.some(x=>x.startsWith('CODE_')))throw fail(400,'A story is either Functional or Code Intelligence, not both.');
+ return list.length?[...new Set(list)]:['FUNCTIONAL'];}
+// Code branch of a story with any Code Intelligence check (empty = the project's default branch).
+function codeBranch(v,types){if(!types.some(t=>t.startsWith('CODE_')))return null;const b=s(v,250);if(!b)return null;if(!/^[\w.\-\/]+$/.test(b)||b.includes('..'))throw fail(400,'Code branch name is not valid.');return b;}
+// Story → Scan by: BRANCH (name), PULL_REQUEST (number) or COMMIT (SHA). Only for stories with code checks; empty = project default branch.
+const TARGET_TYPES=['BRANCH','PULL_REQUEST','COMMIT'];
+function codeTarget(typeIn,valueIn,types){
+ if(!types.some(t=>t.startsWith('CODE_')))return {type:'BRANCH',value:null};
+ const type=TARGET_TYPES.includes(String(typeIn||'').toUpperCase())?String(typeIn).toUpperCase():'BRANCH';
+ const v=s(valueIn,250);
+ if(!v)return {type,value:null};
+ if(type==='BRANCH'&&(!/^[\w.\-\/]+$/.test(v)||v.includes('..')))throw fail(400,'Branch name is not valid.');
+ if(type==='PULL_REQUEST'&&!/^\d{1,9}$/.test(v))throw fail(400,'Choose a pull request from the list.');
+ if(type==='COMMIT'&&!/^[0-9a-f]{7,40}$/i.test(v))throw fail(400,'Choose a commit from the list.');
+ return {type,value:v};
+}
 function storyPoints(v){if(v===undefined||v===null||v==='')return null;const n=Number(v);if(!Number.isInteger(n)||n<1||n>10)throw fail(400,'Story points must be a whole number from 1 to 10.');return n;}
 router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  try{
@@ -247,9 +266,10 @@ router.post('/api/projects/:projectId/stories',requireAuth,async(req,res)=>{
  if(!title || !story)throw fail(400,'Story title and business story are required.');
  const eid=req.body?.environmentId||null;
  if(eid){const env=await db.query('select 1 from project_environments where id=$1 and project_id=$2 and is_active=true',[eid,req.params.projectId]);if(!env.rowCount)throw fail(400,'Environment does not belong to project.');}
- const points=storyPoints(req.body?.storyPoints),scope=pageScope(req.body?.pageScope);
- const result=await db.query('insert into project_stories(project_id,environment_id,reference_no,title,story,acceptance_criteria,page_paths,priority,created_by,updated_by,story_points,page_scope) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11) returning *',
- [req.params.projectId,eid,'ST-'+require('crypto').randomUUID().slice(0,8).toUpperCase(),title,story,s(req.body?.acceptanceCriteria,8000)||null,s(req.body?.pagePaths,1500)||null,s(req.body?.priority,20)||'MEDIUM',req.user.sub,points,scope]);
+ const points=storyPoints(req.body?.storyPoints),scope=pageScope(req.body?.pageScope),types=storyTypes(req.body?.storyTypes),target=codeTarget(req.body?.codeTargetType,req.body?.codeTarget,types),branch=target.type==='BRANCH'?target.value:null;
+ const repoId=await codeRepository(req.params.projectId,req.body?.codeRepositoryId,types);
+ const result=await db.query('insert into project_stories(project_id,environment_id,reference_no,title,story,acceptance_criteria,page_paths,priority,created_by,updated_by,story_points,page_scope,story_types,code_branch,code_target_type,code_target,code_repository_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12,$13,$14,$15,$16) returning *',
+ [req.params.projectId,eid,'ST-'+require('crypto').randomUUID().slice(0,8).toUpperCase(),title,story,s(req.body?.acceptanceCriteria,8000)||null,s(req.body?.pagePaths,1500)||null,s(req.body?.priority,20)||'MEDIUM',req.user.sub,points,scope,types,branch,target.type,target.value,repoId]);
  await db.query('insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,$4,$5::jsonb)',[req.params.projectId,result.rows[0].id,req.user.sub,'STORY_CREATED',JSON.stringify({referenceNo:result.rows[0].reference_no})]);
  res.status(201).json({ok:true,story:result.rows[0]});
  }catch(e){respond(res,e);}
@@ -267,6 +287,88 @@ router.delete('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,
  res.json({ok:true,story});
  }catch(e){respond(res,e);}
 });
+// Story form → Code branch: the branches of the project's linked repository (Source code card).
+router.get('/api/projects/:projectId/repository-branches',requireAuth,async(req,res)=>{
+ try{
+ await access(req,req.params.projectId);
+ // ?repoId=… picks one linked repository (Source code card); otherwise the newest one (story form).
+ const repoId=id(req.query.repoId)?req.query.repoId:null;
+ const repo=(await db.query('select id,provider,api_base_url,repo_full_name,default_branch,access_token_encrypted from source_repositories where project_id=$1 and source_enabled=true and ($2::uuid is null or id=$2) order by created_at desc limit 1',[req.params.projectId,repoId])).rows[0];
+ if(!repo)return res.json({ok:true,repository:null,branches:[]});
+ const branches=await require('../services/sourceAwareService').listBranches(repo);
+ const def=repo.default_branch||'main';
+ res.json({ok:true,repository:repo.repo_full_name,defaultBranch:def,branches:[def,...branches.filter(b=>b!==def).sort()]});
+ }catch(e){respond(res,e);}
+});
+// Code Intelligence story → which repository it scans (must belong to the project). Functional stories have none.
+async function codeRepository(projectId,value,types){
+ if(!types.some(t=>String(t).startsWith('CODE_'))||!value)return null;
+ if(!id(value))throw fail(400,'Invalid repository.');
+ const r=await db.query('select id from source_repositories where id=$1 and project_id=$2',[value,projectId]);
+ if(!r.rowCount)throw fail(400,'Repository does not belong to this project.');
+ return value;
+}
+// Story → Scan by: list the repository's branches, pull requests or recent commits as {id,label} for the search box.
+router.get('/api/projects/:projectId/repository-targets',requireAuth,async(req,res)=>{
+ try{
+ await access(req,req.params.projectId);
+ const type=String(req.query.type||'BRANCH').toUpperCase();
+ if(!['BRANCH','PULL_REQUEST','COMMIT'].includes(type))throw fail(400,'Unknown scan target type.');
+ const repoId=id(req.query.repoId)?req.query.repoId:null;
+ const repo=(await db.query('select id,provider,api_base_url,repo_full_name,default_branch,access_token_encrypted from source_repositories where project_id=$1 and source_enabled=true and ($2::uuid is null or id=$2) order by created_at desc limit 1',[req.params.projectId,repoId])).rows[0];
+ if(!repo)return res.json({ok:true,repository:null,items:[]});
+ const src=require('../services/sourceAwareService'),def=repo.default_branch||'main';
+ // GitHub pull requests are "#45", GitLab merge requests are "!45".
+ const provider=repo.provider==='gitlab'?'gitlab':'github',mark=provider==='gitlab'?'!':'#';
+ let items;
+ if(type==='BRANCH'){const b=await src.listBranches(repo);items=[def,...b.filter(x=>x!==def).sort()].map(x=>({id:x,label:x}));}
+ else if(type==='PULL_REQUEST')items=(await src.listPullRequests(repo)).map(p=>({id:p.id,label:mark+p.number+' · '+p.title+' · '+p.state}));
+ else items=(await src.listCommits(repo,def)).map(c=>({id:c.sha,label:c.sha.slice(0,7)+' · '+c.message}));
+ res.json({ok:true,repository:repo.repo_full_name,provider,defaultBranch:def,type,items});
+ }catch(e){respond(res,e);}
+});
+// Source code tab → ✏ Edit: change a repository's default branch (QA / project manager).
+router.patch('/api/projects/:projectId/repositories/:repoId',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ if(!id(req.params.repoId))throw fail(400,'Invalid repository ID.');
+ const branch=s(req.body?.defaultBranch,250)||'main';
+ if(!/^[\w.\-\/]+$/.test(branch)||branch.includes('..'))throw fail(400,'Default branch name is not valid.');
+ const r=await db.query('update source_repositories set default_branch=$1,updated_at=now(),updated_by=$2 where id=$3 and project_id=$4 returning repo_full_name,default_branch',[branch,req.user.sub,req.params.repoId,req.params.projectId]);
+ if(!r.rowCount)throw fail(404,'Repository not found.');
+ await db.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'REPOSITORY_UPDATED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({repository:r.rows[0].repo_full_name,defaultBranch:branch})]);
+ res.json({ok:true});
+ }catch(e){respond(res,e);}
+});
+// Source code card → Remove: unlink a repository from the project (project manager). Its saved token goes with it;
+// test sessions that used it keep their results (their repository link is cleared by the database).
+router.delete('/api/projects/:projectId/repositories/:repoId',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);manager(ctx.role);
+ if(!id(req.params.repoId))throw fail(400,'Invalid repository ID.');
+ const d=await db.query('delete from source_repositories where id=$1 and project_id=$2 returning repo_full_name,default_branch',[req.params.repoId,req.params.projectId]);
+ if(!d.rowCount)throw fail(404,'Repository not found.');
+ await db.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,'REPOSITORY_REMOVED',$3::jsonb)",[req.params.projectId,req.user.sub,JSON.stringify({repository:d.rows[0].repo_full_name,branch:d.rows[0].default_branch})]);
+ res.json({ok:true});
+ }catch(e){respond(res,e);}
+});
+// Source code card → Token: save (checked with GitHub first, stored encrypted) or remove a repository's read-only token.
+router.put('/api/projects/:projectId/repositories/:repoId/token',requireAuth,async(req,res)=>{
+ try{
+ const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
+ if(!id(req.params.repoId))throw fail(400,'Invalid repository ID.');
+ const repo=(await db.query('select id,provider,api_base_url,repo_full_name,access_token_encrypted from source_repositories where id=$1 and project_id=$2',[req.params.repoId,req.params.projectId])).rows[0];
+ if(!repo)throw fail(404,'Repository not found.');
+ const token=String(req.body?.token||'').trim();
+ if(token){
+  if(token.length>400||/\s/.test(token))throw fail(400,'This does not look like a GitHub token.');
+  await require('../services/sourceAwareService').checkToken(repo,token);
+ }
+ await db.query('update source_repositories set access_token_encrypted=$1,token_updated_at=now(),token_updated_by=$2,updated_at=now(),updated_by=$2 where id=$3',[token?vault.encrypt(token):null,req.user.sub,repo.id]);
+ await db.query("insert into project_audit_events(project_id,actor_id,event_type,metadata) values($1,$2,$3,$4::jsonb)",[req.params.projectId,req.user.sub,token?'REPOSITORY_TOKEN_SAVED':'REPOSITORY_TOKEN_REMOVED',JSON.stringify({repository:repo.repo_full_name})]);
+ res.json({ok:true,hasToken:!!token});
+ }catch(e){respond(res,e);}
+});
 router.patch('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,res)=>{
  try{
  const ctx=await access(req,req.params.projectId);reviewer(ctx.role);
@@ -275,9 +377,12 @@ router.patch('/api/projects/:projectId/stories/:storyId',requireAuth,async(req,r
  const old=existing.rows[0],b=req.body||{};
  const updated=await db.withTransaction(async client=>{
  const points='storyPoints' in b?storyPoints(b.storyPoints):old.story_points,scope='pageScope' in b?pageScope(b.pageScope):old.page_scope;
- const updated=await client.query('update project_stories set title=$1,story=$2,acceptance_criteria=$3,page_paths=$4,priority=$5,updated_by=$6,updated_at=now(),story_points=$9,page_scope=$10 where id=$7 and project_id=$8 returning *',
- [s(b.title??old.title,250),s(b.story??old.story,12000),s(b.acceptanceCriteria??old.acceptance_criteria,8000),s(b.pagePaths??old.page_paths,1500),s(b.priority??old.priority,20),req.user.sub,req.params.storyId,req.params.projectId,points,scope]);
- await client.query("insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,'STORY_UPDATED',$4::jsonb)",[req.params.projectId,req.params.storyId,req.user.sub,JSON.stringify({previousUpdatedAt:old.updated_at,newUpdatedAt:updated.rows[0].updated_at,fields:['title','story','acceptance_criteria','page_paths','priority'].filter(k=>String(old[k]??'')!==String(updated.rows[0][k]??''))})]);
+ const types='storyTypes' in b?storyTypes(b.storyTypes):(old.story_types||['FUNCTIONAL']);
+ const target='codeTargetType' in b||'codeTarget' in b?codeTarget(b.codeTargetType??old.code_target_type,b.codeTarget,types):codeTarget(old.code_target_type,old.code_target??old.code_branch,types),branch=target.type==='BRANCH'?target.value:null;
+ const repoId='codeRepositoryId' in b?await codeRepository(req.params.projectId,b.codeRepositoryId,types):(types.some(t=>t.startsWith('CODE_'))?old.code_repository_id:null);
+ const updated=await client.query('update project_stories set title=$1,story=$2,acceptance_criteria=$3,page_paths=$4,priority=$5,updated_by=$6,updated_at=now(),story_points=$9,page_scope=$10,story_types=$11,code_branch=$12,code_target_type=$13,code_target=$14,code_repository_id=$15 where id=$7 and project_id=$8 returning *',
+ [s(b.title??old.title,250),s(b.story??old.story,12000),s(b.acceptanceCriteria??old.acceptance_criteria,8000),s(b.pagePaths??old.page_paths,1500),s(b.priority??old.priority,20),req.user.sub,req.params.storyId,req.params.projectId,points,scope,types,branch,target.type,target.value,repoId]);
+ await client.query("insert into project_audit_events(project_id,story_id,actor_id,event_type,metadata) values($1,$2,$3,'STORY_UPDATED',$4::jsonb)",[req.params.projectId,req.params.storyId,req.user.sub,JSON.stringify({previousUpdatedAt:old.updated_at,newUpdatedAt:updated.rows[0].updated_at,fields:['title','story','acceptance_criteria','page_paths','priority','story_types','code_branch','code_target_type','code_target','code_repository_id'].filter(k=>String(old[k]??'')!==String(updated.rows[0][k]??''))})]);
  return updated.rows[0];
  });
  res.json({ok:true,story:updated});
